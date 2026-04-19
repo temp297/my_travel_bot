@@ -320,9 +320,13 @@ async def start_web_server():
 async def main():
     await init_db()
     asyncio.create_task(start_web_server())
-    scheduler.add_job(check_returns, 'cron', hour=9, minute=0)
+    # Налаштування списку команд для кнопки "Меню"
+    await bot.set_my_commands([
+        types.BotCommand(command="start", description="🚀 Почати підбір туру"),
+        types.BotCommand(command="admin", description="🛠 Панель менеджера (тільки для адміна)")
+    ])
+    scheduler.add_job(check_returns, 'cron', hour=9, minute=0) # або твій час
     scheduler.start()
-    await bot.set_my_commands([types.BotCommand(command="start", description="Почати")])
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
