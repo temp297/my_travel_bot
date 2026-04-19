@@ -240,7 +240,8 @@ async def process_contact(message: types.Message, state: FSMContext):
         f"⭐ <b>Готель:</b> {data.get('stars')}\n"
         f"🍴 <b>Харчування:</b> {data.get('meals')}\n"
         f"💰 <b>Бюджет:</b> {data.get('budget')} ГРН\n"
-        f"👤 <b>Клієнт:</b> {user.full_name}\n"
+        f"👤 <b>Клієнт:</b> <a href='tg://user?id={user.id}'>{user.full_name}</a>\n"
+        f"🆔 <b>Username:</b> @{user.username if user.username else 'немає'}\n"
         f"🆔 <b>ID для відгуку:</b> <code>{user.id}</code>\n"
         f"📱 <b>Контакт:</b> {message.text}\n"
         f"━━━━━━━━━━━━━━━"
@@ -248,7 +249,7 @@ async def process_contact(message: types.Message, state: FSMContext):
     await bot.send_message(ADMIN_ID, report, parse_mode="HTML")
     re_builder = ReplyKeyboardBuilder()
     re_builder.add(types.KeyboardButton(text="🔄 СТВОРИТИ НОВУ ЗАЯВКУ"))
-    await message.answer("✅ Дякуємо! Заявку відправлено.\nМенеджер зв'яжеться з Вами.", reply_markup=re_builder.as_markup(resize_keyboard=True))
+    await message.answer("✅ Дякуємо! Заявку успішно відправлено!\nМи зв'яжемося з Вами найближчим часом 😊", reply_markup=re_builder.as_markup(resize_keyboard=True))
     await state.clear()
 
 # --- ОБРОБНИКИ ВІДГУКІВ ---
@@ -258,10 +259,10 @@ async def process_rating(callback_query: types.CallbackQuery, state: FSMContext)
     rating = int(callback_query.data.split("_")[1])
     await state.update_data(user_rating=rating)
     if rating >= 4:
-        await callback_query.message.edit_text(f"Ви поставили {rating}⭐! Дякуємо!\nНапишіть короткий відгук про Вашу подорож:")
+        await callback_query.message.edit_text(f"Ви поставили {rating}⭐!\n😍 Дякуємо Вам за високу оцінку нашої роботи!\nМи щасливі, що Вам сподобалося. ❤️\nЯкщо у Вас є хвилинка, будемо вдячні за відгук про Вашу подорож:")
         await state.set_state(FeedbackState.waiting_for_text)
     else:
-        await callback_query.message.edit_text("Дякуємо за Вашу оцінку! ❤️")
+        await callback_query.message.edit_text("Дякуємо за щирість. Нам прикро, що не все було ідеально.\nМи обов'язково розберемося в ситуації, щоб наступний Ваш відпочинок був на висоті! ❤️")
         await state.clear()
 
 @dp.message(FeedbackState.waiting_for_text)
@@ -305,7 +306,7 @@ async def process_admin_date(callback_query: types.CallbackQuery, callback_data:
         async with aiosqlite.connect("travel_bot.db") as db:
             await db.execute("INSERT INTO feedbacks (user_id, return_date) VALUES (?, ?)", (data['client_id'], formatted))
             await db.commit()
-        await callback_query.message.edit_text(f"✅ Заплановано! {formatted} бот автоматично напише клієнту (ID: {data['client_id']}).")
+        await callback_query.message.edit_text(f"✅ Чекаємо на повернення мандрівника! Автоматичне повідомлення для клієнта (ID: {data['client_id']}) заплановано на {formatted}.")
         await state.clear()
 
 # --- ТЕХНІЧНИЙ БЛОК ---
@@ -322,7 +323,7 @@ async def main():
         types.BotCommand(command="start", description="🚀 Почати підбір туру"), 
         types.BotCommand(command="admin", description="🛠 Панель менеджера")
     ])
-    scheduler.add_job(check_returns, 'cron', hour=12, minute=30) # 15:30 за Києвом 
+    scheduler.add_job(check_returns, 'cron', hour=13, minute=15) # 16:15 за Києвом 
     scheduler.start()
     await dp.start_polling(bot)
 
