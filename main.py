@@ -305,7 +305,7 @@ async def process_feedback_text(message: types.Message, state: FSMContext):
         f"🌟 <b>НОВИЙ ВІДГУК!</b>\n"
         f"━━━━━━━━━━━━━━━\n"
         f"👤 <b>Мандрівник:</b> {message.from_user.first_name}\n"
-        f"⭐ <b>Оцінка:</b> {'⭐'*rating}\n"
+        f"⭐ <b>Оцінка:</b> {rating}⭐\n"
         f"📝 <b>Враження:</b> {message.text}\n"
         f"━━━━━━━━━━━━━━━"
     )
