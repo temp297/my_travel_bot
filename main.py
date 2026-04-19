@@ -320,7 +320,7 @@ async def start_web_server():
 async def main():
     await init_db()
     asyncio.create_task(start_web_server())
-    scheduler.add_job(check_returns, 'cron', hour=11, minute=0)
+    scheduler.add_job(check_returns, 'cron', hour=11, minute=45)
     scheduler.start()
     await bot.set_my_commands([types.BotCommand(command="start", description="Почати")])
     await dp.start_polling(bot)
