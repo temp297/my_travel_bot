@@ -278,7 +278,7 @@ async def process_contact(message: types.Message, state: FSMContext):
 @dp.message(Command("admin"), F.from_user.id == ADMIN_ID)
 async def admin_start(message: types.Message, state: FSMContext):
     # Тут parse_mode="HTML" виправить проблему з відображенням <b>
-    await message.answer("🛠 <b>Панель менеджера</b>\n\nВведіть ID клієнта, якому потрібно запланувати відгук:", parse_mode="HTML")
+    await message.answer("🛠 Панель менеджера\n\nВведіть ID клієнта, якому потрібно запланувати відгук:", parse_mode="HTML")
     await state.set_state(AdminPanel.waiting_for_client_id)
 
 @dp.message(AdminPanel.waiting_for_client_id)
