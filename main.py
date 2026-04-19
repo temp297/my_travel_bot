@@ -319,8 +319,8 @@ async def main():
     await runner.setup()
     await web.TCPSite(runner, "0.0.0.0", int(os.environ.get("PORT", 8080))).start()
     await bot.set_my_commands([
-        types.BotCommand(command="start", description="🚀 Старт"), 
-        types.BotCommand(command="admin", description="🛠 Адмін")
+        types.BotCommand(command="start", description="🚀 Почати підбір туру"), 
+        types.BotCommand(command="admin", description="🛠 Панель менеджера")
     ])
     scheduler.add_job(check_returns, 'cron', hour=12, minute=05) # 15:05 за Києвом 
     scheduler.start()
