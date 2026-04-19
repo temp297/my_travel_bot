@@ -98,9 +98,11 @@ def start_kb():
 
 def rating_kb():
     builder = InlineKeyboardBuilder()
+    # Додаємо цифру + емодзі зірочки для кожної кнопки
     for i in range(1, 6):
-        builder.add(types.InlineKeyboardButton(text="⭐"*i, callback_data=f"rate_{i}"))
-    builder.adjust(1)
+        builder.add(types.InlineKeyboardButton(text=f"{i}⭐", callback_data=f"rate_{i}"))
+    # Вирівнюємо всі 5 кнопок в один ряд
+    builder.adjust(5) 
     return builder.as_markup()
 
 def stars_kb():
@@ -276,11 +278,23 @@ async def process_contact(message: types.Message, state: FSMContext):
 async def process_rating(callback_query: types.CallbackQuery, state: FSMContext):
     rating = int(callback_query.data.split("_")[1])
     await state.update_data(user_rating=rating)
+    
     if rating >= 4:
-        await callback_query.message.edit_text(f"Ви поставили {rating}⭐!\n😍 Дякуємо Вам за високу оцінку нашої роботи!\nМи щасливі, що Вам сподобалося. ❤️\nЯкщо у Вас є хвилинка, будемо вдячні за відгук про Вашу подорож:")
+        # Тут ми виводимо оцінку у форматі "5⭐"
+        await callback_query.message.edit_text(
+            f"Ви поставили {rating}⭐!\n"
+            "😍 Дякуємо Вам за високу оцінку нашої роботи!\n"
+            "Ми щасливі, що Вам сподобалося. ❤️\n"
+            "Якщо у Вас є хвилинка, будемо вдячні за відгук про Вашу подорож:"
+        )
         await state.set_state(FeedbackState.waiting_for_text)
     else:
-        await callback_query.message.edit_text("Дякуємо за щирість. Нам прикро, що не все було ідеально.\nМи обов'язково розберемося в ситуації, щоб наступний Ваш відпочинок був на висоті! ❤️")
+        # Для низьких оцінок (1-3)
+        await callback_query.message.edit_text(
+            f"Ви поставили {rating}⭐.\n"
+            "Дякуємо за щирість. Нам прикро, що не все було ідеально.\n"
+            "Ми обов'язково розберемося в ситуації, щоб наступний Ваш відпочинок був на висоті! ❤️"
+        )
         await state.clear()
 
 @dp.message(FeedbackState.waiting_for_text)
