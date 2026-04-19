@@ -262,8 +262,8 @@ async def process_contact(message: types.Message, state: FSMContext):
         f"⭐ <b>Готель:</b> {data.get('stars')}\n"
         f"🍴 <b>Харчування:</b> {data.get('meals')}\n"
         f"💰 <b>Бюджет:</b> {data.get('budget')} ГРН\n"
-        f"👤 <b>ID для відгуку:</b>\n<code>{user.id}</code>\n"
-        f"🆔 <b>ID для відгуку:</b> {user.id}\n"
+        f"👤 <b>Клієнт:</b> {user.full_name}\n"
+        f"🆔 <b>ID для відгуку:</b>\n<code>{user.id}</code>\n"
         f"📱 <b>Контакт:</b> {message.text}\n"
         f"━━━━━━━━━━━━━━━"
     )
