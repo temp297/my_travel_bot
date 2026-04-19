@@ -1,6 +1,8 @@
 import asyncio
 import logging
 import os
+import aiosqlite
+from datetime import datetime
 from aiohttp import web
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command
@@ -8,16 +10,18 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.utils.keyboard import ReplyKeyboardBuilder, InlineKeyboardBuilder
 from aiogram_calendar import SimpleCalendar, SimpleCalendarCallback
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 # --- НАЛАШТУВАННЯ ---
 API_TOKEN = '8742210436:AAEX2p71Tpp4V1cKsm10WnPZ385ZTolRVok'
 ADMIN_ID = 7185133060
 
 logging.basicConfig(level=logging.INFO)
-# Для Render прибираємо сесію з проксі
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher()
+scheduler = AsyncIOScheduler()
 
+# --- СТАНИ ---
 class TourRequest(StatesGroup):
     start_confirmed = State()
     destination = State()
@@ -30,6 +34,40 @@ class TourRequest(StatesGroup):
     meal_type = State()
     budget = State()
     contact = State()
+
+class AdminPanel(StatesGroup):
+    waiting_for_client_id = State()
+    waiting_for_date = State()
+
+# --- РОБОТА З БАЗОЮ ДАНИХ ТА ПЛАНУВАЛЬНИК ---
+async def init_db():
+    async with aiosqlite.connect("travel_bot.db") as db:
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS feedbacks (
+                user_id INTEGER,
+                return_date TEXT,
+                sent INTEGER DEFAULT 0
+            )
+        """)
+        await db.commit()
+
+async def check_returns():
+    today = datetime.now().strftime("%d.%m.%Y")
+    async with aiosqlite.connect("travel_bot.db") as db:
+        async with db.execute("SELECT user_id FROM feedbacks WHERE return_date = ? AND sent = 0", (today,)) as cursor:
+            users = await cursor.fetchall()
+            for row in users:
+                user_id = row[0]
+                try:
+                    await bot.send_message(
+                        user_id,
+                        "✈️ З поверненням! Сподіваємося, Ваш відпочинок був чудовим.\n\n"
+                        "Поділіться, будь ласка, Вашими враженнями. Нам це дуже важливо! ❤️"
+                    )
+                    await db.execute("UPDATE feedbacks SET sent = 1 WHERE user_id = ?", (user_id,))
+                except Exception as e:
+                    logging.error(f"Не вдалося надіслати повідомлення {user_id}: {e}")
+        await db.commit()
 
 # --- КЛАВІАТУРИ ---
 def start_kb():
@@ -56,7 +94,7 @@ def meals_kb():
     builder.adjust(1)
     return builder.as_markup()
 
-# --- ОБРОБНИКИ ---
+# --- ОБРОБНИКИ АНКЕТИ ---
 
 @dp.message(Command("start"))
 @dp.message(F.text == "🔄 СТВОРИТИ НОВУ ЗАЯВКУ")
@@ -75,6 +113,8 @@ async def process_start_button(message: types.Message, state: FSMContext):
         await message.answer("🌍 Куди б Ви хотіли поїхати?", reply_markup=types.ReplyKeyboardRemove())
         await state.set_state(TourRequest.destination)
     else:
+        try: await message.delete()
+        except: pass
         await message.answer("⚠️ Будь ласка, використовуйте кнопку:", reply_markup=start_kb())
 
 @dp.message(TourRequest.destination)
@@ -84,18 +124,8 @@ async def process_dest(message: types.Message, state: FSMContext):
         await message.answer("⚠️ Введіть назву країни літерами.")
         return
 
-    # ПОВНИЙ ПЕРЕЛІК КРАЇН (як у твоєму оригіналі)
     replacements = {
-        "турция": "Туреччина", "туреччина": "Туреччина", "турція": "Туреччина", "анталія": "Туреччина (Анталія)", "анталия": "Туреччина (Анталія)", "кемер": "Туреччина (Кемер)", "аланія": "Туреччина (Аланія)", "белек": "Туреччина (Белек)",
-        "египет": "Єгипет", "єгипет": "Єгипет", "егіпет": "Єгипет", "єгіпет": "Єгипет", "египт": "Єгипет", "єгіпєт": "Єгипет", "егіпєт": "Єгипет", "шарм": "Єгипет (Шарм-ель-Шейх)", "хургада": "Єгипет (Хургада)", "марса": "Єгипет (Марса-Алам)",
-        "болгарія": "Болгарія", "болгария": "Болгарія", "греція": "Греція", "греция": "Греція", "крит": "Греція (Крит)",
-        "чорногорія": "Чорногорія", "черногория": "Чорногорія", "хорватія": "Хорватія", "хорватия": "Хорватія",
-        "іспанія": "Іспанія", "испания": "Іспанія", "італія": "Італія", "италия": "Італія", "кіпр": "Кіпр", "кипр": "Кіпр",
-        "албанія": "Албанія", "албания": "Албанія", "португалія": "Португалія", "португалия": "Португалія", "франція": "Франція", "франция": "Франція",
-        "оае": "ОАЕ", "оаэ": "ОАЕ", "емираты": "ОАЕ", "емірати": "ОАЕ", "дубай": "ОАЕ (Дубай)", "дубаи": "ОАЕ (Дубай)",
-        "таїланд": "Таїланд", "таиланд": "Таїланд", "тайланд": "Таїланд", "тай": "Таїланд", "пхукет": "Таїланд (Пхукет)",
-        "мальдіви": "Мальдіви", "мальдивы": "Мальдіви", "мальдиви": "Мальдіви", "домінікана": "Домінікана", "доминикана": "Домінікана",
-        "занзібар": "Занзібар", "занзибар": "Занзібар", "шрі ланка": "Шрі-Ланка", "шри ланка": "Шрі-Ланка", "балі": "Балі (Індонезія)", "бали": "Балі (Індонезія)"
+        "турция": "Туреччина", "туреччина": "Туреччина", "турція": "Туреччина", "анталія": "Туреччина (Анталія)", "египет": "Єгипет", "єгипет": "Єгипет", "шарм": "Єгипет (Шарм-ель-Шейх)", "оае": "ОАЕ", "таїланд": "Таїланд"
     }
     final_destination = replacements.get(text, message.text.strip().capitalize())
     await state.update_data(destination=final_destination)
@@ -108,10 +138,10 @@ async def process_dest(message: types.Message, state: FSMContext):
     await message.answer("👤 Оберіть кількість дорослих:", reply_markup=builder.as_markup())
     await state.set_state(TourRequest.adults_count)
 
-# --- ПЕРЕВІРКА КНОПОК ---
-
 @dp.message(TourRequest.adults_count)
 async def fail_adults(message: types.Message):
+    try: await message.delete()
+    except: pass
     builder = InlineKeyboardBuilder()
     builder.add(types.InlineKeyboardButton(text="1", callback_data="adults_1"),
                 types.InlineKeyboardButton(text="2", callback_data="adults_2"),
@@ -137,9 +167,11 @@ async def process_adults(callback_query: types.CallbackQuery, state: FSMContext)
 
 @dp.message(TourRequest.children_count)
 async def fail_children(message: types.Message):
+    try: await message.delete()
+    except: pass
     builder = InlineKeyboardBuilder()
-    builder.add(types.InlineKeyboardButton(text="Без дітей (0)", callback_data="child_0"))
-    builder.add(types.InlineKeyboardButton(text="1", callback_data="child_1"),
+    builder.add(types.InlineKeyboardButton(text="Без дітей (0)", callback_data="child_0"),
+                types.InlineKeyboardButton(text="1", callback_data="child_1"),
                 types.InlineKeyboardButton(text="2", callback_data="child_2"),
                 types.InlineKeyboardButton(text="3+", callback_data="child_3"))
     builder.adjust(1, 3)
@@ -152,13 +184,8 @@ async def process_children(callback_query: types.CallbackQuery, state: FSMContex
     await callback_query.answer()
     await callback_query.message.edit_reply_markup(reply_markup=None)
     await callback_query.message.answer(f"👶 Дітей: {count}")
-    # ОРИГІНАЛЬНЕ ЗАПИТАННЯ
     await callback_query.message.answer("📅 Оберіть дату, з якої можна планувати виліт (З):", reply_markup=await SimpleCalendar().start_calendar())
     await state.set_state(TourRequest.date_from)
-
-@dp.message(TourRequest.date_from)
-async def fail_date_from(message: types.Message):
-    await message.answer("⚠️ Будь ласка, оберіть дату на календарі вище 👆")
 
 @dp.callback_query(SimpleCalendarCallback.filter(), TourRequest.date_from)
 async def process_date_from(callback_query: types.CallbackQuery, callback_data: SimpleCalendarCallback, state: FSMContext):
@@ -167,13 +194,8 @@ async def process_date_from(callback_query: types.CallbackQuery, callback_data: 
         formatted = date.strftime("%d.%m.%Y")
         await state.update_data(date_from=formatted)
         await callback_query.message.answer(f"✅ З: {formatted}")
-        # ОРИГІНАЛЬНЕ ЗАПИТАННЯ
         await callback_query.message.answer("📅 Оберіть дату, до якої можна планувати виліт (ПО):", reply_markup=await SimpleCalendar().start_calendar())
         await state.set_state(TourRequest.date_to)
-
-@dp.message(TourRequest.date_to)
-async def fail_date_to(message: types.Message):
-    await message.answer("⚠️ Будь ласка, оберіть дату на календарі вище 👆")
 
 @dp.callback_query(SimpleCalendarCallback.filter(), TourRequest.date_to)
 async def process_date_to(callback_query: types.CallbackQuery, callback_data: SimpleCalendarCallback, state: FSMContext):
@@ -191,10 +213,6 @@ async def process_nights(message: types.Message, state: FSMContext):
     await message.answer("⭐ Оберіть категорію готелю", reply_markup=stars_kb())
     await state.set_state(TourRequest.hotel_stars)
 
-@dp.message(TourRequest.hotel_stars)
-async def fail_stars(message: types.Message):
-    await message.answer("⚠️ Будь ласка, оберіть категорію за допомогою кнопок:", reply_markup=stars_kb())
-
 @dp.callback_query(F.data.startswith("star_"), TourRequest.hotel_stars)
 async def process_stars(callback_query: types.CallbackQuery, state: FSMContext):
     star = callback_query.data.split("_")[1]
@@ -205,10 +223,6 @@ async def process_stars(callback_query: types.CallbackQuery, state: FSMContext):
     await callback_query.message.answer(f"⭐ Готель: {label}")
     await callback_query.message.answer("🍴 Яке харчування Вам підходить:", reply_markup=meals_kb())
     await state.set_state(TourRequest.meal_type)
-
-@dp.message(TourRequest.meal_type)
-async def fail_meals(message: types.Message):
-    await message.answer("⚠️ Будь ласка, оберіть тип харчування за допомогою кнопок:", reply_markup=meals_kb())
 
 @dp.callback_query(F.data.startswith("meal_"), TourRequest.meal_type)
 async def process_meals(callback_query: types.CallbackQuery, state: FSMContext):
@@ -245,7 +259,6 @@ async def process_contact(message: types.Message, state: FSMContext):
         f"🍴 <b>Харчування:</b> {data.get('meals')}\n"
         f"💰 <b>Бюджет:</b> {data.get('budget')} ГРН\n"
         f"👤 <b>Клієнт:</b> <a href='tg://user?id={user.id}'>{user.full_name}</a>\n"
-        f"🆔 <b>Username:</b> @{user.username if user.username else 'немає'}\n"
         f"🆔 <b>ID для відгуку:</b> {user.id}\n"
         f"📱 <b>Контакт:</b> {message.text}\n"
         f"━━━━━━━━━━━━━━━"
@@ -258,31 +271,60 @@ async def process_contact(message: types.Message, state: FSMContext):
         await state.clear()
     except Exception as e:
         logging.error(f"Error: {e}")
-        await message.answer("⚠️ Помилка формування звіту.")
 
-# --- ТЕХНІЧНИЙ БЛОК (ВЕБ-СЕРВЕР ТА ПОРТ) ---
+# --- КОМАНДИ МЕНЕДЖЕРА (Відгуки) ---
+
+@dp.message(Command("admin"), F.from_user.id == ADMIN_ID)
+async def admin_start(message: types.Message, state: FSMContext):
+    await message.answer("🛠 <b>Панель менеджера</b>\n\nВведіть ID клієнта для планування відгуку:")
+    await state.set_state(AdminPanel.waiting_for_client_id)
+
+@dp.message(AdminPanel.waiting_for_client_id)
+async def process_client_id(message: types.Message, state: FSMContext):
+    if not message.text.isdigit():
+        await message.answer("⚠️ ID має бути числом.")
+        return
+    await state.update_data(client_id=int(message.text))
+    await message.answer("📅 Тепер введіть дату повернення (ДД.ММ.РРРР):")
+    await state.set_state(AdminPanel.waiting_for_date)
+
+@dp.message(AdminPanel.waiting_for_date)
+async def process_date(message: types.Message, state: FSMContext):
+    try:
+        datetime.strptime(message.text, "%d.%m.%Y")
+        data = await state.get_data()
+        async with aiosqlite.connect("travel_bot.db") as db:
+            await db.execute("INSERT INTO feedbacks (user_id, return_date) VALUES (?, ?)", (data['client_id'], message.text))
+            await db.commit()
+        await message.answer(f"✅ Заплановано! {message.text} бот автоматично напише клієнту.")
+        await state.clear()
+    except ValueError:
+        await message.answer("⚠️ Неправильний формат дати. Треба: ДД.ММ.РРРР")
+
+# --- ТЕХНІЧНИЙ БЛОК (ВЕБ-СЕРВЕР ТА ПЛАНУВАЛЬНИК) ---
 
 async def handle(request):
-    return web.Response(text="Bot is alive!")
+    return web.Response(text="Bot is running!")
 
 async def start_web_server():
     app = web.Application()
     app.router.add_get("/", handle)
     runner = web.AppRunner(app)
     await runner.setup()
-    port = int(os.environ.get("PORT", 8080))
-    site = web.TCPSite(runner, "0.0.0.0", port)
+    site = web.TCPSite(runner, "0.0.0.0", int(os.environ.get("PORT", 8080)))
     await site.start()
 
 async def main():
-    # Запускаємо веб-сервер у фоні (важливо для Render)
+    await init_db()
     asyncio.create_task(start_web_server())
+    scheduler.add_job(check_returns, 'cron', hour=11, minute=0)
+    scheduler.start()
     await bot.set_my_commands([types.BotCommand(command="start", description="Почати")])
     while True:
         try:
             await dp.start_polling(bot)
         except Exception as e:
-            logging.error(f"Помилка: {e}")
+            logging.error(f"Error: {e}")
             await asyncio.sleep(5)
 
 if __name__ == "__main__":
