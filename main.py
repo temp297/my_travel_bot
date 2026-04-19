@@ -15,7 +15,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 # --- НАЛАШТУВАННЯ ---
 API_TOKEN = '8742210436:AAEX2p71Tpp4V1cKsm10WnPZ385ZTolRVok'
 ADMIN_ID = 7185133060
-REVIEWS_CHAT_ID = -1003818943967 
+REVIEWS_CHAT_ID = -1003818943967
 
 logging.basicConfig(level=logging.INFO)
 bot = Bot(token=API_TOKEN)
@@ -37,7 +37,7 @@ class TourRequest(StatesGroup):
     contact = State()
 
 class AdminPanel(StatesGroup):
-    waiting_for_client_id = State()
+    waiting_for_client_info = State()
     waiting_for_date = State()
 
 class FeedbackState(StatesGroup):
@@ -54,7 +54,22 @@ async def init_db():
                 sent INTEGER DEFAULT 0
             )
         """)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS users (
+                user_id INTEGER PRIMARY KEY,
+                username TEXT
+            )
+        """)
         await db.commit()
+
+async def save_user(user: types.User):
+    if user.username:
+        async with aiosqlite.connect("travel_bot.db") as db:
+            await db.execute(
+                "INSERT OR REPLACE INTO users (user_id, username) VALUES (?, ?)",
+                (user.id, user.username.lower())
+            )
+            await db.commit()
 
 async def check_returns():
     today = datetime.now().strftime("%d.%m.%Y")
@@ -107,11 +122,12 @@ def meals_kb():
     builder.adjust(1)
     return builder.as_markup()
 
-# --- ОБРОБНИКИ АНКЕТИ (ПОВНІСТЮ ВАШІ ТЕКСТИ) ---
+# --- ОБРОБНИКИ АНКЕТИ ---
 
 @dp.message(Command("start"))
 @dp.message(F.text == "🔄 СТВОРИТИ НОВУ ЗАЯВКУ")
 async def cmd_start(message: types.Message, state: FSMContext):
+    await save_user(message.from_user)
     await state.clear()
     await message.answer(
         f"👋 Вітаю, {message.from_user.first_name}!\nЯ допоможу Вам підібрати ідеальний тур. Натисніть кнопку нижче:", 
@@ -121,6 +137,7 @@ async def cmd_start(message: types.Message, state: FSMContext):
 
 @dp.message(TourRequest.start_confirmed)
 async def process_start_button(message: types.Message, state: FSMContext):
+    await save_user(message.from_user)
     if message.text == "🚀 ПОЧАТИ ПІДБІР ТУРУ":
         await message.answer("🌍 Куди б Ви хотіли поїхати?", reply_markup=types.ReplyKeyboardRemove())
         await state.set_state(TourRequest.destination)
@@ -203,7 +220,7 @@ async def process_nights(message: types.Message, state: FSMContext):
     await state.set_state(TourRequest.hotel_stars)
 
 @dp.callback_query(F.data.startswith("star_"), TourRequest.hotel_stars)
-async def process_stars(callback_query: types.Query, state: FSMContext):
+async def process_stars(callback_query: types.CallbackQuery, state: FSMContext):
     star = callback_query.data.split("_")[1]
     label = "Будь-яка" if star == "any" else f"{star}*"
     await state.update_data(stars=label)
@@ -228,6 +245,7 @@ async def process_budget(message: types.Message, state: FSMContext):
 
 @dp.message(TourRequest.contact)
 async def process_contact(message: types.Message, state: FSMContext):
+    await save_user(message.from_user)
     data = await state.get_data()
     user = message.from_user
     report = (
@@ -281,21 +299,33 @@ async def process_feedback_text(message: types.Message, state: FSMContext):
     await message.answer("❤️ Дякуємо за Ваш відгук! Його опубліковано у чаті мандрівників.")
     await state.clear()
 
-# --- ПАНЕЛЬ АДМІНА (З КАЛЕНДАРЕМ) ---
+# --- ПАНЕЛЬ АДМІНА (З ПОШУКОМ ЗА ID АБО USERNAME) ---
 
 @dp.message(Command("admin"), F.from_user.id == ADMIN_ID)
 async def admin_start(message: types.Message, state: FSMContext):
-    await message.answer("🛠 <b>Панель менеджера</b>\n\nВведіть ID клієнта:", parse_mode="HTML")
-    await state.set_state(AdminPanel.waiting_for_client_id)
+    await message.answer("🛠 <b>Панель менеджера</b>\n\nВведіть <b>ID</b> клієнта або його <b>@username</b>:", parse_mode="HTML")
+    await state.set_state(AdminPanel.waiting_for_client_info)
 
-@dp.message(AdminPanel.waiting_for_client_id)
-async def process_admin_cid(message: types.Message, state: FSMContext):
-    if not message.text.isdigit():
-        await message.answer("⚠️ ID має бути числом.")
-        return
-    await state.update_data(client_id=int(message.text))
-    await message.answer("📅 Оберіть дату повернення клієнта:", reply_markup=await SimpleCalendar().start_calendar())
-    await state.set_state(AdminPanel.waiting_for_date)
+@dp.message(AdminPanel.waiting_for_client_info)
+async def process_admin_search(message: types.Message, state: FSMContext):
+    input_data = message.text.strip().replace("@", "").lower()
+    target_id = None
+
+    if input_data.isdigit():
+        target_id = int(input_data)
+    else:
+        async with aiosqlite.connect("travel_bot.db") as db:
+            async with db.execute("SELECT user_id FROM users WHERE username = ?", (input_data,)) as cursor:
+                row = await cursor.fetchone()
+                if row:
+                    target_id = row[0]
+    
+    if target_id:
+        await state.update_data(client_id=target_id)
+        await message.answer(f"✅ Клієнта знайдено (ID: {target_id}).\nТепер оберіть дату повернення:", reply_markup=await SimpleCalendar().start_calendar())
+        await state.set_state(AdminPanel.waiting_for_date)
+    else:
+        await message.answer("❌ Клієнта не знайдено в базі. Бот зможе знайти користувача за юзернеймом тільки якщо той хоча б раз натискав /start.")
 
 @dp.callback_query(SimpleCalendarCallback.filter(), AdminPanel.waiting_for_date)
 async def process_admin_date(callback_query: types.CallbackQuery, callback_data: SimpleCalendarCallback, state: FSMContext):
@@ -323,7 +353,7 @@ async def main():
         types.BotCommand(command="start", description="🚀 Почати підбір туру"), 
         types.BotCommand(command="admin", description="🛠 Панель менеджера")
     ])
-    scheduler.add_job(check_returns, 'cron', hour=13, minute=15) # 16:15 за Києвом 
+    scheduler.add_job(check_returns, 'cron', hour=15, minute=0) # 18:00 за Києвом
     scheduler.start()
     await dp.start_polling(bot)
 
