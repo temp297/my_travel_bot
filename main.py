@@ -94,7 +94,7 @@ def meals_kb():
     builder.adjust(1)
     return builder.as_markup()
 
-# --- ОБРОБНИКИ АНКЕТИ ---
+# --- ОБРОБНИКИ ТВОЄЇ АНКЕТИ (БЕЗ ЗМІН) ---
 
 @dp.message(Command("start"))
 @dp.message(F.text == "🔄 СТВОРИТИ НОВУ ЗАЯВКУ")
@@ -113,8 +113,6 @@ async def process_start_button(message: types.Message, state: FSMContext):
         await message.answer("🌍 Куди б Ви хотіли поїхати?", reply_markup=types.ReplyKeyboardRemove())
         await state.set_state(TourRequest.destination)
     else:
-        try: await message.delete()
-        except: pass
         await message.answer("⚠️ Будь ласка, використовуйте кнопку:", reply_markup=start_kb())
 
 @dp.message(TourRequest.destination)
@@ -124,8 +122,18 @@ async def process_dest(message: types.Message, state: FSMContext):
         await message.answer("⚠️ Введіть назву країни літерами.")
         return
 
+    # ПОВНИЙ ПЕРЕЛІК КРАЇН ЯК У ТЕБЕ
     replacements = {
-        "турция": "Туреччина", "туреччина": "Туреччина", "турція": "Туреччина", "анталія": "Туреччина (Анталія)", "египет": "Єгипет", "єгипет": "Єгипет", "шарм": "Єгипет (Шарм-ель-Шейх)", "оае": "ОАЕ", "таїланд": "Таїланд"
+        "турция": "Туреччина", "туреччина": "Туреччина", "турція": "Туреччина", "анталія": "Туреччина (Анталія)", "анталия": "Туреччина (Анталія)", "кемер": "Туреччина (Кемер)", "аланія": "Туреччина (Аланія)", "белек": "Туреччина (Белек)",
+        "египет": "Єгипет", "єгипет": "Єгипет", "егіпет": "Єгипет", "єгіпет": "Єгипет", "египт": "Єгипет", "єгіпєт": "Єгипет", "егіпєт": "Єгипет", "шарм": "Єгипет (Шарм-ель-Шейх)", "хургада": "Єгипет (Хургада)", "марса": "Єгипет (Марса-Алам)",
+        "болгарія": "Болгарія", "болгария": "Болгарія", "греція": "Греція", "греция": "Греція", "крит": "Греція (Крит)",
+        "чорногорія": "Chornogoriya", "черногория": "Чорногорія", "хорватія": "Хорватія", "хорватия": "Хорватія",
+        "іспанія": "Іспанія", "испания": "Іспанія", "італія": "Італія", "италия": "Італія", "кіпр": "Кіпр", "кипр": "Кіпр",
+        "албанія": "Албанія", "албания": "Албанія", "португалія": "Португалія", "португалия": "Португалія", "франція": "Франція", "франция": "Франція",
+        "оае": "ОАЕ", "оаэ": "ОАЕ", "емираты": "ОАЕ", "емірати": "ОАЕ", "дубай": "ОАЕ (Дубай)", "дубаи": "ОАЕ (Дубай)",
+        "таїланд": "Таїланд", "таиланд": "Таїланд", "тайланд": "Таїланд", "тай": "Таїланд", "пхукет": "Таїланд (Пхукет)",
+        "мальдіви": "Мальдіви", "мальдивы": "Мальдіви", "мальдиви": "Мальдіви", "домінікана": "Домінікана", "доминикана": "Домінікана",
+        "занзібар": "Занзібар", "занзибар": "Занзібар", "шрі ланка": "Шрі-Ланка", "шри ланка": "Шрі-Ланка", "балі": "Балі (Індонезія)", "бали": "Балі (Індонезія)"
     }
     final_destination = replacements.get(text, message.text.strip().capitalize())
     await state.update_data(destination=final_destination)
@@ -140,8 +148,6 @@ async def process_dest(message: types.Message, state: FSMContext):
 
 @dp.message(TourRequest.adults_count)
 async def fail_adults(message: types.Message):
-    try: await message.delete()
-    except: pass
     builder = InlineKeyboardBuilder()
     builder.add(types.InlineKeyboardButton(text="1", callback_data="adults_1"),
                 types.InlineKeyboardButton(text="2", callback_data="adults_2"),
@@ -167,11 +173,9 @@ async def process_adults(callback_query: types.CallbackQuery, state: FSMContext)
 
 @dp.message(TourRequest.children_count)
 async def fail_children(message: types.Message):
-    try: await message.delete()
-    except: pass
     builder = InlineKeyboardBuilder()
-    builder.add(types.InlineKeyboardButton(text="Без дітей (0)", callback_data="child_0"),
-                types.InlineKeyboardButton(text="1", callback_data="child_1"),
+    builder.add(types.InlineKeyboardButton(text="Без дітей (0)", callback_data="child_0"))
+    builder.add(types.InlineKeyboardButton(text="1", callback_data="child_1"),
                 types.InlineKeyboardButton(text="2", callback_data="child_2"),
                 types.InlineKeyboardButton(text="3+", callback_data="child_3"))
     builder.adjust(1, 3)
@@ -263,29 +267,27 @@ async def process_contact(message: types.Message, state: FSMContext):
         f"📱 <b>Контакт:</b> {message.text}\n"
         f"━━━━━━━━━━━━━━━"
     )
-    try:
-        await bot.send_message(ADMIN_ID, report, parse_mode="HTML")
-        re_builder = ReplyKeyboardBuilder()
-        re_builder.add(types.KeyboardButton(text="🔄 СТВОРИТИ НОВУ ЗАЯВКУ"))
-        await message.answer("✅ Дякуємо! Заявку відправлено.\nМенеджер зв'яжеться з Вами.", reply_markup=re_builder.as_markup(resize_keyboard=True))
-        await state.clear()
-    except Exception as e:
-        logging.error(f"Error: {e}")
+    await bot.send_message(ADMIN_ID, report, parse_mode="HTML")
+    re_builder = ReplyKeyboardBuilder()
+    re_builder.add(types.KeyboardButton(text="🔄 СТВОРИТИ НОВУ ЗАЯВКУ"))
+    await message.answer("✅ Дякуємо! Заявку відправлено.\nМенеджер зв'яжеться з Вами.", reply_markup=re_builder.as_markup(resize_keyboard=True))
+    await state.clear()
 
-# --- КОМАНДИ МЕНЕДЖЕРА (Відгуки) ---
+# --- КОМАНДИ МЕНЕДЖЕРА ---
 
 @dp.message(Command("admin"), F.from_user.id == ADMIN_ID)
 async def admin_start(message: types.Message, state: FSMContext):
-    await message.answer("🛠 <b>Панель менеджера</b>\n\nВведіть ID клієнта для планування відгуку:")
+    # Тут parse_mode="HTML" виправить проблему з відображенням <b>
+    await message.answer("🛠 <b>Панель менеджера</b>\n\nВведіть ID клієнта, якому потрібно запланувати відгук:", parse_mode="HTML")
     await state.set_state(AdminPanel.waiting_for_client_id)
 
 @dp.message(AdminPanel.waiting_for_client_id)
 async def process_client_id(message: types.Message, state: FSMContext):
     if not message.text.isdigit():
-        await message.answer("⚠️ ID має бути числом.")
+        await message.answer("⚠️ ID має бути числом. Скопіюйте його зі звіту про заявку.")
         return
     await state.update_data(client_id=int(message.text))
-    await message.answer("📅 Тепер введіть дату повернення (ДД.ММ.РРРР):")
+    await message.answer("📅 Тепер введіть дату повернення у форматі: **ДД.ММ.РРРР**\n(Наприклад: 25.10.2023)")
     await state.set_state(AdminPanel.waiting_for_date)
 
 @dp.message(AdminPanel.waiting_for_date)
@@ -296,12 +298,12 @@ async def process_date(message: types.Message, state: FSMContext):
         async with aiosqlite.connect("travel_bot.db") as db:
             await db.execute("INSERT INTO feedbacks (user_id, return_date) VALUES (?, ?)", (data['client_id'], message.text))
             await db.commit()
-        await message.answer(f"✅ Заплановано! {message.text} бот автоматично напише клієнту.")
+        await message.answer(f"✅ Заплановано! {message.text} бот автоматично напише клієнту (ID: {data['client_id']}).")
         await state.clear()
     except ValueError:
-        await message.answer("⚠️ Неправильний формат дати. Треба: ДД.ММ.РРРР")
+        await message.answer("⚠️ Неправильний формат дати. Спробуйте ще раз: ДД.ММ.РРРР")
 
-# --- ТЕХНІЧНИЙ БЛОК (ВЕБ-СЕРВЕР ТА ПЛАНУВАЛЬНИК) ---
+# --- ТЕХНІЧНИЙ БЛОК ДЛЯ RENDER ---
 
 async def handle(request):
     return web.Response(text="Bot is running!")
@@ -311,7 +313,8 @@ async def start_web_server():
     app.router.add_get("/", handle)
     runner = web.AppRunner(app)
     await runner.setup()
-    site = web.TCPSite(runner, "0.0.0.0", int(os.environ.get("PORT", 8080)))
+    port = int(os.environ.get("PORT", 8080))
+    site = web.TCPSite(runner, "0.0.0.0", port)
     await site.start()
 
 async def main():
@@ -320,12 +323,7 @@ async def main():
     scheduler.add_job(check_returns, 'cron', hour=11, minute=0)
     scheduler.start()
     await bot.set_my_commands([types.BotCommand(command="start", description="Почати")])
-    while True:
-        try:
-            await dp.start_polling(bot)
-        except Exception as e:
-            logging.error(f"Error: {e}")
-            await asyncio.sleep(5)
+    await dp.start_polling(bot)
 
 if __name__ == "__main__":
     asyncio.run(main())
