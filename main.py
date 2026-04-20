@@ -260,7 +260,6 @@ async def process_meals(callback_query: types.CallbackQuery, state: FSMContext):
     meal_text = meal_map.get(callback_query.data.split("_")[1], "Будь-яке")
     await state.update_data(meals=meal_text)
     
-    # Виправлено тут: тепер ми редагуємо повідомлення з кнопками, щоб вони зникли
     await callback_query.message.edit_text(f"🍴 Харчування: {meal_text}")
     
     msg = await callback_query.message.answer("💰 Який Ви плануєте витратити бюджет у гривнях (цифрами):")
@@ -299,7 +298,6 @@ async def process_contact(message: types.Message, state: FSMContext):
     )
     await bot.send_message(ADMIN_ID, report, parse_mode="HTML")
 
-    # --- ВИДАЛЕННЯ ВСІХ ПОВІДОМЛЕНЬ АНКЕТИ ---
     msgs_to_delete = data.get("msgs_to_delete", [])
     for m_id in msgs_to_delete:
         try:
@@ -331,18 +329,25 @@ async def process_rating(callback_query: types.CallbackQuery, state: FSMContext)
 async def process_feedback_text(message: types.Message, state: FSMContext):
     data = await state.get_data()
     rating = data.get("user_rating")
-    await bot.send_message(
-        REVIEWS_CHAT_ID, 
+    user = message.from_user
+    
+    feedback_header = (
         f"🌟 <b>НОВИЙ ВІДГУК!</b>\n"
+        f"👤 <b>Від:</b> {user.full_name}\n"
+        f"🆔 <b>ID:</b> <code>{user.id}</code>\n"
+        f"📱 <b>Username:</b> @{user.username if user.username else 'немає'}\n"
         f"⭐ <b>Оцінка:</b> {rating}⭐\n"
-        f"━━━━━━━━━━━━━━━", 
-        parse_mode="HTML"
+        f"━━━━━━━━━━━━━━━"
     )
+    
+    await bot.send_message(REVIEWS_CHAT_ID, feedback_header, parse_mode="HTML")
     forwarded_msg = await message.forward(chat_id=REVIEWS_CHAT_ID)
     await message.answer("❤️ Дякуємо за Ваш відгук! Його опубліковано у чаті мандрівників.")
     await state.clear()
+    
     wait_time = random.randint(60, 600)
     await asyncio.sleep(wait_time)
+    
     if rating == 5:
         reply_text = "😍 Неймовірно! Ми дуже раді, що відпочинок пройшов ідеально. Дякуємо, що обираєте нас! ❤️"
     elif rating == 4:
@@ -351,6 +356,7 @@ async def process_feedback_text(message: types.Message, state: FSMContext):
         reply_text = "🙏 Дякуємо за ваш відгук. Ми обов'язково врахуємо ваші зауваження, щоб стати кращими!"
     else: 
         reply_text = "😔 Нам дуже прикро, що ви залишилися незадоволені. Менеджер вже вивчає ситуацію, щоб зв'язатися з вами та все владнати."
+        
     try:
         await forwarded_msg.reply(reply_text)
     except Exception as e:
@@ -360,27 +366,44 @@ async def process_feedback_text(message: types.Message, state: FSMContext):
 
 @dp.message(Command("admin"), F.from_user.id == ADMIN_ID)
 async def admin_start(message: types.Message, state: FSMContext):
-    await message.answer("🛠 <b>Панель менеджера</b>\n\nВведіть <b>ID</b> клієнта або його <b>@username</b>:", parse_mode="HTML")
+    await state.clear()
+    msg = await message.answer("🛠 <b>Панель менеджера</b>\n\nВведіть <b>ID</b> клієнта або його <b>@username</b>:", parse_mode="HTML")
+    await save_msg(message, state)
+    await save_msg(msg, state)
     await state.set_state(AdminPanel.waiting_for_client_info)
 
 @dp.message(AdminPanel.waiting_for_client_info)
 async def process_admin_search(message: types.Message, state: FSMContext):
+    await save_msg(message, state)
     input_data = message.text.strip().replace("@", "").lower()
     target_id = None
-    if input_data.isdigit():
-        target_id = int(input_data)
-    else:
-        async with aiosqlite.connect("travel_bot.db") as db:
+    username = "не вказано"
+
+    async with aiosqlite.connect("travel_bot.db") as db:
+        if input_data.isdigit():
+            target_id = int(input_data)
+            async with db.execute("SELECT username FROM users WHERE user_id = ?", (target_id,)) as cursor:
+                row = await cursor.fetchone()
+                if row: username = f"@{row[0]}"
+        else:
             async with db.execute("SELECT user_id FROM users WHERE username = ?", (input_data,)) as cursor:
                 row = await cursor.fetchone()
-                if row:
+                if row: 
                     target_id = row[0]
+                    username = f"@{input_data}"
+
     if target_id:
-        await state.update_data(client_id=target_id)
-        await message.answer(f"✅ Клієнта знайдено (ID: {target_id}).\nТепер оберіть дату повернення:", reply_markup=await SimpleCalendar().start_calendar())
+        await state.update_data(client_id=target_id, client_username=username)
+        msg = await message.answer(
+            f"✅ Клієнта знайдено:\nID: <code>{target_id}</code>\nUser: {username}\n\nТепер оберіть дату повернення:", 
+            reply_markup=await SimpleCalendar().start_calendar(),
+            parse_mode="HTML"
+        )
+        await save_msg(msg, state)
         await state.set_state(AdminPanel.waiting_for_date)
     else:
-        await message.answer("❌ Клієнта не знайдено в базі.")
+        msg = await message.answer("❌ Клієнта не знайдено в базі.")
+        await save_msg(msg, state)
 
 @dp.callback_query(SimpleCalendarCallback.filter(), AdminPanel.waiting_for_date)
 async def process_admin_date(callback_query: types.CallbackQuery, callback_data: SimpleCalendarCallback, state: FSMContext):
@@ -388,10 +411,25 @@ async def process_admin_date(callback_query: types.CallbackQuery, callback_data:
     if selected:
         formatted = date.strftime("%d.%m.%Y")
         data = await state.get_data()
+        client_id = data['client_id']
+        username = data['client_username']
+        
         async with aiosqlite.connect("travel_bot.db") as db:
-            await db.execute("INSERT INTO feedbacks (user_id, return_date) VALUES (?, ?)", (data['client_id'], formatted))
+            await db.execute("INSERT INTO feedbacks (user_id, return_date) VALUES (?, ?)", (client_id, formatted))
             await db.commit()
-        await callback_query.message.edit_text(f"✅ Заплановано на {formatted}.")
+
+        msgs_to_delete = data.get("msgs_to_delete", [])
+        for m_id in msgs_to_delete:
+            try:
+                await bot.delete_message(chat_id=callback_query.message.chat.id, message_id=m_id)
+            except Exception:
+                pass
+
+        await callback_query.message.answer(
+            f"✅ <b>Заплановано на {formatted}</b>\n"
+            f"👤 Клієнт: <code>{client_id}</code> ({username})",
+            parse_mode="HTML"
+        )
         await state.clear()
 
 # --- ТЕХНІЧНИЙ БЛОК ---
