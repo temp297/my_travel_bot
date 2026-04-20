@@ -561,9 +561,14 @@ async def process_admin_date(callback_query: types.CallbackQuery, callback_data:
         async with aiosqlite.connect("travel_bot.db") as db:
             await db.execute("INSERT INTO feedbacks (user_id, return_date) VALUES (?, ?)", (data['client_id'], formatted))
             await db.commit()
-        await callback_query.message.answer(f"✅ Заплановано на {formatted}")
+        await callback_query.message.answer(
+            f"✅ <b>Заплановано на {formatted}</b>\n"
+            f"👤 Клієнт: <code>{client_id}</code> ({username})",
+            parse_mode="HTML"
+        )
         await state.clear()
 
+# --- ТЕХНІЧНИЙ БЛОК ---
 async def handle(request): return web.Response(text="Live")
 
 async def main():
