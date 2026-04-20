@@ -192,6 +192,11 @@ async def process_dest(message: types.Message, state: FSMContext):
     await state.set_state(TourRequest.adults_count)
 
 # ПЕРЕВІРКА КНОПОК ДОРОСЛИХ
+@dp.message(TourRequest.adults_count)
+async def check_adults_input(message: types.Message, state: FSMContext):
+    await save_msg(message, state)
+    msg = await message.answer("⚠️ Будь ласка, оберіть кількість дорослих натиснувши кнопку вище.")
+    await save_msg(msg, state)
 @dp.callback_query(F.data.startswith("adults_"), TourRequest.adults_count)
 async def process_adults(callback_query: types.CallbackQuery, state: FSMContext):
     # Видаляємо кнопки лише після успішного натискання
