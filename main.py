@@ -259,8 +259,10 @@ async def process_meals(callback_query: types.CallbackQuery, state: FSMContext):
     meal_map = {"BB": "Сніданки", "HB": "Сніданок+вечеря", "AI": "Все включено", "UAI": "Ультра все включено", "RO": "Без харчування"}
     meal_text = meal_map.get(callback_query.data.split("_")[1], "Будь-яке")
     await state.update_data(meals=meal_text)
-    msg = await callback_query.message.answer(f"🍴 Харчування: {meal_text}")
-    await save_msg(msg, state)
+    
+    # Виправлено тут: тепер ми редагуємо повідомлення з кнопками, щоб вони зникли
+    await callback_query.message.edit_text(f"🍴 Харчування: {meal_text}")
+    
     msg = await callback_query.message.answer("💰 Який Ви плануєте витратити бюджет у гривнях (цифрами):")
     await save_msg(msg, state)
     await state.set_state(TourRequest.budget)
@@ -321,7 +323,7 @@ async def process_rating(callback_query: types.CallbackQuery, state: FSMContext)
     await state.update_data(user_rating=rating)
     await callback_query.message.edit_text(
         f"Ви поставили {rating}⭐!\n"
-        "Будь ласка, напишіть декілька слів про Вашу подорож (Ваш відгук буде опубліковано у чаті мандрівників):"
+        "Будь ласка, напишіть декілька слів про Вашу подорож (Ваш відгук буде опубліковано у чаті):"
     )
     await state.set_state(FeedbackState.waiting_for_text)
 
