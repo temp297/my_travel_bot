@@ -2,6 +2,7 @@ import asyncio
 import logging
 import os
 import aiosqlite
+import random  # Додано для випадкової затримки
 from datetime import datetime
 from aiohttp import web
 from aiogram import Bot, Dispatcher, types, F
@@ -98,10 +99,8 @@ def start_kb():
 
 def rating_kb():
     builder = InlineKeyboardBuilder()
-    # Додаємо цифру + емодзі зірочки для кожної кнопки
     for i in range(1, 6):
         builder.add(types.InlineKeyboardButton(text=f"{i}⭐", callback_data=f"rate_{i}"))
-    # Вирівнюємо всі 5 кнопок в один ряд
     builder.adjust(5) 
     return builder.as_markup()
 
@@ -279,41 +278,55 @@ async def process_rating(callback_query: types.CallbackQuery, state: FSMContext)
     rating = int(callback_query.data.split("_")[1])
     await state.update_data(user_rating=rating)
     
-    if rating >= 4:
-        # Тут ми виводимо оцінку у форматі "5⭐"
-        await callback_query.message.edit_text(
-            f"Ви поставили {rating}⭐!\n"
-            "😍 Дякуємо Вам за високу оцінку нашої роботи!\n"
-            "Ми щасливі, що Вам сподобалося. ❤️\n"
-            "Якщо у Вас є хвилинка, будемо вдячні за відгук про Вашу подорож:"
-        )
-        await state.set_state(FeedbackState.waiting_for_text)
-    else:
-        # Для низьких оцінок (1-3)
-        await callback_query.message.edit_text(
-            f"Ви поставили {rating}⭐.\n"
-            "Дякуємо за щирість. Нам прикро, що не все було ідеально.\n"
-            "Ми обов'язково розберемося в ситуації, щоб наступний Ваш відпочинок був на висоті! ❤️"
-        )
-        await state.clear()
+    # Тепер бот завжди просить написати відгук
+    await callback_query.message.edit_text(
+        f"Ви поставили {rating}⭐!\n"
+        "Будь ласка, напишіть декілька слів про Вашу подорож (Ваш відгук буде опубліковано у чаті):"
+    )
+    await state.set_state(FeedbackState.waiting_for_text)
 
 @dp.message(FeedbackState.waiting_for_text)
 async def process_feedback_text(message: types.Message, state: FSMContext):
     data = await state.get_data()
     rating = data.get("user_rating")
-    review_msg = (
+    
+    # 1. Надсилаємо заголовок в чат відгуків
+    await bot.send_message(
+        REVIEWS_CHAT_ID, 
         f"🌟 <b>НОВИЙ ВІДГУК!</b>\n"
-        f"━━━━━━━━━━━━━━━\n"
-        f"👤 <b>Мандрівник:</b> {message.from_user.first_name}\n"
         f"⭐ <b>Оцінка:</b> {rating}⭐\n"
-        f"📝 <b>Враження:</b> {message.text}\n"
-        f"━━━━━━━━━━━━━━━"
+        f"━━━━━━━━━━━━━━━", 
+        parse_mode="HTML"
     )
-    await bot.send_message(REVIEWS_CHAT_ID, review_msg, parse_mode="HTML")
+    
+    # 2. Пересилаємо повідомлення клієнта (щоб було видно автора)
+    forwarded_msg = await message.forward(chat_id=REVIEWS_CHAT_ID)
+    
+    # 3. Одразу відповідаємо клієнту в особисті
     await message.answer("❤️ Дякуємо за Ваш відгук! Його опубліковано у чаті мандрівників.")
     await state.clear()
 
-# --- ПАНЕЛЬ АДМІНА (З ПОШУКОМ ЗА ID АБО USERNAME) ---
+    # 4. Випадкова пауза від 1 до 10 хвилин (60-600 сек)
+    wait_time = random.randint(60, 600)
+    await asyncio.sleep(wait_time)
+    
+    # 5. Вибір відповіді
+    if rating == 5:
+        reply_text = "😍 Неймовірно! Ми дуже раді, що відпочинок пройшов ідеально. Дякуємо, що обираєте нас! ❤️"
+    elif rating == 4:
+        reply_text = "😊 Дякуємо за відгук! Раді, що вам сподобалося. Будемо чекати на вас знову! ✨"
+    elif rating == 3:
+        reply_text = "🙏 Дякуємо за ваш відгук. Ми обов'язково врахуємо ваші зауваження, щоб стати кращими!"
+    else: 
+        reply_text = "😔 Нам дуже прикро, що ви залишилися незадоволені. Менеджер вже вивчає ситуацію, щоб зв'язатися з вами та все владнати."
+
+    # 6. Відповідь на переслане повідомлення
+    try:
+        await forwarded_msg.reply(reply_text)
+    except Exception as e:
+        logging.error(f"Error replying: {e}")
+
+# --- ПАНЕЛЬ АДМІНА ---
 
 @dp.message(Command("admin"), F.from_user.id == ADMIN_ID)
 async def admin_start(message: types.Message, state: FSMContext):
@@ -339,7 +352,7 @@ async def process_admin_search(message: types.Message, state: FSMContext):
         await message.answer(f"✅ Клієнта знайдено (ID: {target_id}).\nТепер оберіть дату повернення:", reply_markup=await SimpleCalendar().start_calendar())
         await state.set_state(AdminPanel.waiting_for_date)
     else:
-        await message.answer("❌ Клієнта не знайдено в базі. Бот зможе знайти користувача за юзернеймом тільки якщо той хоча б раз натискав /start.")
+        await message.answer("❌ Клієнта не знайдено в базі.")
 
 @dp.callback_query(SimpleCalendarCallback.filter(), AdminPanel.waiting_for_date)
 async def process_admin_date(callback_query: types.CallbackQuery, callback_data: SimpleCalendarCallback, state: FSMContext):
@@ -350,7 +363,7 @@ async def process_admin_date(callback_query: types.CallbackQuery, callback_data:
         async with aiosqlite.connect("travel_bot.db") as db:
             await db.execute("INSERT INTO feedbacks (user_id, return_date) VALUES (?, ?)", (data['client_id'], formatted))
             await db.commit()
-        await callback_query.message.edit_text(f"✅ Чекаємо на повернення мандрівника! Автоматичне повідомлення для клієнта (ID: {data['client_id']}) заплановано на {formatted}.")
+        await callback_query.message.edit_text(f"✅ Заплановано на {formatted}.")
         await state.clear()
 
 # --- ТЕХНІЧНИЙ БЛОК ---
@@ -367,7 +380,7 @@ async def main():
         types.BotCommand(command="start", description="🚀 Почати підбір туру"), 
         types.BotCommand(command="admin", description="🛠 Панель менеджера")
     ])
-    scheduler.add_job(check_returns, 'cron', hour=15, minute=0) # 18:00 за Києвом
+    scheduler.add_job(check_returns, 'cron', hour=15, minute=0)
     scheduler.start()
     await dp.start_polling(bot)
 
