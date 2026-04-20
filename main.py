@@ -13,7 +13,6 @@ from aiogram.utils.keyboard import ReplyKeyboardBuilder, InlineKeyboardBuilder
 from aiogram_calendar import SimpleCalendar, SimpleCalendarCallback
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from aiogram.exceptions import TelegramBadRequest
-from datetime import datetime
 
 # --- НАЛАШТУВАННЯ ---
 API_TOKEN = '8742210436:AAEX2p71Tpp4V1cKsm10WnPZ385ZTolRVok'
@@ -510,30 +509,30 @@ async def check_admin_date_input(message: types.Message, state: FSMContext):
 
 @dp.callback_query(SimpleCalendarCallback.filter(), AdminPanel.waiting_for_date)
 async def process_admin_date(callback_query: types.CallbackQuery, callback_data: SimpleCalendarCallback, state: FSMContext):
+    # Отримуємо вибір користувача
     selected, date = await SimpleCalendar().process_selection(callback_query, callback_data)
     
     if selected:
         today = datetime.now().date()
-        if date.date() < today:
-            # 1. Показуємо спливаюче вікно
+        selected_date = date.date()
+
+        # 1. ПЕРЕВІРКА НА МИНУЛУ ДАТУ
+        if selected_date < today:
             await callback_query.answer("❌ Дата не може бути в минулому!", show_alert=True)
             
-            # 2. ПЕРЕМАЛЬОВУЄМО календар у тому самому повідомленні
-            # Це важливо: ми не даємо йому зникнути
+            # Повертаємо календар у початковий стан, щоб він не «завис»
             await callback_query.message.edit_reply_markup(
                 reply_markup=await SimpleCalendar().start_calendar()
             )
-            return # Зупиняємо виконання, чекаємо на новий клік
+            return  # Зупиняємося і чекаємо на новий клік
 
-        # ЯКЩО ДАТА КОРЕКТНА:
-        # Прибираємо кнопки (тепер вони точно не потрібні)
-        await callback_query.message.edit_reply_markup(reply_markup=None)
-        
-        formatted = date.strftime("%d.%m.%Y")
+        # 2. ЯКЩО ДАТА КОРЕКТНА — ВИКОНУЄМО ДІЇ
+        formatted = selected_date.strftime("%d.%m.%Y")
         data = await state.get_data()
-        client_id = data['client_id']
-        username = data['client_username']
-        
+        client_id = data.get('client_id')
+        username = data.get('client_username')
+
+        # Запис у БД
         async with aiosqlite.connect("travel_bot.db") as db:
             await db.execute(
                 "INSERT INTO feedbacks (user_id, return_date) VALUES (?, ?)", 
@@ -541,7 +540,10 @@ async def process_admin_date(callback_query: types.CallbackQuery, callback_data:
             )
             await db.commit()
 
-        # Видаляємо всі проміжні повідомлення (включаючи попередження про текст)
+        # 3. ПРИБИРАЄМО КЛАВІАТУРУ (щоб не було повторних натискань)
+        await callback_query.message.edit_reply_markup(reply_markup=None)
+
+        # 4. ОЧИЩЕННЯ ПОВІДОМЛЕНЬ
         msgs_to_delete = data.get("msgs_to_delete", [])
         for m_id in msgs_to_delete:
             try:
@@ -549,11 +551,14 @@ async def process_admin_date(callback_query: types.CallbackQuery, callback_data:
             except Exception:
                 pass
 
+        # 5. ФІНАЛЬНЕ ПОВІДОМЛЕННЯ ТА ЗАВЕРШЕННЯ СТАНУ
         await callback_query.message.answer(
             f"✅ <b>Заплановано на {formatted}</b>\n"
             f"👤 Клієнт: <code>{client_id}</code> ({username})",
             parse_mode="HTML"
         )
+        
+        # ВАЖЛИВО: Очищуємо стан ТІЛЬКИ ТУТ, коли дата успішна
         await state.clear()
 
 # --- ТЕХНІЧНИЙ БЛОК ---
