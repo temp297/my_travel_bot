@@ -235,6 +235,7 @@ async def process_children(callback_query: types.CallbackQuery, state: FSMContex
     )
     await save_msg(msg1, state)
     await save_msg(msg2, state)
+    await state.set_state(TourRequest.date_from) # ВСТАНОВЛЮЄМО СТАН ДЛЯ КАЛЕНДАРЯ
 
 # ПЕРЕВІРКА КАЛЕНДАРЯ (З)
 @dp.message(TourRequest.date_from)
@@ -256,6 +257,7 @@ async def process_date_from(callback_query: types.CallbackQuery, callback_data: 
         )
         await save_msg(msg1, state)
         await save_msg(msg2, state)
+        await state.set_state(TourRequest.date_to) # ПЕРЕХОДИМО ДО НАСТУПНОЇ ДАТИ
 
 # ПЕРЕВІРКА КАЛЕНДАРЯ (ПО)
 @dp.message(TourRequest.date_to)
@@ -275,6 +277,7 @@ async def process_date_to(callback_query: types.CallbackQuery, callback_data: Si
         msg2 = await callback_query.message.answer(f"🌙 На скільки ночей плануєте відпочинок?")
         await save_msg(msg1, state)
         await save_msg(msg2, state)
+        await state.set_state(TourRequest.nights_count) # ВСТАНОВЛЮЄМО СТАН ДЛЯ НОЧЕЙ
 
 @dp.message(TourRequest.nights_count)
 async def process_nights(message: types.Message, state: FSMContext):
