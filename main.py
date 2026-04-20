@@ -472,34 +472,33 @@ async def process_admin_search(message: types.Message, state: FSMContext):
 
     async with aiosqlite.connect("travel_bot.db") as db:
         if input_data.isdigit():
-            # ШУКАЄМО ЗА ID
-            search_id = int(input_data)
-            async with db.execute("SELECT user_id, username FROM users WHERE user_id = ?", (search_id,)) as cursor:
+            async with db.execute("SELECT user_id, username FROM users WHERE user_id = ?", (int(input_data),)) as cursor:
                 row = await cursor.fetchone()
                 if row:
-                    target_id = row[0]
-                    username = f"@{row[1]}" if row[1] else "не вказано"
+                    target_id, row_username = row
+                    username = f"@{row_username}" if row_username else "не вказано"
         else:
-            # ШУКАЄМО ЗА ЮЗЕРНЕЙМОМ
             async with db.execute("SELECT user_id, username FROM users WHERE LOWER(username) = ?", (input_data,)) as cursor:
                 row = await cursor.fetchone()
                 if row:
-                    target_id = row[0]
-                    username = f"@{row[1]}"
+                    target_id, row_username = row
+                    username = f"@{row_username}" if row_username else f"@{input_data}"
 
-    # Тепер ця перевірка спрацює ТІЛЬКИ якщо target_id було знайдено в SELECT
     if target_id is not None:
         await state.update_data(client_id=target_id, client_username=username)
+        
+        # Створюємо клавіатуру календаря
+        calendar_kb = await SimpleCalendar().start_calendar()
+        
         msg = await message.answer(
             f"✅ Клієнта знайдено:\nID: <code>{target_id}</code>\nUser: {username}\n\nТепер оберіть дату повернення:", 
-            reply_markup=await SimpleCalendar().start_calendar(),
+            reply_markup=calendar_kb, # ПЕРЕВІРТЕ ЦЕЙ РЯДОК
             parse_mode="HTML"
         )
         await save_msg(msg, state)
         await state.set_state(AdminPanel.waiting_for_date)
     else:
-        # Якщо в базі немає такого ID або юзера
-        msg = await message.answer("❌ Клієнта не знайдено в базі. Перевірте дані та введіть ще раз:")
+        msg = await message.answer("❌ Клієнта не знайдено. Спробуйте ще раз:")
         await save_msg(msg, state)
 
 # ПЕРЕВІРКА КАЛЕНДАРЯ АДМІНА
