@@ -13,6 +13,7 @@ from aiogram.utils.keyboard import ReplyKeyboardBuilder, InlineKeyboardBuilder
 from aiogram_calendar import SimpleCalendar, SimpleCalendarCallback
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from aiogram.exceptions import TelegramBadRequest
+from datetime import datetime
 
 # --- НАЛАШТУВАННЯ ---
 API_TOKEN = '8742210436:AAEX2p71Tpp4V1cKsm10WnPZ385ZTolRVok'
@@ -511,16 +512,32 @@ async def check_admin_date_input(message: types.Message, state: FSMContext):
 @dp.callback_query(SimpleCalendarCallback.filter(), AdminPanel.waiting_for_date)
 async def process_admin_date(callback_query: types.CallbackQuery, callback_data: SimpleCalendarCallback, state: FSMContext):
     selected, date = await SimpleCalendar().process_selection(callback_query, callback_data)
+    
     if selected:
+        # --- ПЕРЕВІРКА ДАТИ ---
+        today = datetime.now().date()
+        selected_date = date.date()
+
+        if selected_date < today:
+            # Спливаюче вікно з помилкою
+            await callback_query.answer(
+                "❌ Неможливо обрати дату в минулому!", 
+                show_alert=True
+            )
+            return  # Зупиняємо функцію, щоб адмін спробував ще раз
+        # -----------------------
+
         formatted = date.strftime("%d.%m.%Y")
         data = await state.get_data()
         client_id = data['client_id']
         username = data['client_username']
         
+        # Запис у базу даних
         async with aiosqlite.connect("travel_bot.db") as db:
             await db.execute("INSERT INTO feedbacks (user_id, return_date) VALUES (?, ?)", (client_id, formatted))
             await db.commit()
 
+        # Видалення старих повідомлень панелі адміна
         msgs_to_delete = data.get("msgs_to_delete", [])
         for m_id in msgs_to_delete:
             try:
@@ -528,6 +545,13 @@ async def process_admin_date(callback_query: types.CallbackQuery, callback_data:
             except Exception:
                 pass
 
+        # Прибираємо кнопки календаря, щоб не клікати двічі
+        try:
+            await callback_query.message.edit_reply_markup(reply_markup=None)
+        except Exception:
+            pass
+
+        # Фінальне повідомлення
         await callback_query.message.answer(
             f"✅ <b>Заплановано на {formatted}</b>\n"
             f"👤 Клієнт: <code>{client_id}</code> ({username})",
