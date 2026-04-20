@@ -509,41 +509,47 @@ async def check_admin_date_input(message: types.Message, state: FSMContext):
 
 @dp.callback_query(SimpleCalendarCallback.filter(), AdminPanel.waiting_for_date)
 async def process_admin_date(callback_query: types.CallbackQuery, callback_data: SimpleCalendarCallback, state: FSMContext):
-    # Отримуємо вибір користувача
-    selected, date = await SimpleCalendar().process_selection(callback_query, callback_data)
-    
-    if selected:
+    try:
+        # 1. Отримуємо вибір
+        selected, date = await SimpleCalendar().process_selection(callback_query, callback_data)
+        if not selected:
+            return
+
         today = datetime.now().date()
         selected_date = date.date()
 
-        # 1. ПЕРЕВІРКА НА МИНУЛУ ДАТУ
+        # 2. ПЕРЕВІРКА: Тільки минуле (вчора і раніше) — це помилка
         if selected_date < today:
             await callback_query.answer("❌ Дата не може бути в минулому!", show_alert=True)
-            
-            # Повертаємо календар у початковий стан, щоб він не «завис»
             await callback_query.message.edit_reply_markup(
                 reply_markup=await SimpleCalendar().start_calendar()
             )
-            return  # Зупиняємося і чекаємо на новий клік
+            return
 
-        # 2. ЯКЩО ДАТА КОРЕКТНА — ВИКОНУЄМО ДІЇ
+        # 3. ЯКЩО ДАТА ОК (сьогодні або майбутнє)
         formatted = selected_date.strftime("%d.%m.%Y")
         data = await state.get_data()
+        
+        # Перевіряємо, чи дані ще є в пам'яті
         client_id = data.get('client_id')
-        username = data.get('client_username')
+        username = data.get('client_username', 'не вказано')
 
-        # Запис у БД
+        if not client_id:
+            await callback_query.message.answer("❌ Помилка: дані клієнта втрачено. Почніть пошук спочатку через /admin")
+            await state.clear()
+            return
+
+        # 4. ЗАПИС У БАЗУ
         async with aiosqlite.connect("travel_bot.db") as db:
             await db.execute(
-                "INSERT INTO feedbacks (user_id, return_date) VALUES (?, ?)", 
+                "INSERT INTO feedbacks (user_id, return_date, sent) VALUES (?, ?, 0)", 
                 (client_id, formatted)
             )
             await db.commit()
 
-        # 3. ПРИБИРАЄМО КЛАВІАТУРУ (щоб не було повторних натискань)
+        # 5. ВИДАЛЕННЯ КНОПОК ТА ПОВІДОМЛЕНЬ
         await callback_query.message.edit_reply_markup(reply_markup=None)
-
-        # 4. ОЧИЩЕННЯ ПОВІДОМЛЕНЬ
+        
         msgs_to_delete = data.get("msgs_to_delete", [])
         for m_id in msgs_to_delete:
             try:
@@ -551,15 +557,17 @@ async def process_admin_date(callback_query: types.CallbackQuery, callback_data:
             except Exception:
                 pass
 
-        # 5. ФІНАЛЬНЕ ПОВІДОМЛЕННЯ ТА ЗАВЕРШЕННЯ СТАНУ
+        # 6. УСПІШНЕ ЗАВЕРШЕННЯ
         await callback_query.message.answer(
             f"✅ <b>Заплановано на {formatted}</b>\n"
             f"👤 Клієнт: <code>{client_id}</code> ({username})",
             parse_mode="HTML"
         )
-        
-        # ВАЖЛИВО: Очищуємо стан ТІЛЬКИ ТУТ, коли дата успішна
         await state.clear()
+
+    except Exception as e:
+        logging.error(f"Критична помилка в календарі адміна: {e}")
+        await callback_query.message.answer("⚠️ Сталася помилка при збереженні. Перевірте консоль.")
 
 # --- ТЕХНІЧНИЙ БЛОК ---
 async def handle(request): return web.Response(text="Live")
