@@ -160,7 +160,7 @@ async def process_start_callback(callback_query: types.CallbackQuery, state: FSM
     # Видаляємо кнопку, щоб вона не залишалася в тексті
     await callback_query.message.edit_reply_markup(reply_markup=None)
     
-    msg = await callback_query.message.answer("🌍 Ваші побажання щодо відпочинку: країна, готель (якщо визначилися)", reply_markup=types.ReplyKeyboardRemove())
+    msg = await callback_query.message.answer("🌍 Вкажіть пріоритетну країну та назву готелю (якщо визначилися)", reply_markup=types.ReplyKeyboardRemove())
     await save_msg(msg, state)
     await state.set_state(TourRequest.destination)
 
