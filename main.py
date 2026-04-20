@@ -513,13 +513,20 @@ async def process_admin_date(callback_query: types.CallbackQuery, callback_data:
     selected, date = await SimpleCalendar().process_selection(callback_query, callback_data)
     
     if selected:
-        # 1. Перевірка на минулу дату
         today = datetime.now().date()
         if date.date() < today:
+            # 1. Показуємо спливаюче вікно
             await callback_query.answer("❌ Дата не може бути в минулому!", show_alert=True)
-            return # Просто зупиняємо, календар залишається на екрані
+            
+            # 2. ПЕРЕМАЛЬОВУЄМО календар у тому самому повідомленні
+            # Це важливо: ми не даємо йому зникнути
+            await callback_query.message.edit_reply_markup(
+                reply_markup=await SimpleCalendar().start_calendar()
+            )
+            return # Зупиняємо виконання, чекаємо на новий клік
 
-        # 2. Якщо дата правильна — прибираємо кнопки календаря
+        # ЯКЩО ДАТА КОРЕКТНА:
+        # Прибираємо кнопки (тепер вони точно не потрібні)
         await callback_query.message.edit_reply_markup(reply_markup=None)
         
         formatted = date.strftime("%d.%m.%Y")
@@ -527,7 +534,6 @@ async def process_admin_date(callback_query: types.CallbackQuery, callback_data:
         client_id = data['client_id']
         username = data['client_username']
         
-        # 3. Запис у базу
         async with aiosqlite.connect("travel_bot.db") as db:
             await db.execute(
                 "INSERT INTO feedbacks (user_id, return_date) VALUES (?, ?)", 
@@ -535,7 +541,7 @@ async def process_admin_date(callback_query: types.CallbackQuery, callback_data:
             )
             await db.commit()
 
-        # 4. Видалення «сміття» (повідомлень про помилки та вводу адміна)
+        # Видаляємо всі проміжні повідомлення (включаючи попередження про текст)
         msgs_to_delete = data.get("msgs_to_delete", [])
         for m_id in msgs_to_delete:
             try:
@@ -543,14 +549,11 @@ async def process_admin_date(callback_query: types.CallbackQuery, callback_data:
             except Exception:
                 pass
 
-        # 5. Фінальне повідомлення (як msg1, msg2 у туриста)
         await callback_query.message.answer(
             f"✅ <b>Заплановано на {formatted}</b>\n"
             f"👤 Клієнт: <code>{client_id}</code> ({username})",
             parse_mode="HTML"
         )
-        
-        # Очищуємо стан, бо адмінська задача виконана
         await state.clear()
 
 # --- ТЕХНІЧНИЙ БЛОК ---
