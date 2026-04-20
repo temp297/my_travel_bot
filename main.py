@@ -228,6 +228,9 @@ async def check_children_input(message: types.Message, state: FSMContext):
 
 @dp.callback_query(F.data.startswith("child_"), TourRequest.children_count)
 async def process_children(callback_query: types.CallbackQuery, state: FSMContext):
+    # Видаляємо кнопки вибору дітей
+    await callback_query.message.edit_reply_markup(reply_markup=None)
+    
     count = callback_query.data.split("_")[1]
     await state.update_data(children=count)
     
@@ -238,8 +241,9 @@ async def process_children(callback_query: types.CallbackQuery, state: FSMContex
     )
     await save_msg(msg1, state)
     await save_msg(msg2, state)
-    await state.set_state(TourRequest.date_from) # ВСТАНОВЛЮЄМО СТАН ДЛЯ КАЛЕНДАРЯ
+    await state.set_state(TourRequest.date_from) 
 
+# ВСТАНОВЛЮЄМО СТАН ДЛЯ КАЛЕНДАРЯ
 # ПЕРЕВІРКА КАЛЕНДАРЯ (З)
 @dp.message(TourRequest.date_from)
 async def check_date_from_input(message: types.Message, state: FSMContext):
@@ -299,6 +303,9 @@ async def check_stars_input(message: types.Message, state: FSMContext):
 
 @dp.callback_query(F.data.startswith("star_"), TourRequest.hotel_stars)
 async def process_stars(callback_query: types.CallbackQuery, state: FSMContext):
+    # Видаляємо кнопки зірок
+    await callback_query.message.edit_reply_markup(reply_markup=None)
+    
     star = callback_query.data.split("_")[1]
     label = "Будь-яка" if star == "any" else f"{star}*"
     await state.update_data(stars=label)
@@ -317,6 +324,9 @@ async def check_meals_input(message: types.Message, state: FSMContext):
 
 @dp.callback_query(F.data.startswith("meal_"), TourRequest.meal_type)
 async def process_meals(callback_query: types.CallbackQuery, state: FSMContext):
+    # Видаляємо кнопки харчування
+    await callback_query.message.edit_reply_markup(reply_markup=None)
+    
     meal_map = {"BB": "Сніданки", "HB": "Сніданок+вечеря", "AI": "Все включено", "UAI": "Ультра все включено", "RO": "Без харчування"}
     meal_text = meal_map.get(callback_query.data.split("_")[1], "Будь-яке")
     await state.update_data(meals=meal_text)
