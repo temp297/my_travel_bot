@@ -171,7 +171,7 @@ async def process_dest(message: types.Message, state: FSMContext):
         "іспанія": "Іспанія", "испания": "Іспанія", "італія": "Італія", "италия": "Італія", "кіпр": "Кіпр", "кипр": "Кіпр",
         "албанія": "Албанія", "албания": "Албанія", "португалія": "Португалія", "португалия": "Португалія", "франція": "Франція", "франция": "Франція",
         "оае": "ОАЕ", "оаэ": "ОАЕ", "емираты": "ОАЕ", "емірати": "ОАЕ", "дубай": "ОАЕ (Дубай)", "дубаи": "ОАЕ (Дубай)",
-        "таїланд": "Таїланд", "таиланд": "Таїланд", "тайланд": "Таїланд", "тай": "Таїланд", "пхукет": "Таїланд (Пхукет)",
+        "таїланд": "Таїланд", "таиland": "Таїланд", "тайланд": "Таїланд", "тай": "Таїланд", "пхукет": "Таїланд (Пхукет)",
         "мальдіви": "Мальдіви", "мальдивы": "Мальдіви", "мальдиви": "Мальдіви", "домінікана": "Домінікана", "доминикана": "Домінікана",
         "занзібар": "Занзібар", "занзибар": "Занзібар", "шрі ланка": "Шрі-Ланка", "шри ланка": "Шрі-Ланка", "балі": "Балі (Індонезія)", "бали": "Балі (Індонезія)"
     }
@@ -182,15 +182,20 @@ async def process_dest(message: types.Message, state: FSMContext):
     builder.add(types.InlineKeyboardButton(text="1", callback_data="adults_1"),
                 types.InlineKeyboardButton(text="2", callback_data="adults_2"),
                 types.InlineKeyboardButton(text="3+", callback_data="adults_3+"))
-    msg = await message.answer(f"✅ Напрямок: {final_destination}\n\n👤 Оберіть кількість дорослих:", reply_markup=builder.as_markup())
-    await save_msg(msg, state)
+    
+    msg1 = await message.answer(f"✅ Напрямок: {final_destination}")
+    msg2 = await message.answer(f"👤 Оберіть кількість дорослих:", reply_markup=builder.as_markup())
+    await save_msg(msg1, state)
+    await save_msg(msg2, state)
     await state.set_state(TourRequest.adults_count)
 
 @dp.callback_query(F.data.startswith("adults_"), TourRequest.adults_count)
 async def process_adults(callback_query: types.CallbackQuery, state: FSMContext):
     count = callback_query.data.split("_")[1]
     await state.update_data(adults=count)
-    await callback_query.message.edit_reply_markup(reply_markup=None)
+    try:
+        await callback_query.message.edit_reply_markup(reply_markup=None)
+    except: pass
     
     builder = InlineKeyboardBuilder()
     builder.add(types.InlineKeyboardButton(text="Без дітей (0)", callback_data="child_0"))
@@ -199,19 +204,28 @@ async def process_adults(callback_query: types.CallbackQuery, state: FSMContext)
                 types.InlineKeyboardButton(text="3+", callback_data="child_3"))
     builder.adjust(1, 3)
     
-    msg = await callback_query.message.answer(f"👤 Дорослих: {count}\n\n👶 Скільки буде дітей?", reply_markup=builder.as_markup())
-    await save_msg(msg, state)
+    msg1 = await callback_query.message.answer(f"👤 Дорослих: {count}")
+    msg2 = await callback_query.message.answer(f"👶 Скільки буде дітей?", reply_markup=builder.as_markup())
+    await save_msg(msg1, state)
+    await save_msg(msg2, state)
     await state.set_state(TourRequest.children_count)
 
 @dp.callback_query(F.data.startswith("child_"), TourRequest.children_count)
 async def process_children(callback_query: types.CallbackQuery, state: FSMContext):
     count = callback_query.data.split("_")[1]
     await state.update_data(children=count)
-    await callback_query.message.edit_reply_markup(reply_markup=None)
+    try:
+        await callback_query.message.edit_reply_markup(reply_markup=None)
+    except: pass
     
-    msg = await callback_query.message.answer(f"👶 Дітей: {count}\n\n📅 Оберіть дату, з якої можна планувати виліт (З):", reply_markup=await SimpleCalendar().start_calendar())
-    await save_msg(msg, state)
     await state.set_state(TourRequest.date_from)
+    msg1 = await callback_query.message.answer(f"👶 Дітей: {count}")
+    msg2 = await callback_query.message.answer(
+        f"📅 Оберіть дату, з якої можна планувати виліт (З):", 
+        reply_markup=await SimpleCalendar().start_calendar()
+    )
+    await save_msg(msg1, state)
+    await save_msg(msg2, state)
 
 @dp.callback_query(SimpleCalendarCallback.filter(), TourRequest.date_from)
 async def process_date_from(callback_query: types.CallbackQuery, callback_data: SimpleCalendarCallback, state: FSMContext):
@@ -219,11 +233,18 @@ async def process_date_from(callback_query: types.CallbackQuery, callback_data: 
     if selected:
         formatted = date.strftime("%d.%m.%Y")
         await state.update_data(date_from=formatted)
-        await callback_query.message.edit_reply_markup(reply_markup=None)
+        try:
+            await callback_query.message.edit_reply_markup(reply_markup=None)
+        except: pass
         
-        msg = await callback_query.message.answer(f"📅 Дата вильоту (З): {formatted}\n\n📅 Оберіть дату, до якої можна планувати виліт (ПО):", reply_markup=await SimpleCalendar().start_calendar())
-        await save_msg(msg, state)
         await state.set_state(TourRequest.date_to)
+        msg1 = await callback_query.message.answer(f"📅 Дата вильоту (З): {formatted}")
+        msg2 = await callback_query.message.answer(
+            f"📅 Оберіть дату, до якої можна планувати виліт (ПО):", 
+            reply_markup=await SimpleCalendar().start_calendar()
+        )
+        await save_msg(msg1, state)
+        await save_msg(msg2, state)
 
 @dp.callback_query(SimpleCalendarCallback.filter(), TourRequest.date_to)
 async def process_date_to(callback_query: types.CallbackQuery, callback_data: SimpleCalendarCallback, state: FSMContext):
@@ -231,11 +252,15 @@ async def process_date_to(callback_query: types.CallbackQuery, callback_data: Si
     if selected:
         formatted = date.strftime("%d.%m.%Y")
         await state.update_data(date_to=formatted)
-        await callback_query.message.edit_reply_markup(reply_markup=None)
+        try:
+            await callback_query.message.edit_reply_markup(reply_markup=None)
+        except: pass
         
-        msg = await callback_query.message.answer(f"✅ Дата вильоту (ПО): {formatted}\n\n🌙 На скільки ночей плануєте відпочинок?")
-        await save_msg(msg, state)
         await state.set_state(TourRequest.nights_count)
+        msg1 = await callback_query.message.answer(f"✅ Дата вильоту (ПО): {formatted}")
+        msg2 = await callback_query.message.answer(f"🌙 На скільки ночей плануєте відпочинок?")
+        await save_msg(msg1, state)
+        await save_msg(msg2, state)
 
 @dp.message(TourRequest.nights_count)
 async def process_nights(message: types.Message, state: FSMContext):
@@ -250,10 +275,14 @@ async def process_stars(callback_query: types.CallbackQuery, state: FSMContext):
     star = callback_query.data.split("_")[1]
     label = "Будь-яка" if star == "any" else f"{star}*"
     await state.update_data(stars=label)
-    await callback_query.message.edit_reply_markup(reply_markup=None)
+    try:
+        await callback_query.message.edit_reply_markup(reply_markup=None)
+    except: pass
     
-    msg = await callback_query.message.answer(f"⭐ Готель: {label}\n\n🍴 Яке харчування Вам підходить:", reply_markup=meals_kb())
-    await save_msg(msg, state)
+    msg1 = await callback_query.message.answer(f"⭐ Готель: {label}")
+    msg2 = await callback_query.message.answer(f"🍴 Яке харчування Вам підходить:", reply_markup=meals_kb())
+    await save_msg(msg1, state)
+    await save_msg(msg2, state)
     await state.set_state(TourRequest.meal_type)
 
 @dp.callback_query(F.data.startswith("meal_"), TourRequest.meal_type)
@@ -261,10 +290,14 @@ async def process_meals(callback_query: types.CallbackQuery, state: FSMContext):
     meal_map = {"BB": "Сніданки", "HB": "Сніданок+вечеря", "AI": "Все включено", "UAI": "Ультра все включено", "RO": "Без харчування"}
     meal_text = meal_map.get(callback_query.data.split("_")[1], "Будь-яке")
     await state.update_data(meals=meal_text)
-    await callback_query.message.edit_reply_markup(reply_markup=None)
+    try:
+        await callback_query.message.edit_reply_markup(reply_markup=None)
+    except: pass
     
-    msg = await callback_query.message.answer(f"🍴 Харчування: {meal_text}\n\n💰 Який Ви плануєте витратити бюджет у гривнях (цифрами):")
-    await save_msg(msg, state)
+    msg1 = await callback_query.message.answer(f"🍴 Харчування: {meal_text}")
+    msg2 = await callback_query.message.answer(f"💰 Який Ви плануєте витратити бюджет у гривнях (цифрами):")
+    await save_msg(msg1, state)
+    await save_msg(msg2, state)
     await state.set_state(TourRequest.budget)
 
 @dp.message(TourRequest.budget)
@@ -401,13 +434,13 @@ async def process_admin_search(message: types.Message, state: FSMContext):
 
     if target_id:
         await state.update_data(client_id=target_id, client_username=username)
+        await state.set_state(AdminPanel.waiting_for_date)
         msg = await message.answer(
             f"✅ Клієнта знайдено:\nID: <code>{target_id}</code>\nUser: {username}\n\nТепер оберіть дату повернення:", 
             reply_markup=await SimpleCalendar().start_calendar(),
             parse_mode="HTML"
         )
         await save_msg(msg, state)
-        await state.set_state(AdminPanel.waiting_for_date)
     else:
         msg = await message.answer("❌ Клієнта не знайдено в базі.")
         await save_msg(msg, state)
