@@ -153,6 +153,9 @@ async def process_start_button(message: types.Message, state: FSMContext):
         msg = await message.answer("🌍 Куди б Ви хотіли поїхати?", reply_markup=types.ReplyKeyboardRemove())
         await save_msg(msg, state)
         await state.set_state(TourRequest.destination)
+    else:
+        msg = await message.answer("⚠️ Будь ласка, натисніть кнопку «🚀 ПОЧАТИ ПІДБІР ТУРУ»")
+        await save_msg(msg, state)
 
 @dp.message(TourRequest.destination)
 async def process_dest(message: types.Message, state: FSMContext):
@@ -189,6 +192,13 @@ async def process_dest(message: types.Message, state: FSMContext):
     await save_msg(msg2, state)
     await state.set_state(TourRequest.adults_count)
 
+# Заборона тексту, коли треба обрати кількість дорослих
+@dp.message(TourRequest.adults_count)
+async def forbid_text_adults(message: types.Message, state: FSMContext):
+    await save_msg(message, state)
+    msg = await message.answer("⚠️ Будь ласка, оберіть кількість дорослих за допомогою кнопок вище.")
+    await save_msg(msg, state)
+
 @dp.callback_query(F.data.startswith("adults_"), TourRequest.adults_count)
 async def process_adults(callback_query: types.CallbackQuery, state: FSMContext):
     count = callback_query.data.split("_")[1]
@@ -210,6 +220,13 @@ async def process_adults(callback_query: types.CallbackQuery, state: FSMContext)
     await save_msg(msg2, state)
     await state.set_state(TourRequest.children_count)
 
+# Заборона тексту, коли треба обрати кількість дітей
+@dp.message(TourRequest.children_count)
+async def forbid_text_children(message: types.Message, state: FSMContext):
+    await save_msg(message, state)
+    msg = await message.answer("⚠️ Будь ласка, вкажіть кількість дітей за допомогою кнопок.")
+    await save_msg(msg, state)
+
 @dp.callback_query(F.data.startswith("child_"), TourRequest.children_count)
 async def process_children(callback_query: types.CallbackQuery, state: FSMContext):
     count = callback_query.data.split("_")[1]
@@ -226,6 +243,13 @@ async def process_children(callback_query: types.CallbackQuery, state: FSMContex
     )
     await save_msg(msg1, state)
     await save_msg(msg2, state)
+
+# Заборона тексту, коли треба календар (Дата З)
+@dp.message(TourRequest.date_from)
+async def forbid_text_date_from(message: types.Message, state: FSMContext):
+    await save_msg(message, state)
+    msg = await message.answer("⚠️ Будь ласка, оберіть дату в календарі вище.")
+    await save_msg(msg, state)
 
 @dp.callback_query(SimpleCalendarCallback.filter(), TourRequest.date_from)
 async def process_date_from(callback_query: types.CallbackQuery, callback_data: SimpleCalendarCallback, state: FSMContext):
@@ -245,6 +269,13 @@ async def process_date_from(callback_query: types.CallbackQuery, callback_data: 
         )
         await save_msg(msg1, state)
         await save_msg(msg2, state)
+
+# Заборона тексту, коли треба календар (Дата ПО)
+@dp.message(TourRequest.date_to)
+async def forbid_text_date_to(message: types.Message, state: FSMContext):
+    await save_msg(message, state)
+    msg = await message.answer("⚠️ Будь ласка, оберіть дату в календарі вище.")
+    await save_msg(msg, state)
 
 @dp.callback_query(SimpleCalendarCallback.filter(), TourRequest.date_to)
 async def process_date_to(callback_query: types.CallbackQuery, callback_data: SimpleCalendarCallback, state: FSMContext):
@@ -270,6 +301,13 @@ async def process_nights(message: types.Message, state: FSMContext):
     await save_msg(msg, state)
     await state.set_state(TourRequest.hotel_stars)
 
+# Заборона тексту, коли треба зірки готелю
+@dp.message(TourRequest.hotel_stars)
+async def forbid_text_stars(message: types.Message, state: FSMContext):
+    await save_msg(message, state)
+    msg = await message.answer("⚠️ Будь ласка, оберіть зірковість готелю за допомогою кнопок.")
+    await save_msg(msg, state)
+
 @dp.callback_query(F.data.startswith("star_"), TourRequest.hotel_stars)
 async def process_stars(callback_query: types.CallbackQuery, state: FSMContext):
     star = callback_query.data.split("_")[1]
@@ -284,6 +322,13 @@ async def process_stars(callback_query: types.CallbackQuery, state: FSMContext):
     await save_msg(msg1, state)
     await save_msg(msg2, state)
     await state.set_state(TourRequest.meal_type)
+
+# Заборона тексту, коли треба харчування
+@dp.message(TourRequest.meal_type)
+async def forbid_text_meals(message: types.Message, state: FSMContext):
+    await save_msg(message, state)
+    msg = await message.answer("⚠️ Будь ласка, оберіть тип харчування за допомогою кнопок.")
+    await save_msg(msg, state)
 
 @dp.callback_query(F.data.startswith("meal_"), TourRequest.meal_type)
 async def process_meals(callback_query: types.CallbackQuery, state: FSMContext):
