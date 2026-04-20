@@ -100,10 +100,10 @@ async def check_returns():
         await db.commit()
 
 # --- КЛАВІАТУРИ ---
-def start_kb():
-    builder = ReplyKeyboardBuilder()
-    builder.add(types.KeyboardButton(text="🚀 ПОЧАТИ ПІДБІР ТУРУ"))
-    return builder.as_markup(resize_keyboard=True)
+def start_inline_kb():
+    builder = InlineKeyboardBuilder()
+    builder.add(types.InlineKeyboardButton(text="🚀 ПОЧАТИ ПІДБІР ТУРУ", callback_data="start_selection"))
+    return builder.as_markup()
 
 def rating_kb():
     builder = InlineKeyboardBuilder()
@@ -138,24 +138,31 @@ def meals_kb():
 async def cmd_start(message: types.Message, state: FSMContext):
     await save_user(message.from_user)
     await state.clear()
+    # Надсилаємо Inline-кнопку замість звичайної
     msg = await message.answer(
         f"👋 Вітаю, {message.from_user.first_name}!\nЯ допоможу Вам підібрати ідеальний тур. Натисніть кнопку нижче:", 
-        reply_markup=start_kb()
+        reply_markup=start_inline_kb()
     )
     await save_msg(message, state)
     await save_msg(msg, state)
     await state.set_state(TourRequest.start_confirmed)
 
+# ПЕРЕВІРКА: якщо користувач замість кнопки ввів текст "123" або інший
 @dp.message(TourRequest.start_confirmed)
-async def process_start_button(message: types.Message, state: FSMContext):
+async def check_start_input(message: types.Message, state: FSMContext):
     await save_msg(message, state)
-    if message.text == "🚀 ПОЧАТИ ПІДБІР ТУРУ":
-        msg = await message.answer("🌍 Куди б Ви хотіли поїхати?", reply_markup=types.ReplyKeyboardRemove())
-        await save_msg(msg, state)
-        await state.set_state(TourRequest.destination)
-    else:
-        msg = await message.answer("⚠️ Будь ласка, натисніть на кнопку «🚀 ПОЧАТИ ПІДБІР ТУРУ»")
-        await save_msg(msg, state)
+    msg = await message.answer("⚠️ Будь ласка, натисніть на кнопку «🚀 ПОЧАТИ ПІДБІР ТУРУ»")
+    await save_msg(msg, state)
+
+# ОБРОБНИК НАТИСКАННЯ: спрацює тільки при кліку на Inline-кнопку
+@dp.callback_query(F.data == "start_selection", TourRequest.start_confirmed)
+async def process_start_callback(callback_query: types.CallbackQuery, state: FSMContext):
+    # Видаляємо кнопку, щоб вона не залишалася в тексті
+    await callback_query.message.edit_reply_markup(reply_markup=None)
+    
+    msg = await callback_query.message.answer("🌍 Куди б Ви хотіли поїхати?", reply_markup=types.ReplyKeyboardRemove())
+    await save_msg(msg, state)
+    await state.set_state(TourRequest.destination)
 
 @dp.message(TourRequest.destination)
 async def process_dest(message: types.Message, state: FSMContext):
