@@ -514,30 +514,29 @@ async def process_admin_date(callback_query: types.CallbackQuery, callback_data:
     selected, date = await SimpleCalendar().process_selection(callback_query, callback_data)
     
     if selected:
-        # --- ПЕРЕВІРКА ДАТИ ---
+        # 1. Перевірка на минулу дату
         today = datetime.now().date()
-        selected_date = date.date()
+        if date.date() < today:
+            await callback_query.answer("❌ Дата не може бути в минулому!", show_alert=True)
+            return # Просто зупиняємо, календар залишається на екрані
 
-        if selected_date < today:
-            # Спливаюче вікно з помилкою
-            await callback_query.answer(
-                "❌ Неможливо обрати дату в минулому!", 
-                show_alert=True
-            )
-            return  # Зупиняємо функцію, щоб адмін спробував ще раз
-        # -----------------------
-
+        # 2. Якщо дата правильна — прибираємо кнопки календаря
+        await callback_query.message.edit_reply_markup(reply_markup=None)
+        
         formatted = date.strftime("%d.%m.%Y")
         data = await state.get_data()
         client_id = data['client_id']
         username = data['client_username']
         
-        # Запис у базу даних
+        # 3. Запис у базу
         async with aiosqlite.connect("travel_bot.db") as db:
-            await db.execute("INSERT INTO feedbacks (user_id, return_date) VALUES (?, ?)", (client_id, formatted))
+            await db.execute(
+                "INSERT INTO feedbacks (user_id, return_date) VALUES (?, ?)", 
+                (client_id, formatted)
+            )
             await db.commit()
 
-        # Видалення старих повідомлень панелі адміна
+        # 4. Видалення «сміття» (повідомлень про помилки та вводу адміна)
         msgs_to_delete = data.get("msgs_to_delete", [])
         for m_id in msgs_to_delete:
             try:
@@ -545,18 +544,14 @@ async def process_admin_date(callback_query: types.CallbackQuery, callback_data:
             except Exception:
                 pass
 
-        # Прибираємо кнопки календаря, щоб не клікати двічі
-        try:
-            await callback_query.message.edit_reply_markup(reply_markup=None)
-        except Exception:
-            pass
-
-        # Фінальне повідомлення
+        # 5. Фінальне повідомлення (як msg1, msg2 у туриста)
         await callback_query.message.answer(
             f"✅ <b>Заплановано на {formatted}</b>\n"
             f"👤 Клієнт: <code>{client_id}</code> ({username})",
             parse_mode="HTML"
         )
+        
+        # Очищуємо стан, бо адмінська задача виконана
         await state.clear()
 
 # --- ТЕХНІЧНИЙ БЛОК ---
