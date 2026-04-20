@@ -171,7 +171,7 @@ async def process_dest(message: types.Message, state: FSMContext):
         "іспанія": "Іспанія", "испания": "Іспанія", "італія": "Італія", "италия": "Італія", "кіпр": "Кіпр", "кипр": "Кіпр",
         "албанія": "Албанія", "албания": "Албанія", "португалія": "Португалія", "португалия": "Португалія", "франція": "Франція", "франция": "Франція",
         "оае": "ОАЕ", "оаэ": "ОАЕ", "емираты": "ОАЕ", "емірати": "ОАЕ", "дубай": "ОАЕ (Дубай)", "дубаи": "ОАЕ (Дубай)",
-        "таїланд": "Таїланд", "таиланд": "Таїланд", "тайланд": "Таїланд", "тай": "Таїланд", "пхукет": "Таїланд (Пхукет)",
+        "таїланд": "Таїланд", "таиland": "Таїланд", "тайланд": "Таїланд", "тай": "Таїланд", "пхукет": "Таїланд (Пхукет)",
         "мальдіви": "Мальдіви", "мальдивы": "Мальдіви", "мальдиви": "Мальдіви", "домінікана": "Домінікана", "доминикана": "Домінікана",
         "занзібар": "Занзібар", "занзибар": "Занзібар", "шрі ланка": "Шрі-Ланка", "шри ланка": "Шрі-Ланка", "балі": "Балі (Індонезія)", "бали": "Балі (Індонезія)"
     }
@@ -262,13 +262,13 @@ async def process_budget(message: types.Message, state: FSMContext):
 
 @dp.message(TourRequest.contact)
 async def process_contact(message: types.Message, state: FSMContext):
+    # Додаємо останнє повідомлення користувача до списку видалення
     await save_msg(message, state)
     data = await state.get_data()
     user = message.from_user
     
-    report = (
-        f"🔥 <b>НОВА ЗАЯВКА НА ТУР!</b>\n"
-        f"━━━━━━━━━━━━━━━\n"
+    # Формуємо таблицю даних
+    info_table = (
         f"🌍 <b>Напрямок:</b> {data.get('destination')}\n"
         f"👥 <b>Склад:</b> {data.get('adults')} дор. + {data.get('children')} діт.\n"
         f"📅 <b>Дати:</b> {data.get('date_from')} - {data.get('date_to')}\n"
@@ -276,15 +276,25 @@ async def process_contact(message: types.Message, state: FSMContext):
         f"⭐ <b>Готель:</b> {data.get('stars')}\n"
         f"🍴 <b>Харчування:</b> {data.get('meals')}\n"
         f"💰 <b>Бюджет:</b> {data.get('budget')} ГРН\n"
+        f"📱 <b>Контакт:</b> {message.text}"
+    )
+
+    # Звіт для адміна
+    report = (
+        f"🔥 <b>НОВА ЗАЯВКА НА ТУР!</b>\n"
+        f"━━━━━━━━━━━━━━━\n"
+        f"{info_table}\n"
+        f"━━━━━━━━━━━━━━━\n"
         f"👤 <b>Клієнт:</b> <a href='tg://user?id={user.id}'>{user.full_name}</a>\n"
         f"🆔 <b>Username:</b> @{user.username if user.username else 'немає'}\n"
         f"🆔 <b>ID для відгуку:</b> <code>{user.id}</code>\n"
-        f"📱 <b>Контакт:</b> {message.text}\n"
         f"━━━━━━━━━━━━━━━"
     )
+    
+    # Відправка менеджеру
     await bot.send_message(ADMIN_ID, report, parse_mode="HTML")
 
-    # ВИДАЛЕННЯ ПОВІДОМЛЕНЬ ПІСЛЯ ЗАПОВНЕННЯ
+    # ВИДАЛЕННЯ ВСІХ ПОВІДОМЛЕНЬ
     msgs_to_delete = data.get("msgs_to_delete", [])
     for m_id in msgs_to_delete:
         try:
@@ -294,8 +304,15 @@ async def process_contact(message: types.Message, state: FSMContext):
 
     re_builder = ReplyKeyboardBuilder()
     re_builder.add(types.KeyboardButton(text="🔄 СТВОРИТИ НОВУ ЗАЯВКУ"))
+    
+    # Фінальне повідомлення клієнту з таблицею
     await message.answer(
-        "✅ Дякуємо! Заявку успішно відправлено!\nМи зв'яжемося з Вами найближчим часом 😊", 
+        f"✅ Дякуємо! Заявку успішно відправлено!\nМи зв'яжемося з Вами найближчим часом 😊\n\n"
+        f"<b>Деталі вашої заявки:</b>\n"
+        f"━━━━━━━━━━━━━━━\n"
+        f"{info_table}\n"
+        f"━━━━━━━━━━━━━━━", 
+        parse_mode="HTML",
         reply_markup=re_builder.as_markup(resize_keyboard=True)
     )
     await state.clear()
