@@ -542,7 +542,7 @@ async def main():
         types.BotCommand(command="start", description="🚀 Почати підбір туру"), 
         types.BotCommand(command="admin", description="🛠 Панель менеджера")
     ])
-    scheduler.add_job(check_returns, 'cron', hour=19, minute=0)
+    scheduler.add_job(check_returns, 'cron', hour=10, minute=0)
     scheduler.start()
     await dp.start_polling(bot)
 
