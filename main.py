@@ -465,23 +465,29 @@ async def admin_start(message: types.Message, state: FSMContext):
 async def process_admin_search(message: types.Message, state: FSMContext):
     await save_msg(message, state)
     input_data = message.text.strip().replace("@", "").lower()
+    
     target_id = None
     username = "не вказано"
 
     async with aiosqlite.connect("travel_bot.db") as db:
         if input_data.isdigit():
-            target_id = int(input_data)
-            async with db.execute("SELECT username FROM users WHERE user_id = ?", (target_id,)) as cursor:
+            # ШУКАЄМО ЗА ID
+            search_id = int(input_data)
+            async with db.execute("SELECT user_id, username FROM users WHERE user_id = ?", (search_id,)) as cursor:
                 row = await cursor.fetchone()
-                if row: username = f"@{row[0]}"
-        else:
-            async with db.execute("SELECT user_id FROM users WHERE username = ?", (input_data,)) as cursor:
-                row = await cursor.fetchone()
-                if row: 
+                if row:
                     target_id = row[0]
-                    username = f"@{input_data}"
+                    username = f"@{row[1]}" if row[1] else "не вказано"
+        else:
+            # ШУКАЄМО ЗА ЮЗЕРНЕЙМОМ
+            async with db.execute("SELECT user_id, username FROM users WHERE LOWER(username) = ?", (input_data,)) as cursor:
+                row = await cursor.fetchone()
+                if row:
+                    target_id = row[0]
+                    username = f"@{row[1]}"
 
-    if target_id:
+    # Тепер ця перевірка спрацює ТІЛЬКИ якщо target_id було знайдено в SELECT
+    if target_id is not None:
         await state.update_data(client_id=target_id, client_username=username)
         msg = await message.answer(
             f"✅ Клієнта знайдено:\nID: <code>{target_id}</code>\nUser: {username}\n\nТепер оберіть дату повернення:", 
@@ -491,7 +497,8 @@ async def process_admin_search(message: types.Message, state: FSMContext):
         await save_msg(msg, state)
         await state.set_state(AdminPanel.waiting_for_date)
     else:
-        msg = await message.answer("❌ Клієнта не знайдено в базі.")
+        # Якщо в базі немає такого ID або юзера
+        msg = await message.answer("❌ Клієнта не знайдено в базі. Перевірте дані та введіть ще раз:")
         await save_msg(msg, state)
 
 # ПЕРЕВІРКА КАЛЕНДАРЯ АДМІНА
