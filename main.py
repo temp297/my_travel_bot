@@ -490,7 +490,7 @@ async def process_admin_search(message: types.Message, state: FSMContext):
         calendar_kb = await SimpleCalendar().start_calendar()
         
         msg = await message.answer(
-            f"✅ Клієнта знайдено:\nID: <code>{target_id}</code>\nUser: {username}\n\nТепер оберіть дату повернення:", 
+            f"✅ Клієнта знайдено:\nID: <code>{target_id}</code>\nUser: @{user.username if user.username else 'немає'}\n\nТепер оберіть дату повернення:", 
             reply_markup=calendar_kb, # ПЕРЕВІРТЕ ЦЕЙ РЯДОК
             parse_mode="HTML"
         )
@@ -530,7 +530,7 @@ async def process_admin_date(callback_query: types.CallbackQuery, callback_data:
 
         await callback_query.message.answer(
             f"✅ <b>Заплановано на {formatted}</b>\n"
-            f"👤 Клієнт: <code>{client_id}</code> ({username})",
+            f"👤 Клієнт: <code>{client_id}</code> (@{user.username if user.username else 'немає'})",
             parse_mode="HTML"
         )
         await state.clear()
