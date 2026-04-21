@@ -76,7 +76,7 @@ async def save_user(user: types.User):
         async with aiosqlite.connect("travel_bot.db") as db:
             await db.execute(
                 "INSERT OR REPLACE INTO users (user_id, username) VALUES (?, ?)",
-                (user.id, user.username.lower())
+                (user.id, user.username)
             )
             await db.commit()
 
