@@ -530,7 +530,7 @@ async def process_admin_date(callback_query: types.CallbackQuery, callback_data:
 
         await callback_query.message.answer(
             f"✅ <b>Заплановано на {formatted}</b>\n"
-            f"👤 Клієнт: <code>{client_id}</code> ({username})",
+            f"👤 Клієнт: <code>{client_id}</code> ({user.username})",
             parse_mode="HTML"
         )
         await state.clear()
