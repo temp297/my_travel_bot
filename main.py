@@ -20,7 +20,7 @@ DATABASE_URL = "postgresql://travel_db_mfal_user:Huoul9HzfcOK6pdyIt1tTNRUtFT2S1S
 API_TOKEN = '8742210436:AAEX2p71Tpp4V1cKsm10WnPZ385ZTolRVok'
 ADMIN_ID = 7185133060
 REVIEWS_CHAT_ID = -1003818943967
-FEEDBACK_HOUR = 11  # Вкажіть годину тут
+FEEDBACK_HOUR = 10  # Вкажіть годину тут
 
 logging.basicConfig(level=logging.INFO)
 bot = Bot(token=API_TOKEN)
