@@ -428,7 +428,6 @@ async def process_feedback_text(message: types.Message, state: FSMContext):
     feedback_header = (
         f"🌟 <b>НОВИЙ ВІДГУК!</b>\n"
         f"👤 <b>Від:</b> {user.full_name}\n"
-        f"🆔 <b>ID:</b> <code>{user.id}</code>\n"
         f"📱 <b>Username:</b> @{user.username if user.username else 'немає'}\n"
         f"⭐ <b>Оцінка:</b> {rating}⭐\n"
         f"━━━━━━━━━━━━━━━"
