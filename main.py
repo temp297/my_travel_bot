@@ -568,7 +568,7 @@ async def list_users(message: types.Message):
     if not rows:
         return await message.answer("База даних поки порожня.")
     
-    text = "👥 <b>Список клієнтів:</b>\n"
+    text = "👥 <b>Список туристів:</b>\n"
     text += "━━━━━━━━━━━━━━━\n"
     for row in rows:
         username = f"@{row['username']}" if row['username'] else "немає"
@@ -591,7 +591,7 @@ async def main():
     await bot.set_my_commands([
         types.BotCommand(command="start", description="🚀 Почати підбір туру"), 
         types.BotCommand(command="admin", description="🛠 Панель менеджера"),
-        types.BotCommand(command="users", description="👥 Список клієнтів")
+        types.BotCommand(command="users", description="👥 Список туристів")
     ])
     scheduler.add_job(check_returns, 'cron', hour=FEEDBACK_HOUR, minute=0)
     scheduler.start()
