@@ -1,7 +1,7 @@
 import asyncio
 import logging
 import os
-import aiosqlite
+import asyncpg
 import pytz
 import random
 from datetime import datetime
@@ -14,6 +14,7 @@ from aiogram.utils.keyboard import ReplyKeyboardBuilder, InlineKeyboardBuilder
 from aiogram_calendar import SimpleCalendar, SimpleCalendarCallback
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from aiogram.exceptions import TelegramBadRequest
+DATABASE_URL = "postgresql://travel_db_mfal_user:Huoul9HzfcOK6pdyIt1tTNRUtFT2S1Ss@dpg-d7k8pse8bjmc73fcflb0-a/travel_db_mfal"
 
 # --- НАЛАШТУВАННЯ ---
 API_TOKEN = '8742210436:AAEX2p71Tpp4V1cKsm10WnPZ385ZTolRVok'
@@ -60,49 +61,50 @@ async def save_msg(message: types.Message, state: FSMContext):
 
 # --- БАЗА ДАНИХ ТА ПЛАНУВАЛЬНИК ---
 async def init_db():
-    async with aiosqlite.connect("travel_bot.db") as db:
-        await db.execute("""
-            CREATE TABLE IF NOT EXISTS feedbacks (
-                user_id INTEGER,
-                return_date TEXT,
-                sent INTEGER DEFAULT 0
-            )
-        """)
-        await db.execute("""
-            CREATE TABLE IF NOT EXISTS users (
-                user_id INTEGER PRIMARY KEY,
-                username TEXT
-            )
-        """)
-        await db.commit()
+    conn = await asyncpg.connect(DATABASE_URL)
+    await conn.execute("""
+        CREATE TABLE IF NOT EXISTS feedbacks (
+            user_id BIGINT,
+            return_date TEXT,
+            sent INTEGER DEFAULT 0
+        )
+    """)
+    await conn.execute("""
+        CREATE TABLE IF NOT EXISTS users (
+            user_id BIGINT PRIMARY KEY,
+            username TEXT
+        )
+    """)
+    await conn.close()
 
 async def save_user(user: types.User):
-    if user.username:
-        async with aiosqlite.connect("travel_bot.db") as db:
-            await db.execute(
-                "INSERT OR REPLACE INTO users (user_id, username) VALUES (?, ?)",
-                (user.id, user.username)
-            )
-            await db.commit()
+    conn = await asyncpg.connect(DATABASE_URL)
+    # Тепер записуємо всіх, навіть якщо username порожній
+    await conn.execute(
+        "INSERT INTO users (user_id, username) VALUES ($1, $2) "
+        "ON CONFLICT (user_id) DO UPDATE SET username = EXCLUDED.username",
+        user.id, user.username
+    )
+    await conn.close()
 
 async def check_returns():
     today = datetime.now(pytz.timezone('Europe/Kyiv')).strftime("%d.%m.%Y")
-    async with aiosqlite.connect("travel_bot.db") as db:
-        async with db.execute("SELECT user_id FROM feedbacks WHERE return_date = ? AND sent = 0", (today,)) as cursor:
-            users = await cursor.fetchall()
-            for row in users:
-                user_id = row[0]
-                try:
-                    await bot.send_message(
-                        user_id,
-                        "✈️ З поверненням! Сподіваємося, Ваш відпочинок був чудовим.\n\n"
-                        "Будь ласка, оцініть нашу роботу:",
-                        reply_markup=rating_kb()
-                    )
-                    await db.execute("UPDATE feedbacks SET sent = 1 WHERE user_id = ?", (user_id,))
-                except Exception as e:
-                    logging.error(f"Error: {e}")
-        await db.commit()
+    conn = await asyncpg.connect(DATABASE_URL)
+    users = await conn.fetch("SELECT user_id FROM feedbacks WHERE return_date = $1 AND sent = 0", today)
+    
+    for row in users:
+        user_id = row['user_id']
+        try:
+            await bot.send_message(
+                user_id,
+                "✈️ З поверненням! Сподіваємося, Ваш відпочинок був чудовим.\n\n"
+                "Будь ласка, оцініть нашу роботу:",
+                reply_markup=rating_kb()
+            )
+            await conn.execute("UPDATE feedbacks SET sent = 1 WHERE user_id = $1", user_id)
+        except Exception as e:
+            logging.error(f"Error: {e}")
+    await conn.close()
 
 # --- КЛАВІАТУРИ ---
 def start_inline_kb():
@@ -469,62 +471,59 @@ async def admin_start(message: types.Message, state: FSMContext):
 async def process_admin_search(message: types.Message, state: FSMContext):
     await save_msg(message, state)
     input_data = message.text.strip().replace("@", "").lower()
-    
     target_id = None
-    username = "не вказано"
+    username = "невідомий"
 
-    async with aiosqlite.connect("travel_bot.db") as db:
-        if input_data.isdigit():
-            async with db.execute("SELECT user_id, username FROM users WHERE user_id = ?", (int(input_data),)) as cursor:
-                row = await cursor.fetchone()
-                if row:
-                    target_id, row_username = row
-                    username = f"@{row_username}" if row_username else "не вказано"
+    conn = await asyncpg.connect(DATABASE_URL)
+    
+    if input_data.isdigit():
+        row = await conn.fetchrow("SELECT user_id, username FROM users WHERE user_id = $1", int(input_data))
+        if row:
+            target_id = row['user_id']
+            username = f"@{row['username']}" if row['username'] else "без юзернейму"
         else:
-            async with db.execute("SELECT user_id, username FROM users WHERE LOWER(username) = ?", (input_data,)) as cursor:
-                row = await cursor.fetchone()
-                if row:
-                    target_id, row_username = row
-                    username = f"@{row_username}" if row_username else f"@{input_data}"
+            target_id = int(input_data)
+            username = "Введено вручну (ID)"
+    else:
+        row = await conn.fetchrow("SELECT user_id, username FROM users WHERE LOWER(username) = $1", input_data)
+        if row:
+            target_id = row['user_id']
+            username = f"@{row['username']}"
 
-    if target_id is not None:
+    await conn.close()
+
+    if target_id:
+        # ОБОВ'ЯЗКОВО зберігаємо дані в state
         await state.update_data(client_id=target_id, client_username=username)
         
-        # Створюємо клавіатуру календаря
         calendar_kb = await SimpleCalendar().start_calendar()
-        
         msg = await message.answer(
             f"✅ Клієнта знайдено:\nID: <code>{target_id}</code>\nUser: {username}\n\nТепер оберіть дату повернення:", 
-            reply_markup=calendar_kb, # ПЕРЕВІРТЕ ЦЕЙ РЯДОК
+            reply_markup=calendar_kb,
             parse_mode="HTML"
         )
         await save_msg(msg, state)
         await state.set_state(AdminPanel.waiting_for_date)
     else:
-        msg = await message.answer("❌ Клієнта не знайдено. Спробуйте ще раз:")
+        msg = await message.answer("❌ Клієнта не знайдено в базі і введений текст не є ID. Спробуйте ще раз:")
         await save_msg(msg, state)
 
-# ПЕРЕВІРКА КАЛЕНДАРЯ АДМІНА
-@dp.message(AdminPanel.waiting_for_date)
-async def check_admin_date_input(message: types.Message, state: FSMContext):
-    await save_msg(message, state)
-    msg = await message.answer("⚠️ Будь ласка, оберіть дату повернення на календарі вище.")
-    await save_msg(msg, state)
-
+# ОБРОБКА ВИБОРУ ДАТИ В АДМІНЦІ
 @dp.callback_query(SimpleCalendarCallback.filter(), AdminPanel.waiting_for_date)
 async def process_admin_date(callback_query: types.CallbackQuery, callback_data: SimpleCalendarCallback, state: FSMContext):
     selected, date = await SimpleCalendar().process_selection(callback_query, callback_data)
     if selected:
         formatted = date.strftime("%d.%m.%Y")
         data = await state.get_data()
-        client_id = data['client_id']
-        username = data['client_username']
+        client_id = data.get('client_id')
+        username = data.get('client_username')
         
-        async with aiosqlite.connect("travel_bot.db") as db:
-            await db.execute("INSERT INTO feedbacks (user_id, return_date) VALUES (?, ?)", (client_id, formatted))
-            await db.commit()
+        # Записуємо в PostgreSQL
+        conn = await asyncpg.connect(DATABASE_URL)
+        await conn.execute("INSERT INTO feedbacks (user_id, return_date) VALUES ($1, $2)", client_id, formatted)
+        await conn.close()
 
-        # ВИДАЛЕННЯ ПОВІДОМЛЕНЬ ПІСЛЯ ВИБОРУ ДАТИ
+        # Видалення повідомлень
         msgs_to_delete = data.get("msgs_to_delete", [])
         for m_id in msgs_to_delete:
             try:
@@ -536,7 +535,7 @@ async def process_admin_date(callback_query: types.CallbackQuery, callback_data:
             f"✅ <b>Запит на відгук заплановано!</b>\n"
             f"━━━━━━━━━━━━━━━\n"
             f"📅 <b>Дата:</b> {formatted}\n"
-            f"⏰ <b>Час:</b> {FEEDBACK_HOUR}:00 (за Києвом 🇺🇦)\n"
+            f"⏰ <b>Час:</b> {FEEDBACK_HOUR}:00\n"
             f"👤 <b>Клієнт:</b> {username} (<code>{client_id}</code>)\n"
             f"━━━━━━━━━━━━━━━",
             parse_mode="HTML"
