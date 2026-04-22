@@ -19,6 +19,7 @@ from aiogram.exceptions import TelegramBadRequest
 API_TOKEN = '8742210436:AAEX2p71Tpp4V1cKsm10WnPZ385ZTolRVok'
 ADMIN_ID = 7185133060
 REVIEWS_CHAT_ID = -1003818943967
+FEEDBACK_HOUR = 10  # Вкажіть годину тут
 
 logging.basicConfig(level=logging.INFO)
 bot = Bot(token=API_TOKEN)
@@ -536,7 +537,7 @@ async def process_admin_date(callback_query: types.CallbackQuery, callback_data:
             f"✅ <b>Запит на відгук заплановано!</b>\n"
             f"━━━━━━━━━━━━━━━\n"
             f"📅 <b>Дата:</b> {formatted}\n"
-            f"⏰ <b>Час:</b> 10:00 (за Києвом 🇺🇦)\n"
+            f"⏰ <b>Час:</b> {FEEDBACK_HOUR}:00 (за Києвом 🇺🇦)\n"
             f"👤 <b>Клієнт:</b> {username} (<code>{client_id}</code>)\n"
             f"━━━━━━━━━━━━━━━",
             parse_mode="HTML"
@@ -558,7 +559,7 @@ async def main():
         types.BotCommand(command="start", description="🚀 Почати підбір туру"), 
         types.BotCommand(command="admin", description="🛠 Панель менеджера")
     ])
-    scheduler.add_job(check_returns, 'cron', hour=10, minute=0)
+    scheduler.add_job(check_returns, 'cron', hour=FEEDBACK_HOUR, minute=0)
     scheduler.start()
     await dp.start_polling(bot)
 
