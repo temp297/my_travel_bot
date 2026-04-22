@@ -572,7 +572,8 @@ async def main():
     await web.TCPSite(runner, "0.0.0.0", int(os.environ.get("PORT", 8080))).start()
     await bot.set_my_commands([
         types.BotCommand(command="start", description="🚀 Почати підбір туру"), 
-        types.BotCommand(command="admin", description="🛠 Панель менеджера")
+        types.BotCommand(command="admin", description="🛠 Панель менеджера"),
+        types.BotCommand(command="users", description="👥 Список клієнтів")
     ])
     scheduler.add_job(check_returns, 'cron', hour=FEEDBACK_HOUR, minute=0)
     scheduler.start()
