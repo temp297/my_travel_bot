@@ -23,7 +23,10 @@ REVIEWS_CHAT_ID = -1003818943967
 logging.basicConfig(level=logging.INFO)
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher()
-scheduler = AsyncIOScheduler()
+# Спочатку створюємо об'єкт часового поясу
+ukraine_tz = pytz.timezone('Europe/Kyiv')
+# Передаємо його в планувальник
+scheduler = AsyncIOScheduler(timezone=ukraine_tz)
 
 # --- СТАНИ ---
 class TourRequest(StatesGroup):
