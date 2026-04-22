@@ -569,7 +569,7 @@ async def list_users(message: types.Message):
         return await message.answer("База даних поки порожня.")
     
     text = "👥 <b>Список клієнтів:</b>\n"
-    f"━━━━━━━━━━━━━━━\n"
+    text += "━━━━━━━━━━━━━━━\n"
     for row in rows:
         username = f"@{row['username']}" if row['username'] else "немає"
         name = row['full_name'] if row['full_name'] else "Ім'я не вказано"
