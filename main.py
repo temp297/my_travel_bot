@@ -542,6 +542,23 @@ async def process_admin_date(callback_query: types.CallbackQuery, callback_data:
         )
         await state.clear()
 
+# --- ПЕРЕГЛЯД БАЗИ КОРИСТУВАЧІВ (ВСТАВЛЯТИ СЮДИ) ---
+
+@dp.message(Command("users"), F.from_user.id == ADMIN_ID)
+async def list_users(message: types.Message):
+    conn = await asyncpg.connect(DATABASE_URL)
+    rows = await conn.fetch("SELECT user_id, username FROM users")
+    await conn.close()
+    
+    if not rows:
+        return await message.answer("База даних поки порожня.")
+    
+    text = "👥 <b>Список клієнтів:</b>\n\n"
+    for row in rows:
+        username = f"@{row['username']}" if row['username'] else "немає"
+        text += f"ID: <code>{row['user_id']}</code> — {username}\n"
+    
+    await message.answer(text, parse_mode="HTML")
 
 # --- ТЕХНІЧНИЙ БЛОК ---
 async def handle(request): return web.Response(text="Live")
