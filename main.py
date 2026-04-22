@@ -159,7 +159,6 @@ def meals_kb():
 async def cmd_start(message: types.Message, state: FSMContext):
     await save_user(message.from_user)
     await state.clear()
-    # Надсилаємо Inline-кнопку замість звичайної
     msg = await message.answer(
         f"👋 Вітаю, {message.from_user.first_name}!\nЯ допоможу Вам підібрати ідеальний тур. Натисніть кнопку нижче:", 
         reply_markup=start_inline_kb()
@@ -168,9 +167,21 @@ async def cmd_start(message: types.Message, state: FSMContext):
     await save_msg(msg, state)
     await state.set_state(TourRequest.start_confirmed)
 
-# ПЕРЕВІРКА: якщо користувач замість кнопки ввів текст "123" або інший
+# ТЕПЕР CANCEL ЙДЕ ОДРАЗУ ПІСЛЯ START
+@dp.message(Command("cancel"))
+async def cmd_cancel(message: types.Message, state: FSMContext):
+    await state.clear()
+    await message.answer(
+        "❌ Дія скасована. Тепер ви можете вільно користуватися іншими командами.", 
+        reply_markup=types.ReplyKeyboardRemove()
+    )
+
+# ТЕПЕР ПЕРЕВІРКА ТЕКСТУ (вона не перехопить /cancel, бо він вище)
 @dp.message(TourRequest.start_confirmed)
 async def check_start_input(message: types.Message, state: FSMContext):
+    # Додамо перевірку, щоб команди випадково не потрапляли сюди
+    if message.text and message.text.startswith("/"):
+        return 
     await save_msg(message, state)
     msg = await message.answer("⚠️ Будь ласка, натисніть на кнопку «🚀 ПОЧАТИ ПІДБІР ТУРУ»")
     await save_msg(msg, state)
@@ -591,7 +602,8 @@ async def main():
     await bot.set_my_commands([
         types.BotCommand(command="start", description="🚀 Почати підбір туру"), 
         types.BotCommand(command="admin", description="🛠 Панель менеджера"),
-        types.BotCommand(command="users", description="👥 Список туристів")
+        types.BotCommand(command="users", description="👥 Список туристів"),
+        types.BotCommand(command="cancel", description="❌ Скасувати дію")
     ])
     scheduler.add_job(check_returns, 'cron', hour=FEEDBACK_HOUR, minute=0)
     scheduler.start()
