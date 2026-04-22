@@ -2,6 +2,7 @@ import asyncio
 import logging
 import os
 import aiosqlite
+import pytz
 import random
 from datetime import datetime
 from aiohttp import web
@@ -81,7 +82,7 @@ async def save_user(user: types.User):
             await db.commit()
 
 async def check_returns():
-    today = datetime.now().strftime("%d.%m.%Y")
+    today = datetime.now(pytz.timezone('Europe/Kyiv')).strftime("%d.%m.%Y")
     async with aiosqlite.connect("travel_bot.db") as db:
         async with db.execute("SELECT user_id FROM feedbacks WHERE return_date = ? AND sent = 0", (today,)) as cursor:
             users = await cursor.fetchall()
@@ -529,8 +530,12 @@ async def process_admin_date(callback_query: types.CallbackQuery, callback_data:
                 pass
 
         await callback_query.message.answer(
-            f"✅ <b>Заплановано на {formatted}</b>\n"
-            f"👤 Клієнт: <code>{client_id}</code> ({username})",
+            f"✅ <b>Запит на відгук заплановано!</b>\n"
+            f"━━━━━━━━━━━━━━━\n"
+            f"📅 <b>Дата:</b> {formatted}\n"
+            f"⏰ <b>Час:</b> 10:00 (за Києвом 🇺🇦)\n"
+            f"👤 <b>Клієнт:</b> {username} (<code>{client_id}</code>)\n"
+            f"━━━━━━━━━━━━━━━",
             parse_mode="HTML"
         )
         await state.clear()
