@@ -62,28 +62,29 @@ async def save_msg(message: types.Message, state: FSMContext):
 # --- БАЗА ДАНИХ ТА ПЛАНУВАЛЬНИК ---
 async def init_db():
     conn = await asyncpg.connect(DATABASE_URL)
-    await conn.execute("""
-        CREATE TABLE IF NOT EXISTS feedbacks (
-            user_id BIGINT,
-            return_date TEXT,
-            sent INTEGER DEFAULT 0
-        )
-    """)
+    # ... (код для таблиці feedbacks)
     await conn.execute("""
         CREATE TABLE IF NOT EXISTS users (
             user_id BIGINT PRIMARY KEY,
-            username TEXT
+            username TEXT,
+            full_name TEXT
         )
     """)
+    # Якщо таблиця вже існує, додаємо колонку вручну (про всяк випадок)
+    try:
+        await conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS full_name TEXT")
+    except:
+        pass
     await conn.close()
 
 async def save_user(user: types.User):
     conn = await asyncpg.connect(DATABASE_URL)
-    # Тепер записуємо всіх, навіть якщо username порожній
+    # Додаємо обробку поля full_name
     await conn.execute(
-        "INSERT INTO users (user_id, username) VALUES ($1, $2) "
-        "ON CONFLICT (user_id) DO UPDATE SET username = EXCLUDED.username",
-        user.id, user.username
+        "INSERT INTO users (user_id, username, full_name) VALUES ($1, $2, $3) "
+        "ON CONFLICT (user_id) DO UPDATE SET "
+        "username = EXCLUDED.username, full_name = EXCLUDED.full_name",
+        user.id, user.username, user.full_name
     )
     await conn.close()
 
@@ -547,7 +548,8 @@ async def process_admin_date(callback_query: types.CallbackQuery, callback_data:
 @dp.message(Command("users"), F.from_user.id == ADMIN_ID)
 async def list_users(message: types.Message):
     conn = await asyncpg.connect(DATABASE_URL)
-    rows = await conn.fetch("SELECT user_id, username FROM users")
+    # Додаємо full_name у запит SELECT
+    rows = await conn.fetch("SELECT user_id, username, full_name FROM users")
     await conn.close()
     
     if not rows:
@@ -556,7 +558,9 @@ async def list_users(message: types.Message):
     text = "👥 <b>Список клієнтів:</b>\n\n"
     for row in rows:
         username = f"@{row['username']}" if row['username'] else "немає"
-        text += f"ID: <code>{row['user_id']}</code> — {username}\n"
+        name = row['full_name'] if row['full_name'] else "Ім'я не вказано"
+        # Форматуємо рядок: Ім'я — Юзернейм (ID)
+        text += f"👤 <b>{name}</b> — {username} (<code>{row['user_id']}</code>)\n"
     
     await message.answer(text, parse_mode="HTML")
 
