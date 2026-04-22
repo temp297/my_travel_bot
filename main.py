@@ -62,7 +62,17 @@ async def save_msg(message: types.Message, state: FSMContext):
 # --- БАЗА ДАНИХ ТА ПЛАНУВАЛЬНИК ---
 async def init_db():
     conn = await asyncpg.connect(DATABASE_URL)
-    # ... (код для таблиці feedbacks)
+    
+    # 1. Створюємо таблицю для відгуків (це те, що було пропущено)
+    await conn.execute("""
+        CREATE TABLE IF NOT EXISTS feedbacks (
+            user_id BIGINT,
+            return_date TEXT,
+            sent INTEGER DEFAULT 0
+        )
+    """)
+    
+    # 2. Створюємо таблицю користувачів з полем full_name
     await conn.execute("""
         CREATE TABLE IF NOT EXISTS users (
             user_id BIGINT PRIMARY KEY,
@@ -70,16 +80,18 @@ async def init_db():
             full_name TEXT
         )
     """)
-    # Якщо таблиця вже існує, додаємо колонку вручну (про всяк випадок)
+    
+    # 3. Перевірка на випадок, якщо таблиця users вже була створена раніше без full_name
     try:
         await conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS full_name TEXT")
-    except:
-        pass
+    except Exception as e:
+        logging.info(f"Колонка full_name вже існує або сталася помилка: {e}")
+        
     await conn.close()
 
 async def save_user(user: types.User):
     conn = await asyncpg.connect(DATABASE_URL)
-    # Додаємо обробку поля full_name
+    # Зберігаємо або оновлюємо дані користувача (ID, Username, Full Name)
     await conn.execute(
         "INSERT INTO users (user_id, username, full_name) VALUES ($1, $2, $3) "
         "ON CONFLICT (user_id) DO UPDATE SET "
@@ -89,6 +101,7 @@ async def save_user(user: types.User):
     await conn.close()
 
 async def check_returns():
+    # Ця функція у вас була правильною, залишаємо як є
     today = datetime.now(pytz.timezone('Europe/Kyiv')).strftime("%d.%m.%Y")
     conn = await asyncpg.connect(DATABASE_URL)
     users = await conn.fetch("SELECT user_id FROM feedbacks WHERE return_date = $1 AND sent = 0", today)
@@ -104,7 +117,7 @@ async def check_returns():
             )
             await conn.execute("UPDATE feedbacks SET sent = 1 WHERE user_id = $1", user_id)
         except Exception as e:
-            logging.error(f"Error: {e}")
+            logging.error(f"Error sending feedback request: {e}")
     await conn.close()
 
 # --- КЛАВІАТУРИ ---
