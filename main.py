@@ -74,24 +74,24 @@ async def init_db():
     pool = await asyncpg.create_pool(DATABASE_URL)
     async with pool.acquire() as conn:
         await conn.execute("""
-            CREATE TABLE IF NOT EXISTS discounts (
-                user_id BIGINT PRIMARY KEY,
-                discount_value INTEGER,
-                is_used BOOLEAN DEFAULT FALSE
+        CREATE TABLE IF NOT EXISTS discounts (
+            user_id BIGINT PRIMARY KEY,
+            discount_value INTEGER,
+            is_used BOOLEAN DEFAULT FALSE
             )
         """)
         await conn.execute("""
-            CREATE TABLE IF NOT EXISTS feedbacks (
-                user_id BIGINT,
-                return_date TEXT,
-                sent INTEGER DEFAULT 0
+        CREATE TABLE IF NOT EXISTS feedbacks (
+            user_id BIGINT,
+            return_date TEXT,
+            sent INTEGER DEFAULT 0
             )
         """)
         await conn.execute("""
-            CREATE TABLE IF NOT EXISTS users (
-                user_id BIGINT PRIMARY KEY,
-                username TEXT,
-                full_name TEXT
+        CREATE TABLE IF NOT EXISTS users (
+            user_id BIGINT PRIMARY KEY,
+            username TEXT,
+            full_name TEXT
             )
         """)
         try:
@@ -102,42 +102,42 @@ async def init_db():
 async def save_user(user: types.User):
     async with pool.acquire() as conn:
         await conn.execute(
-            "INSERT INTO users (user_id, username, full_name) VALUES ($1, $2, $3) "
-            "ON CONFLICT (user_id) DO UPDATE SET "
-            "username = EXCLUDED.username, full_name = EXCLUDED.full_name",
-            user.id, user.username, user.full_name
+        "INSERT INTO users (user_id, username, full_name) VALUES ($1, $2, $3) "
+        "ON CONFLICT (user_id) DO UPDATE SET "
+        "username = EXCLUDED.username, full_name = EXCLUDED.full_name",
+        user.id, user.username, user.full_name
         )
 
 async def get_user_discount(user_id: int):
     async with pool.acquire() as conn:
         return await conn.fetchrow(
-            "SELECT discount_value FROM discounts WHERE user_id = $1 AND is_used = FALSE", 
-            user_id
+        "SELECT discount_value FROM discounts WHERE user_id = $1 AND is_used = FALSE", 
+        user_id
         )
 
 async def check_returns():
     today = datetime.now(pytz.timezone('Europe/Kyiv')).strftime("%d.%m.%Y")
     async with pool.acquire() as conn:
         rows = await conn.fetch(
-            "SELECT id, user_id FROM feedbacks WHERE return_date = $1 AND sent = 0", 
-            today
+        "SELECT id, user_id FROM feedbacks WHERE return_date = $1 AND sent = 0", 
+        today
         )
         for row in rows:
             record_id = row['id']
             user_id = row['user_id']
-            try:
-                await bot.send_message(
-                    user_id,
-                    "✈️ З поверненням! Сподіваємося, Ваш відпочинок був чудовим.\n\nБудь ласка, оцініть нашу роботу:",
-                    reply_markup=rating_kb()
-                )
-                await conn.execute("UPDATE feedbacks SET sent = 1 WHERE id = $1", record_id)
-                await asyncio.sleep(0.05)
-            except TelegramForbidden:
-                logging.warning(f"Користувач {user_id} заблокував бота.")
-                await conn.execute("DELETE FROM feedbacks WHERE id = $1", record_id)
-            except Exception as e:
-                logging.error(f"Помилка при надсиланні відгуку {user_id}: {e}")
+        try:
+            await bot.send_message(
+                user_id,
+                "✈️ З поверненням! Сподіваємося, Ваш відпочинок був чудовим.\n\nБудь ласка, оцініть нашу роботу:",
+                reply_markup=rating_kb()
+            )
+            await conn.execute("UPDATE feedbacks SET sent = 1 WHERE id = $1", record_id)
+            await asyncio.sleep(0.05)
+        except TelegramForbidden:
+            logging.warning(f"Користувач {user_id} заблокував бота.")
+            await conn.execute("DELETE FROM feedbacks WHERE id = $1", record_id)
+        except Exception as e:
+            logging.error(f"Помилка при надсиланні відгуку {user_id}: {e}")
 
 # КЛАВІАТУРИ
 def start_inline_kb():
@@ -155,8 +155,8 @@ def rating_kb():
 def stars_kb():
     builder = InlineKeyboardBuilder()
     builder.add(types.InlineKeyboardButton(text="3*", callback_data="star_3"),
-                types.InlineKeyboardButton(text="4*", callback_data="star_4"),
-                types.InlineKeyboardButton(text="5*", callback_data="star_5"))
+            types.InlineKeyboardButton(text="4*", callback_data="star_4"),
+            types.InlineKeyboardButton(text="5*", callback_data="star_5"))
     builder.add(types.InlineKeyboardButton(text="Будь-яка", callback_data="star_any"))
     builder.adjust(3, 1)
     return builder.as_markup()
@@ -164,10 +164,10 @@ def stars_kb():
 def meals_kb():
     builder = InlineKeyboardBuilder()
     builder.add(types.InlineKeyboardButton(text="Сніданки (BB)", callback_data="meal_BB"),
-                types.InlineKeyboardButton(text="Сніданок+вечеря (HB)", callback_data="meal_HB"),
-                types.InlineKeyboardButton(text="Все включено (AI)", callback_data="meal_AI"),
-                types.InlineKeyboardButton(text="Ультра все включено (UAI)", callback_data="meal_UAI"),
-                types.InlineKeyboardButton(text="Без харчування (RO)", callback_data="meal_RO"))
+            types.InlineKeyboardButton(text="Сніданок+вечеря (HB)", callback_data="meal_HB"),
+            types.InlineKeyboardButton(text="Все включено (AI)", callback_data="meal_AI"),
+            types.InlineKeyboardButton(text="Ультра все включено (UAI)", callback_data="meal_UAI"),
+            types.InlineKeyboardButton(text="Без харчування (RO)", callback_data="meal_RO"))
     builder.adjust(1)
     return builder.as_markup()
 
@@ -185,13 +185,10 @@ def generate_discount():
 async def cmd_start(message: types.Message, state: FSMContext, command: CommandObject):
     args = command.args
     user_id = message.from_user.id
-
     await save_user(message.from_user)
     await state.clear()
-
     if args == "discount":
         discount = generate_discount()
-
         async with pool.acquire() as conn:
             await conn.execute("""
                 INSERT INTO discounts (user_id, discount_value, is_used) 
@@ -199,11 +196,9 @@ async def cmd_start(message: types.Message, state: FSMContext, command: CommandO
                 ON CONFLICT (user_id) DO UPDATE 
                 SET discount_value = EXCLUDED.discount_value, is_used = FALSE
             """, user_id, discount)
-
         await message.answer(f"Вітаємо! Ви активували знижку {discount}%. Давайте підберемо вам тур.")
     else:
         await message.answer(f"Вітаємо, {message.from_user.first_name}! Я допоможу вам підібрати тур.")
-
     msg = await message.answer(
         "Натисніть кнопку нижче, щоб розпочати:", 
         reply_markup=start_inline_kb()
@@ -216,8 +211,8 @@ async def cmd_start(message: types.Message, state: FSMContext, command: CommandO
 async def cmd_cancel(message: types.Message, state: FSMContext):
     await state.clear()
     await message.answer(
-        "❌ Дія скасована. Тепер ви можете вільно користуватися іншими командами.", 
-        reply_markup=types.ReplyKeyboardRemove()
+    "❌ Дія скасована. Тепер ви можете вільно користуватися іншими командами.", 
+    reply_markup=types.ReplyKeyboardRemove()
     )
 
 @dp.message(TourRequest.start_confirmed)
@@ -244,23 +239,23 @@ async def process_dest(message: types.Message, state: FSMContext):
         await save_msg(msg, state)
         return
     replacements = {
-        "турция": "Туреччина", "туреччина": "Туреччина", "турція": "Туреччина", "анталія": "Туреччина (Анталія)", "анталия": "Туреччина (Анталія)", "кемер": "Туреччина (Кемер)", "аланія": "Туреччина (Аланія)", "белек": "Туреччина (Белек)",
-        "египет": "Єгипет", "єгипет": "Єгипет", "егіпет": "Єгипет", "єгіпет": "Єгипет", "египт": "Єгипет", "єгіпєт": "Єгипет", "егіпєт": "Єгипет", "шарм": "Єгипет (Шарм-ель-Шейх)", "хургада": "Єгипет (Хургада)", "марса": "Єгипет (Марса-Алам)",
-        "болгарія": "Болгарія", "болгария": "Болгарія", "греція": "Греція", "греция": "Греція", "крит": "Греція (Крит)",
-        "чорногорія": "Чорногорія", "черногория": "Чорногорія", "хорватія": "Хорватія", "хорватия": "Хорватія",
-        "іспанія": "Іспанія", "испания": "Іспанія", "італія": "Італія", "италия": "Італія", "кіпр": "Кіпр", "кипр": "Кіпр",
-        "албанія": "Албанія", "албания": "Албанія", "португалія": "Португалія", "португалия": "Португалія", "франція": "Франція", "франция": "Франція",
-        "оае": "ОАЕ", "оаэ": "ОАЕ", "емираты": "ОАЕ", "емірати": "ОАЕ", "дубай": "ОАЕ (Дубай)", "дубаи": "ОАЕ (Дубай)",
-        "таїланд": "Таїланд", "thailand": "Таїланд", "тайланд": "Таїланд", "тай": "Таїланд", "пхукет": "Таїланд (Пхукет)",
-        "мальдіви": "Мальдіви", "мальдивы": "Мальдіви", "мальдиви": "Мальдіви", "домінікана": "Домінікана", "доминикана": "Домінікана",
-        "занзібар": "Занзібар", "занзибар": "Занзібар", "шрі ланка": "Шрі-Ланка", "шри ланка": "Шрі-Ланка", "балі": "Балі (Індонезія)", "бали": "Балі (Індонезія)"
+    "турция": "Туреччина", "туреччина": "Туреччина", "турція": "Туреччина", "анталія": "Туреччина (Анталія)", "анталия": "Туреччина (Анталія)", "кемер": "Туреччина (Кемер)", "аланія": "Туреччина (Аланія)", "белек": "Туреччина (Белек)",
+    "египет": "Єгипет", "єгипет": "Єгипет", "егіпет": "Єгипет", "єгіпет": "Єгипет", "египт": "Єгипет", "єгіпєт": "Єгипет", "егіпєт": "Єгипет", "шарм": "Єгипет (Шарм-ель-Шейх)", "хургада": "Єгипет (Хургада)", "марса": "Єгипет (Марса-Алам)",
+    "болгарія": "Болгарія", "болгария": "Болгарія", "греція": "Греція", "греция": "Греція", "крит": "Греція (Крит)",
+    "чорногорія": "Чорногорія", "черногория": "Чорногорія", "хорватія": "Хорватія", "хорватия": "Хорватія",
+    "іспанія": "Іспанія", "испания": "Іспанія", "італія": "Італія", "италия": "Італія", "кіпр": "Кіпр", "кипр": "Кіпр",
+    "албанія": "Албанія", "албания": "Албанія", "португалія": "Португалія", "португалия": "Португалія", "франція": "Франція", "франция": "Франція",
+    "оае": "ОАЕ", "оаэ": "ОАЕ", "емираты": "ОАЕ", "емірати": "ОАЕ", "дубай": "ОАЕ (Дубай)", "дубаи": "ОАЕ (Дубай)",
+    "таїланд": "Таїланд", "thailand": "Таїланд", "тайланд": "Таїланд", "тай": "Таїланд", "пхукет": "Таїланд (Пхукет)",
+    "мальдіви": "Мальдіви", "мальдивы": "Мальдіви", "мальдиви": "Мальдіви", "домінікана": "Домінікана", "доминикана": "Домінікана",
+    "занзібар": "Занзібар", "занзибар": "Занзібар", "шрі ланка": "Шрі-Ланка", "шри ланка": "Шрі-Ланка", "балі": "Балі (Індонезія)", "бали": "Балі (Індонезія)"
     }
     final_destination = replacements.get(text, message.text.strip().capitalize())
     await state.update_data(destination=final_destination)
     builder = InlineKeyboardBuilder()
     builder.add(types.InlineKeyboardButton(text="1", callback_data="adults_1"),
-                types.InlineKeyboardButton(text="2", callback_data="adults_2"),
-                types.InlineKeyboardButton(text="3+", callback_data="adults_3+"))
+        types.InlineKeyboardButton(text="2", callback_data="adults_2"),
+        types.InlineKeyboardButton(text="3+", callback_data="adults_3+"))
     msg1 = await message.answer(f"✅ Напрямок: {final_destination}")
     msg2 = await message.answer(f"👤 Оберіть кількість дорослих:", reply_markup=builder.as_markup())
     await save_msg(msg1, state)
@@ -281,8 +276,8 @@ async def process_adults(callback_query: types.CallbackQuery, state: FSMContext)
     builder = InlineKeyboardBuilder()
     builder.add(types.InlineKeyboardButton(text="Без дітей (0)", callback_data="child_0"))
     builder.add(types.InlineKeyboardButton(text="1", callback_data="child_1"),
-                types.InlineKeyboardButton(text="2", callback_data="child_2"),
-                types.InlineKeyboardButton(text="3+", callback_data="child_3"))
+        types.InlineKeyboardButton(text="2", callback_data="child_2"),
+        types.InlineKeyboardButton(text="3+", callback_data="child_3"))
     builder.adjust(1, 3)
     msg1 = await callback_query.message.answer(f"👤 Дорослих: {count}")
     msg2 = await callback_query.message.answer(f"👶 Скільки буде дітей?", reply_markup=builder.as_markup())
@@ -406,11 +401,10 @@ async def process_contact(message: types.Message, state: FSMContext):
     await save_msg(message, state)
     data = await state.get_data()
     user = message.from_user
-
     async with pool.acquire() as conn:
         discount_row = await conn.fetchrow(
-            "SELECT discount_value FROM discounts WHERE user_id = $1 AND is_used = FALSE", 
-            user.id
+        "SELECT discount_value FROM discounts WHERE user_id = $1 AND is_used = FALSE", 
+        user.id
         )
 
     discount_status = f"{discount_row['discount_value']}%" if discount_row else "Немає"
@@ -509,24 +503,24 @@ async def process_feedback_text(message: types.Message, state: FSMContext):
 async def cmd_discount(message: types.Message, state: FSMContext):
     user_id = message.from_user.id
     async with pool.acquire() as conn:
-        row = await conn.fetchrow("SELECT discount_value FROM discounts WHERE user_id = $1 AND is_used = FALSE", user_id)
-        if row:
-            discount = row['discount_value']
-            text = f"🎁 У вас є активна знижка: **{discount}%**\nВикористайте її під час бронювання наступного туру!"
+    row = await conn.fetchrow("SELECT discount_value FROM discounts WHERE user_id = $1 AND is_used = FALSE", user_id)
+    if row:
+        discount = row['discount_value']
+        text = f"🎁 У вас є активна знижка: **{discount}%**\nВикористайте її під час бронювання наступного туру!"
+    else:
+        chance = random.random()
+        if chance < 0.70:
+            discount = random.randint(2, 3)
+        elif chance < 0.95:
+            discount = 4
         else:
-            chance = random.random()
-            if chance < 0.70:
-                discount = random.randint(2, 3)
-            elif chance < 0.95:
-                discount = 4
-            else:
-                discount = 5
-            await conn.execute("""
-                INSERT INTO discounts (user_id, discount_value, is_used) 
-                VALUES ($1, $2, FALSE)
-                ON CONFLICT (user_id) DO UPDATE SET discount_value = $2, is_used = FALSE
-            """, user_id, discount)
-            text = f"Вітаємо! Ви виграли знижку на наступну подорож: **{discount}%** 🎉"
+            discount = 5
+        await conn.execute("""
+            INSERT INTO discounts (user_id, discount_value, is_used) 
+            VALUES ($1, $2, FALSE)
+            ON CONFLICT (user_id) DO UPDATE SET discount_value = $2, is_used = FALSE
+        """, user_id, discount)
+        text = f"Вітаємо! Ви виграли знижку на наступну подорож: **{discount}%** 🎉"
     await message.answer(text, parse_mode="Markdown")
 
 @dp.message(Command("check_discounts"), F.from_user.id == ADMIN_ID)
