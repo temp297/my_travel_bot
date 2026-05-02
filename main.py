@@ -498,12 +498,15 @@ f"━━━━━━━━━━━━━━━"
 # ОБРОБНИКИ ЗНИЖОК
 @dp.message(Command("discount"))
 async def cmd_discount(message: types.Message, state: FSMContext):
-    user_id = message.from_user.id
+    user = message.from_user
+    # Визначаємо ім'я: full_name або "Мандрівник"
+    name = user.full_name or "Мандрівник"
+    user_id = user.id
     async with pool.acquire() as conn:
         row = await conn.fetchrow("SELECT discount_value FROM discounts WHERE user_id = $1 AND is_used = FALSE", user_id)
         if row:
             discount = row['discount_value']
-            text = f"🎁 У вас є активна знижка: **{discount}%**\nВикористайте її під час бронювання наступного туру!"
+            text = f"🎁 {name}, у вас є активна знижка: **{discount}%**\nВикористайте її під час бронювання наступного туру!"
         else:
             chance = random.random()
             if chance < 0.70:
@@ -517,8 +520,7 @@ async def cmd_discount(message: types.Message, state: FSMContext):
             VALUES ($1, $2, FALSE)
             ON CONFLICT (user_id) DO UPDATE SET discount_value = $2, is_used = FALSE
             """, user_id, discount)
-            text = f"Вітаємо! Ви виграли знижку на наступну подорож: **{discount}%** 🎉"
-    
+            text = f"Вітаємо, {name}! 🎉 Ви виграли знижку на наступну подорож: **{discount}%**"
     await state.set_state(TourRequest.start_confirmed)
     await message.answer(text, parse_mode="Markdown", reply_markup=start_inline_kb())
 
