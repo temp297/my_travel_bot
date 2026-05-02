@@ -16,8 +16,6 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from aiogram.exceptions import TelegramBadRequest
 
 # --- НАЛАШТУВАННЯ ---
-import os
-
 # Отримуємо дані зі змінних оточення (Render -> Environment)
 API_TOKEN = os.getenv("API_TOKEN")
 DATABASE_URL = os.getenv("DATABASE_URL")
@@ -81,7 +79,7 @@ async def init_db():
         )
     """)
     
-    # 1. Створюємо таблицю для відгуків (це те, що було пропущено)
+    # 1. Створюємо таблицю для відгуків
     await conn.execute("""
         CREATE TABLE IF NOT EXISTS feedbacks (
             user_id BIGINT,
@@ -90,7 +88,7 @@ async def init_db():
         )
     """)
     
-    # 2. Створюємо таблицю користувачів з полем full_name
+    # 2. Створюємо таблицю користувачів
     await conn.execute("""
         CREATE TABLE IF NOT EXISTS users (
             user_id BIGINT PRIMARY KEY,
@@ -109,7 +107,6 @@ async def init_db():
 
 async def save_user(user: types.User):
     conn = await asyncpg.connect(DATABASE_URL)
-    # Зберігаємо або оновлюємо дані користувача (ID, Username, Full Name)
     await conn.execute(
         "INSERT INTO users (user_id, username, full_name) VALUES ($1, $2, $3) "
         "ON CONFLICT (user_id) DO UPDATE SET "
@@ -119,7 +116,6 @@ async def save_user(user: types.User):
     await conn.close()
 
 async def check_returns():
-    # Ця функція у вас була правильною, залишаємо як є
     today = datetime.now(pytz.timezone('Europe/Kyiv')).strftime("%d.%m.%Y")
     conn = await asyncpg.connect(DATABASE_URL)
     users = await conn.fetch("SELECT user_id FROM feedbacks WHERE return_date = $1 AND sent = 0", today)
@@ -185,7 +181,6 @@ async def cmd_start(message: types.Message, state: FSMContext):
     await save_msg(msg, state)
     await state.set_state(TourRequest.start_confirmed)
 
-# ТЕПЕР CANCEL ЙДЕ ОДРАЗУ ПІСЛЯ START
 @dp.message(Command("cancel"))
 async def cmd_cancel(message: types.Message, state: FSMContext):
     await state.clear()
@@ -194,20 +189,16 @@ async def cmd_cancel(message: types.Message, state: FSMContext):
         reply_markup=types.ReplyKeyboardRemove()
     )
 
-# ТЕПЕР ПЕРЕВІРКА ТЕКСТУ (вона не перехопить /cancel, бо він вище)
 @dp.message(TourRequest.start_confirmed)
 async def check_start_input(message: types.Message, state: FSMContext):
-    # Додамо перевірку, щоб команди випадково не потрапляли сюди
     if message.text and message.text.startswith("/"):
         return 
     await save_msg(message, state)
     msg = await message.answer("⚠️ Будь ласка, натисніть на кнопку «🚀 ПОЧАТИ ПІДБІР ТУРУ»")
     await save_msg(msg, state)
 
-# ОБРОБНИК НАТИСКАННЯ: спрацює тільки при кліку на Inline-кнопку
 @dp.callback_query(F.data == "start_selection", TourRequest.start_confirmed)
 async def process_start_callback(callback_query: types.CallbackQuery, state: FSMContext):
-    # Видаляємо кнопку, щоб вона не залишалася в тексті
     await callback_query.message.edit_reply_markup(reply_markup=None)
     
     msg = await callback_query.message.answer("🌍 Вкажіть пріоритетну країну та назву готелю (якщо визначилися)", reply_markup=types.ReplyKeyboardRemove())
@@ -248,7 +239,6 @@ async def process_dest(message: types.Message, state: FSMContext):
     await save_msg(msg2, state)
     await state.set_state(TourRequest.adults_count)
 
-# ПЕРЕВІРКА КНОПОК ДОРОСЛИХ
 @dp.message(TourRequest.adults_count)
 async def check_adults_input(message: types.Message, state: FSMContext):
     await save_msg(message, state)
@@ -257,7 +247,6 @@ async def check_adults_input(message: types.Message, state: FSMContext):
 
 @dp.callback_query(F.data.startswith("adults_"), TourRequest.adults_count)
 async def process_adults(callback_query: types.CallbackQuery, state: FSMContext):
-    # Видаляємо кнопки лише після успішного натискання
     await callback_query.message.edit_reply_markup(reply_markup=None)
     
     count = callback_query.data.split("_")[1]
@@ -276,7 +265,6 @@ async def process_adults(callback_query: types.CallbackQuery, state: FSMContext)
     await save_msg(msg2, state)
     await state.set_state(TourRequest.children_count)
 
-# ПЕРЕВІРКА КНОПОК ДІТЕЙ
 @dp.message(TourRequest.children_count)
 async def check_children_input(message: types.Message, state: FSMContext):
     await save_msg(message, state)
@@ -285,7 +273,6 @@ async def check_children_input(message: types.Message, state: FSMContext):
 
 @dp.callback_query(F.data.startswith("child_"), TourRequest.children_count)
 async def process_children(callback_query: types.CallbackQuery, state: FSMContext):
-    # Видаляємо кнопки вибору дітей
     await callback_query.message.edit_reply_markup(reply_markup=None)
     
     count = callback_query.data.split("_")[1]
@@ -300,8 +287,6 @@ async def process_children(callback_query: types.CallbackQuery, state: FSMContex
     await save_msg(msg2, state)
     await state.set_state(TourRequest.date_from) 
 
-# ВСТАНОВЛЮЄМО СТАН ДЛЯ КАЛЕНДАРЯ
-# ПЕРЕВІРКА КАЛЕНДАРЯ (З)
 @dp.message(TourRequest.date_from)
 async def check_date_from_input(message: types.Message, state: FSMContext):
     await save_msg(message, state)
@@ -321,9 +306,8 @@ async def process_date_from(callback_query: types.CallbackQuery, callback_data: 
         )
         await save_msg(msg1, state)
         await save_msg(msg2, state)
-        await state.set_state(TourRequest.date_to) # ПЕРЕХОДИМО ДО НАСТУПНОЇ ДАТИ
+        await state.set_state(TourRequest.date_to)
 
-# ПЕРЕВІРКА КАЛЕНДАРЯ (ПО)
 @dp.message(TourRequest.date_to)
 async def check_date_to_input(message: types.Message, state: FSMContext):
     await save_msg(message, state)
@@ -341,7 +325,7 @@ async def process_date_to(callback_query: types.CallbackQuery, callback_data: Si
         msg2 = await callback_query.message.answer(f"🌙 На скільки ночей плануєте відпочинок?")
         await save_msg(msg1, state)
         await save_msg(msg2, state)
-        await state.set_state(TourRequest.nights_count) # ВСТАНОВЛЮЄМО СТАН ДЛЯ НОЧЕЙ
+        await state.set_state(TourRequest.nights_count)
 
 @dp.message(TourRequest.nights_count)
 async def process_nights(message: types.Message, state: FSMContext):
@@ -351,7 +335,6 @@ async def process_nights(message: types.Message, state: FSMContext):
     await save_msg(msg, state)
     await state.set_state(TourRequest.hotel_stars)
 
-# ПЕРЕВІРКА КНОПОК ЗІРОК
 @dp.message(TourRequest.hotel_stars)
 async def check_stars_input(message: types.Message, state: FSMContext):
     await save_msg(message, state)
@@ -360,7 +343,6 @@ async def check_stars_input(message: types.Message, state: FSMContext):
 
 @dp.callback_query(F.data.startswith("star_"), TourRequest.hotel_stars)
 async def process_stars(callback_query: types.CallbackQuery, state: FSMContext):
-    # Видаляємо кнопки зірок
     await callback_query.message.edit_reply_markup(reply_markup=None)
     
     star = callback_query.data.split("_")[1]
@@ -372,7 +354,6 @@ async def process_stars(callback_query: types.CallbackQuery, state: FSMContext):
     await save_msg(msg2, state)
     await state.set_state(TourRequest.meal_type)
 
-# ПЕРЕВІРКА КНОПОК ХАРЧУВАННЯ
 @dp.message(TourRequest.meal_type)
 async def check_meals_input(message: types.Message, state: FSMContext):
     await save_msg(message, state)
@@ -381,7 +362,6 @@ async def check_meals_input(message: types.Message, state: FSMContext):
 
 @dp.callback_query(F.data.startswith("meal_"), TourRequest.meal_type)
 async def process_meals(callback_query: types.CallbackQuery, state: FSMContext):
-    # Видаляємо кнопки харчування
     await callback_query.message.edit_reply_markup(reply_markup=None)
     
     meal_map = {"BB": "Сніданки", "HB": "Сніданок+вечеря", "AI": "Все включено", "UAI": "Ультра все включено", "RO": "Без харчування"}
@@ -507,16 +487,13 @@ async def cmd_discount(message: types.Message, state: FSMContext):
     user_id = message.from_user.id
     conn = await asyncpg.connect(DATABASE_URL)
     
-    # Шукаємо активну (невикористану) знижку
     row = await conn.fetchrow("SELECT discount_value FROM discounts WHERE user_id = $1 AND is_used = FALSE", user_id)
     
     if row:
         discount = row['discount_value']
         text = f"🎁 У вас є активна знижка: **{discount}%**\nВикористайте її під час бронювання наступного туру!"
     else:
-        # Генеруємо нову (від 1 до 5%)
         discount = random.randint(1, 5)
-        # Використовуємо UPSERT, щоб оновити, якщо запис існував (але був використаний)
         await conn.execute("""
             INSERT INTO discounts (user_id, discount_value, is_used) 
             VALUES ($1, $2, FALSE)
@@ -543,14 +520,12 @@ async def check_active_discounts(message: types.Message):
 
 @dp.message(Command("use_discount"), F.from_user.id == ADMIN_ID)
 async def use_discount_admin(message: types.Message):
-    # Команда: /use_discount ID
     args = message.text.split()
     if len(args) < 2:
         return await message.answer("❌ Використання: /use_discount <user_id>")
     
     user_id = int(args[1])
     conn = await asyncpg.connect(DATABASE_URL)
-    # Оновлюємо статус
     result = await conn.execute("UPDATE discounts SET is_used = TRUE WHERE user_id = $1 AND is_used = FALSE", user_id)
     await conn.close()
 
@@ -596,7 +571,6 @@ async def process_admin_search(message: types.Message, state: FSMContext):
     await conn.close()
 
     if target_id:
-        # ОБОВ'ЯЗКОВО зберігаємо дані в state
         await state.update_data(client_id=target_id, client_username=username)
         
         calendar_kb = await SimpleCalendar().start_calendar()
@@ -611,7 +585,6 @@ async def process_admin_search(message: types.Message, state: FSMContext):
         msg = await message.answer("❌ Клієнта не знайдено в базі і введений текст не є ID. Спробуйте ще раз:")
         await save_msg(msg, state)
 
-# ОБРОБКА ВИБОРУ ДАТИ В АДМІНЦІ
 @dp.callback_query(SimpleCalendarCallback.filter(), AdminPanel.waiting_for_date)
 async def process_admin_date(callback_query: types.CallbackQuery, callback_data: SimpleCalendarCallback, state: FSMContext):
     selected, date = await SimpleCalendar().process_selection(callback_query, callback_data)
@@ -621,12 +594,10 @@ async def process_admin_date(callback_query: types.CallbackQuery, callback_data:
         client_id = data.get('client_id')
         username = data.get('client_username')
         
-        # Записуємо в PostgreSQL
         conn = await asyncpg.connect(DATABASE_URL)
         await conn.execute("INSERT INTO feedbacks (user_id, return_date) VALUES ($1, $2)", client_id, formatted)
         await conn.close()
 
-        # Видалення повідомлень
         msgs_to_delete = data.get("msgs_to_delete", [])
         for m_id in msgs_to_delete:
             try:
@@ -645,12 +616,9 @@ async def process_admin_date(callback_query: types.CallbackQuery, callback_data:
         )
         await state.clear()
 
-# --- ПЕРЕГЛЯД БАЗИ КОРИСТУВАЧІВ (ВСТАВЛЯТИ СЮДИ) ---
-
 @dp.message(Command("users"), F.from_user.id == ADMIN_ID)
 async def list_users(message: types.Message):
     conn = await asyncpg.connect(DATABASE_URL)
-    # Додаємо full_name у запит SELECT
     rows = await conn.fetch("SELECT user_id, username, full_name FROM users")
     await conn.close()
     
@@ -662,7 +630,6 @@ async def list_users(message: types.Message):
     for row in rows:
         username = f"@{row['username']}" if row['username'] else "немає"
         name = row['full_name'] if row['full_name'] else "Ім'я не вказано"
-        # Форматуємо рядок: Ім'я — Юзернейм (ID)
         text += f"👤 <b>{name}</b> — {username} (<code>{row['user_id']}</code>)\n"
     
     await message.answer(text, parse_mode="HTML")
