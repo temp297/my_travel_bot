@@ -619,7 +619,13 @@ async def process_admin_date(callback_query: types.CallbackQuery, callback_data:
 @dp.message(Command("users"), F.from_user.id == ADMIN_ID)
 async def list_users(message: types.Message):
     conn = await asyncpg.connect(DATABASE_URL)
-    rows = await conn.fetch("SELECT user_id, username, full_name FROM users")
+    
+    # Використовуємо LEFT JOIN, щоб отримати знижку, якщо вона є
+    rows = await conn.fetch("""
+        SELECT u.user_id, u.username, u.full_name, d.discount_value 
+        FROM users u 
+        LEFT JOIN discounts d ON u.user_id = d.user_id AND d.is_used = FALSE
+    """)
     await conn.close()
     
     if not rows:
@@ -630,7 +636,11 @@ async def list_users(message: types.Message):
     for row in rows:
         username = f"@{row['username']}" if row['username'] else "немає"
         name = row['full_name'] if row['full_name'] else "Ім'я не вказано"
-        text += f"👤 <b>{name}</b> — {username} (<code>{row['user_id']}</code>)\n"
+        
+        # Додаємо відображення знижки, якщо вона існує
+        discount_text = f" | 🎁 {row['discount_value']}%" if row['discount_value'] else ""
+        
+        text += f"👤 <b>{name}</b> — {username} (<code>{row['user_id']}</code>){discount_text}\n"
     
     await message.answer(text, parse_mode="HTML")
 
