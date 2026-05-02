@@ -100,6 +100,15 @@ async def init_db():
         except Exception as e:
             logging.info(f"Колонка full_name вже існує: {e}")
 
+async def save_user(user: types.User):
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "INSERT INTO users (user_id, username, full_name) VALUES ($1, $2, $3) "
+            "ON CONFLICT (user_id) DO UPDATE SET "
+            "username = EXCLUDED.username, full_name = EXCLUDED.full_name",
+            user.id, user.username, user.full_name
+        )
+
 async def get_user_discount(user_id: int):
     async with pool.acquire() as conn:
         return await conn.fetchrow(
@@ -169,14 +178,14 @@ def generate_discount():
 async def cmd_start(message: types.Message, state: FSMContext, command: CommandObject):
     args = command.args
     user_id = message.from_user.id
-    
+
     await save_user(message.from_user)
     await state.clear()
-    
+
     # Якщо прийшли з посиланням на знижку
     if args == "discount":
         discount = generate_discount()  # Генеруємо рандомну знижку
-        
+
         async with pool.acquire() as conn:
             # Зберігаємо або оновлюємо знижку в БД
             await conn.execute("""
@@ -185,11 +194,11 @@ async def cmd_start(message: types.Message, state: FSMContext, command: CommandO
                 ON CONFLICT (user_id) DO UPDATE 
                 SET discount_value = EXCLUDED.discount_value, is_used = FALSE
             """, user_id, discount)
-            
+
         await message.answer(f"Вітаємо! Ви активували знижку {discount}%. Давайте підберемо вам тур.")
     else:
         await message.answer(f"Вітаємо, {message.from_user.first_name}! Я допоможу вам підібрати тур.")
-        
+
     msg = await message.answer(
         "Натисніть кнопку нижче, щоб розпочати:", 
         reply_markup=start_inline_kb()
@@ -399,7 +408,7 @@ async def process_contact(message: types.Message, state: FSMContext):
             "SELECT discount_value FROM discounts WHERE user_id = $1 AND is_used = FALSE", 
             user.id
         )
-    
+
     discount_status = f"{discount_row['discount_value']}%" if discount_row else "Немає"
 
     info_table = (
@@ -413,7 +422,7 @@ async def process_contact(message: types.Message, state: FSMContext):
         f"🎁 <b>Знижка:</b> {discount_status}\n"
         f"📱 <b>Контакт:</b> {message.text}"
     )
-    
+
     report = (
         f"🔥 <b>НОВА ЗАЯВКА НА ТУР!</b>\n"
         f"━━━━━━━━━━━━━━━\n"
@@ -424,17 +433,17 @@ async def process_contact(message: types.Message, state: FSMContext):
         f"🆔 <b>ID для відгуку:</b> <code>{user.id}</code>\n"
         f"━━━━━━━━━━━━━━━"
     )
-    
+
     await bot.send_message(ADMIN_ID, report, parse_mode="HTML")
-    
+
     msgs_to_delete = data.get("msgs_to_delete", [])
     tasks = [bot.delete_message(chat_id=message.chat.id, message_id=m_id) for m_id in msgs_to_delete]
     if tasks:
         await asyncio.gather(*tasks, return_exceptions=True)
-        
+
     re_builder = ReplyKeyboardBuilder()
     re_builder.add(types.KeyboardButton(text="🔄 СТВОРИТИ НОВУ ЗАЯВКУ"))
-    
+
     await message.answer(
         f"✅ Дякуємо! Заявку успішно відправлено!\nМи зв'яжемося з Вами найближчим часом 😊\n\n"
         f"<b>Деталі вашої заявки:</b>\n"
@@ -658,7 +667,7 @@ async def on_shutdown(dispatcher: Dispatcher):
 async def main():
     # Очищення конфліктів вебхуків
     await bot.delete_webhook(drop_pending_updates=True)
-    
+
     await init_db()
     WEBHOOK_URL = os.getenv("WEBHOOK_URL")
     WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "super_secret_key")
