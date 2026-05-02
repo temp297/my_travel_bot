@@ -100,13 +100,11 @@ async def init_db():
         except Exception as e:
             logging.info(f"Колонка full_name вже існує: {e}")
 
-async def save_user(user: types.User):
+async def get_user_discount(user_id: int):
     async with pool.acquire() as conn:
-        await conn.execute(
-            "INSERT INTO users (user_id, username, full_name) VALUES ($1, $2, $3) "
-            "ON CONFLICT (user_id) DO UPDATE SET "
-            "username = EXCLUDED.username, full_name = EXCLUDED.full_name",
-            user.id, user.username, user.full_name
+        return await conn.fetchrow(
+            "SELECT discount_value FROM discounts WHERE user_id = $1 AND is_used = FALSE", 
+            user_id
         )
 
 async def check_returns():
