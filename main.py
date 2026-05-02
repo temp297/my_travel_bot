@@ -394,7 +394,8 @@ async def process_meals(callback_query: types.CallbackQuery, state: FSMContext):
 @dp.message(TourRequest.budget)
 async def process_budget(message: types.Message, state: FSMContext):
     await save_msg(message, state)
-    await state.update_data(budget=message.text)
+    budget = message.text.lower().replace(" ", "").replace("грн", "").replace("$", "").replace("usd", "").replace("eur", "")
+    await state.update_data(budget=budget)
     msg = await message.answer("📞 Ваш номер телефону або нікнейм для зв'язку:")
     await save_msg(msg, state)
     await state.set_state(TourRequest.contact)
