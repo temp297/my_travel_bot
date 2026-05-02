@@ -33,7 +33,8 @@ if not API_TOKEN or not DATABASE_URL:
 
 logging.basicConfig(level=logging.INFO)
 bot = Bot(token=API_TOKEN)
-redis = Redis(host='localhost')
+REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
+redis = Redis.from_url(REDIS_URL)
 storage = RedisStorage(redis=redis)
 dp = Dispatcher(storage=storage)
 ukraine_tz = pytz.timezone('Europe/Kyiv')
