@@ -545,7 +545,7 @@ async def cmd_discount(message: types.Message, state: FSMContext):
     await state.set_state(TourRequest.start_confirmed)
     await message.answer(text, parse_mode="Markdown", reply_markup=start_inline_kb())
 
-@dp.message(Command("check_discounts"), state="*", F.from_user.id == ADMIN_ID)
+@dp.message(Command("check_discounts"), F.from_user.id == ADMIN_ID, state="*")
 async def check_active_discounts(message: types.Message, state: FSMContext):
     await state.clear()
     async with pool.acquire() as conn:
@@ -557,7 +557,7 @@ async def check_active_discounts(message: types.Message, state: FSMContext):
             text += f"👤 ID: <code>{row['user_id']}</code> — {row['discount_value']}%\n"
         await message.answer(text, parse_mode="HTML")
 
-@dp.message(Command("use_discount"), state="*", F.from_user.id == ADMIN_ID)
+@dp.message(Command("use_discount"), F.from_user.id == ADMIN_ID, state="*")
 async def cmd_use_discount_list(message: types.Message, state: FSMContext):
     await state.clear()
     async with pool.acquire() as conn:
@@ -593,7 +593,7 @@ async def apply_discount_callback(callback_query: types.CallbackQuery):
     await callback_query.answer()
 
 # ПАНЕЛЬ АДМІНА
-@dp.message(Command("admin"), state="*", F.from_user.id == ADMIN_ID)
+@dp.message(Command("admin"), F.from_user.id == ADMIN_ID, state="*")
 async def admin_start(message: types.Message, state: FSMContext):
     await state.clear()
     msg = await message.answer("🛠 <b>Панель менеджера</b>\n\nВведіть <b>ID</b> клієнта або його <b>@username</b>:", parse_mode="HTML")
@@ -658,7 +658,7 @@ parse_mode="HTML"
 )
     await state.clear()
 
-@dp.message(Command("users"), state="*", F.from_user.id == ADMIN_ID)
+@dp.message(Command("users"), F.from_user.id == ADMIN_ID, state="*")
 async def list_users(message: types.Message, state: FSMContext):
     await state.clear()
     async with pool.acquire() as conn:
