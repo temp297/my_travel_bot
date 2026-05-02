@@ -155,30 +155,33 @@ def meals_kb():
 # --- ОБРОБНИКИ АНКЕТИ ---
 @dp.message(CommandStart())
 async def cmd_start(message: types.Message, state: FSMContext, command: CommandObject):
+    # Отримуємо аргумент
     args = command.args
     await save_user(message.from_user)
+    
+    # Скидаємо старий стан, щоб почати з чистого листа
     await state.clear()
+    
+    # 1. Зберігаємо інформацію про знижку в state
     if args == "discount":
-        await cmd_discount(message, state)
-        return
-    elif args == "tour":
-        msg = await message.answer(
-            f"👋 Вітаю, {message.from_user.first_name}!\n"
-            "Ви перейшли до підбору туру. Натисніть кнопку нижче:", 
-            reply_markup=start_inline_kb()
-        )
-        await save_msg(message, state)
-        await save_msg(msg, state)
-        await state.set_state(TourRequest.start_confirmed)
+        await state.update_data(has_discount=True)
+        await message.answer("Вітаємо! Ви активували знижку. Давайте підберемо вам тур.")
     else:
-        msg = await message.answer(
-            f"👋 Вітаю, {message.from_user.first_name}!\n"
-            "Я допоможу Вам підібрати ідеальний тур. Натисніть кнопку нижче:", 
-            reply_markup=start_inline_kb()
-        )
-        await save_msg(message, state)
-        await save_msg(msg, state)
-        await state.set_state(TourRequest.start_confirmed)
+        await state.update_data(has_discount=False)
+        await message.answer(f"Вітаємо, {message.from_user.first_name}! Я допоможу вам підібрати тур.")
+        
+    # 2. Показуємо кнопку для продовження (це важливо для вашого коду)
+    msg = await message.answer(
+        "Натисніть кнопку нижче, щоб розпочати:", 
+        reply_markup=start_inline_kb()
+    )
+    
+    # Зберігаємо повідомлення, щоб видалити їх пізніше
+    await save_msg(message, state)
+    await save_msg(msg, state)
+    
+    # 3. Перехід до першого кроку заповнення
+    await state.set_state(TourRequest.start_confirmed)
 
 @dp.message(Command("cancel"))
 async def cmd_cancel(message: types.Message, state: FSMContext):
