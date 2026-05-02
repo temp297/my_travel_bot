@@ -18,6 +18,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from aiogram.exceptions import TelegramBadRequest, TelegramForbidden
 from aiogram.fsm.storage.redis import RedisStorage
 from redis.asyncio import Redis
+
 pool = None
 
 # НАЛАШТУВАННЯ
@@ -187,6 +188,7 @@ async def cmd_start(message: types.Message, state: FSMContext, command: CommandO
     user_id = message.from_user.id
     await save_user(message.from_user)
     await state.clear()
+    
     if args == "discount":
         discount = generate_discount()
         await pool.execute("""
@@ -196,15 +198,15 @@ async def cmd_start(message: types.Message, state: FSMContext, command: CommandO
             SET discount_value = EXCLUDED.discount_value, is_used = FALSE
             """, user_id, discount)
         await message.answer(f"Вітаємо! Ви активували знижку {discount}%. Давайте підберемо вам тур.")
+        await state.set_state(TourRequest.start_confirmed)
+        msg = await message.answer("Натисніть кнопку, щоб почати:", reply_markup=start_inline_kb())
     else:
         await message.answer(f"Вітаємо, {message.from_user.first_name}! Я допоможу вам підібрати тур.")
-    msg = await message.answer(
-        "Натисніть кнопку нижче, щоб розпочати:", 
-        reply_markup=start_inline_kb()
-    )
+        await state.set_state(TourRequest.start_confirmed)
+        msg = await message.answer("Натисніть кнопку нижче, щоб розпочати:", reply_markup=start_inline_kb())
+        
     await save_msg(message, state)
     await save_msg(msg, state)
-    await state.set_state(TourRequest.start_confirmed)
 
 @dp.message(Command("cancel"))
 async def cmd_cancel(message: types.Message, state: FSMContext):
@@ -408,25 +410,25 @@ async def process_contact(message: types.Message, state: FSMContext):
         )
     discount_status = f"{discount_row['discount_value']}%" if discount_row else "Немає"
     info_table = (
-        f"🌍 <b>Напрямок:</b> {data.get('destination')}\n"
-        f"👥 <b>Склад:</b> {data.get('adults')} дор. + {data.get('children')} діт.\n"
-        f"📅 <b>Дати:</b> {data.get('date_from')} - {data.get('date_to')}\n"
-        f"🌙 <b>Ночей:</b> {data.get('nights')}\n"
-        f"⭐ <b>Готель:</b> {data.get('stars')}\n"
-        f"🍴 <b>Харчування:</b> {data.get('meals')}\n"
-        f"💰 <b>Бюджет:</b> {data.get('budget')} ГРН\n"
-        f"🎁 <b>Знижка:</b> {discount_status}\n"
-        f"📱 <b>Контакт:</b> {message.text}"
+f"🌍 <b>Напрямок:</b> {data.get('destination')}\n"
+f"👥 <b>Склад:</b> {data.get('adults')} дор. + {data.get('children')} діт.\n"
+f"📅 <b>Дати:</b> {data.get('date_from')} - {data.get('date_to')}\n"
+f"🌙 <b>Ночей:</b> {data.get('nights')}\n"
+f"⭐ <b>Готель:</b> {data.get('stars')}\n"
+f"🍴 <b>Харчування:</b> {data.get('meals')}\n"
+f"💰 <b>Бюджет:</b> {data.get('budget')} ГРН\n"
+f"🎁 <b>Знижка:</b> {discount_status}\n"
+f"📱 <b>Контакт:</b> {message.text}"
     )
     report = (
-        f"🔥 <b>НОВА ЗАЯВКА НА ТУР!</b>\n"
-        f"━━━━━━━━━━━━━━━\n"
-        f"{info_table}\n"
-        f"━━━━━━━━━━━━━━━\n"
-        f"👤 <b>Клієнт:</b> <a href='tg://user?id={user.id}'>{user.full_name}</a>\n"
-        f"🆔 <b>Username:</b> @{user.username if user.username else 'немає'}\n"
-        f"🆔 <b>ID для відгуку:</b> <code>{user.id}</code>\n"
-        f"━━━━━━━━━━━━━━━"
+f"🔥 <b>НОВА ЗАЯВКА НА ТУР!</b>\n"
+f"━━━━━━━━━━━━━━━\n"
+f"{info_table}\n"
+f"━━━━━━━━━━━━━━━\n"
+f"👤 <b>Клієнт:</b> <a href='tg://user?id={user.id}'>{user.full_name}</a>\n"
+f"🆔 <b>Username:</b> @{user.username if user.username else 'немає'}\n"
+f"🆔 <b>ID для відгуку:</b> <code>{user.id}</code>\n"
+f"━━━━━━━━━━━━━━━"
     )
     await bot.send_message(ADMIN_ID, report, parse_mode="HTML")
     msgs_to_delete = data.get("msgs_to_delete", [])
@@ -436,11 +438,11 @@ async def process_contact(message: types.Message, state: FSMContext):
     re_builder = ReplyKeyboardBuilder()
     re_builder.add(types.KeyboardButton(text="🔄 СТВОРИТИ НОВУ ЗАЯВКУ"))
     await message.answer(
-        f"✅ Дякуємо! Заявку успішно відправлено!\nМи зв'яжемося з Вами найближчим часом 😊\n\n"
-        f"<b>Деталі вашої заявки:</b>\n"
-        f"━━━━━━━━━━━━━━━\n"
-        f"{info_table}\n"
-        f"━━━━━━━━━━━━━━━", 
+f"✅ Дякуємо! Заявку успішно відправлено!\nМи зв'яжемося з Вами найближчим часом 😊\n\n"
+f"<b>Деталі вашої заявки:</b>\n"
+f"━━━━━━━━━━━━━━━\n"
+f"{info_table}\n"
+f"━━━━━━━━━━━━━━━", 
         parse_mode="HTML",
         reply_markup=re_builder.as_markup(resize_keyboard=True)
     )
@@ -479,12 +481,12 @@ async def process_feedback_text(message: types.Message, state: FSMContext):
     rating = data.get("user_rating")
     user = message.from_user
     feedback_header = (
-        f"🌟 <b>НОВИЙ ВІДГУК!</b>\n"
-        f"👤 <b>Від:</b> {user.full_name}\n"
-        f"📱 <b>Username:</b> @{user.username if user.username else 'немає'}\n"
-        f"⭐ <b>Оцінка:</b> {rating}⭐\n"
-        f"━━━━━━━━━━━━━━━"
-    )
+f"🌟 <b>НОВИЙ ВІДГУК!</b>\n"
+f"👤 <b>Від:</b> {user.full_name}\n"
+f"📱 <b>Username:</b> @{user.username if user.username else 'немає'}\n"
+f"⭐ <b>Оцінка:</b> {rating}⭐\n"
+f"━━━━━━━━━━━━━━━"
+)
     await bot.send_message(REVIEWS_CHAT_ID, feedback_header, parse_mode="HTML")
     forwarded_msg = await message.forward(chat_id=REVIEWS_CHAT_ID)
     await message.answer("❤️ Дякуємо за Ваш відгук! Його опубліковано у чаті мандрівників.")
@@ -514,7 +516,9 @@ async def cmd_discount(message: types.Message, state: FSMContext):
             ON CONFLICT (user_id) DO UPDATE SET discount_value = $2, is_used = FALSE
             """, user_id, discount)
             text = f"Вітаємо! Ви виграли знижку на наступну подорож: **{discount}%** 🎉"
-    await message.answer(text, parse_mode="Markdown")
+    
+    await state.set_state(TourRequest.start_confirmed)
+    await message.answer(text, parse_mode="Markdown", reply_markup=start_inline_kb())
 
 @dp.message(Command("check_discounts"), F.from_user.id == ADMIN_ID)
 async def check_active_discounts(message: types.Message):
@@ -617,15 +621,15 @@ async def process_admin_date(callback_query: types.CallbackQuery, callback_data:
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
         await callback_query.message.answer(
-        f"✅ <b>Запит на відгук заплановано!</b>\n"
-        f"━━━━━━━━━━━━━━━\n"
-        f"📅 <b>Дата:</b> {formatted}\n"
-        f"⏰ <b>Час:</b> {FEEDBACK_HOUR}:00\n"
-        f"👤 <b>Клієнт:</b> {username} (<code>{client_id}</code>)\n"
-        f"━━━━━━━━━━━━━━━",
-        parse_mode="HTML"
-        )
-        await state.clear()
+f"✅ <b>Запит на відгук заплановано!</b>\n"
+f"━━━━━━━━━━━━━━━\n"
+f"📅 <b>Дата:</b> {formatted}\n"
+f"⏰ <b>Час:</b> {FEEDBACK_HOUR}:00\n"
+f"👤 <b>Клієнт:</b> {username} (<code>{client_id}</code>)\n"
+f"━━━━━━━━━━━━━━━",
+parse_mode="HTML"
+)
+    await state.clear()
 
 @dp.message(Command("users"), F.from_user.id == ADMIN_ID)
 async def list_users(message: types.Message):
