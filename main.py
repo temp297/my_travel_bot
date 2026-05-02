@@ -120,25 +120,27 @@ async def check_returns():
     today = datetime.now(pytz.timezone('Europe/Kyiv')).strftime("%d.%m.%Y")
     async with pool.acquire() as conn:
         rows = await conn.fetch(
-        "SELECT id, user_id FROM feedbacks WHERE return_date = $1 AND sent = 0", 
-        today
+            "SELECT id, user_id FROM feedbacks WHERE return_date = $1 AND sent = 0", 
+            today
         )
         for row in rows:
             record_id = row['id']
             user_id = row['user_id']
-        try:
-            await bot.send_message(
-                user_id,
-                "✈️ З поверненням! Сподіваємося, Ваш відпочинок був чудовим.\n\nБудь ласка, оцініть нашу роботу:",
-                reply_markup=rating_kb()
-            )
-            await conn.execute("UPDATE feedbacks SET sent = 1 WHERE id = $1", record_id)
-            await asyncio.sleep(0.05)
-        except TelegramForbidden:
-            logging.warning(f"Користувач {user_id} заблокував бота.")
-            await conn.execute("DELETE FROM feedbacks WHERE id = $1", record_id)
-        except Exception as e:
-            logging.error(f"Помилка при надсиланні відгуку {user_id}: {e}")
+            
+            # ТЕПЕР TRY ВСЕРЕДИНІ ЦИКЛУ
+            try:
+                await bot.send_message(
+                    user_id,
+                    "✈️ З поверненням! Сподіваємося, Ваш відпочинок був чудовим.\n\nБудь ласка, оцініть нашу роботу:",
+                    reply_markup=rating_kb()
+                )
+                await conn.execute("UPDATE feedbacks SET sent = 1 WHERE id = $1", record_id)
+                await asyncio.sleep(0.05)
+            except TelegramForbidden:
+                logging.warning(f"Користувач {user_id} заблокував бота.")
+                await conn.execute("DELETE FROM feedbacks WHERE id = $1", record_id)
+            except Exception as e:
+                logging.error(f"Помилка при надсиланні відгуку {user_id}: {e}")
 
 # КЛАВІАТУРИ
 def start_inline_kb():
