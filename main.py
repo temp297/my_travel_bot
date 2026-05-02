@@ -663,10 +663,11 @@ async def on_shutdown(app: web.Application):
 
 # ТЕХНІЧНИЙ БЛОК
 async def main():
+    logging.info("--- БОТ ЗАПУСКАЄТЬСЯ ---") # Додано
     await bot.delete_webhook(drop_pending_updates=True)
-
     await init_db()
     WEBHOOK_URL = os.getenv("WEBHOOK_URL")
+    logging.info(f"Webhook URL: {WEBHOOK_URL}/webhook") # Додано - ви побачите це в логах!
     WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "super_secret_key")
     await bot.set_webhook(
         url=f"{WEBHOOK_URL}/webhook",
