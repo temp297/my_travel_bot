@@ -15,7 +15,7 @@ from aiogram_calendar import SimpleCalendar, SimpleCalendarCallback
 from aiogram.types import BufferedInputFile
 from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from aiogram.exceptions import TelegramBadRequest
+from aiogram.exceptions import TelegramBadRequest, TelegramForbidden
 from aiogram.fsm.storage.redis import RedisStorage
 from redis.asyncio import Redis
 pool = None
@@ -648,7 +648,7 @@ async def list_users(message: types.Message):
         text += f"👤 <b>{name}</b> — {username} (<code>{row['user_id']}</code>){discount_text}\n"
     await message.answer(text, parse_mode="HTML")
 
-async def on_shutdown(dispatcher: Dispatcher):
+async def on_shutdown(app: web.Application):
     global pool
     if pool:
         await pool.close()
