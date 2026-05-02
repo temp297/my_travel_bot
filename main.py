@@ -374,6 +374,17 @@ async def process_contact(message: types.Message, state: FSMContext):
     await save_msg(message, state)
     data = await state.get_data()
     user = message.from_user
+
+    # --- ПЕРЕВІРКА ЗНИЖКИ В БД ---
+    async with pool.acquire() as conn:
+        discount_row = await conn.fetchrow(
+            "SELECT discount_value FROM discounts WHERE user_id = $1 AND is_used = FALSE", 
+            user.id
+        )
+    
+    discount_status = f"{discount_row['discount_value']}%" if discount_row else "Немає"
+    # -----------------------------
+
     info_table = (
         f"🌍 <b>Напрямок:</b> {data.get('destination')}\n"
         f"👥 <b>Склад:</b> {data.get('adults')} дор. + {data.get('children')} діт.\n"
@@ -382,8 +393,10 @@ async def process_contact(message: types.Message, state: FSMContext):
         f"⭐ <b>Готель:</b> {data.get('stars')}\n"
         f"🍴 <b>Харчування:</b> {data.get('meals')}\n"
         f"💰 <b>Бюджет:</b> {data.get('budget')} ГРН\n"
+        f"🎁 <b>Знижка:</b> {discount_status}\n"
         f"📱 <b>Контакт:</b> {message.text}"
     )
+    
     report = (
         f"🔥 <b>НОВА ЗАЯВКА НА ТУР!</b>\n"
         f"━━━━━━━━━━━━━━━\n"
@@ -394,13 +407,17 @@ async def process_contact(message: types.Message, state: FSMContext):
         f"🆔 <b>ID для відгуку:</b> <code>{user.id}</code>\n"
         f"━━━━━━━━━━━━━━━"
     )
+    
     await bot.send_message(ADMIN_ID, report, parse_mode="HTML")
+    
     msgs_to_delete = data.get("msgs_to_delete", [])
     tasks = [bot.delete_message(chat_id=message.chat.id, message_id=m_id) for m_id in msgs_to_delete]
     if tasks:
         await asyncio.gather(*tasks, return_exceptions=True)
+        
     re_builder = ReplyKeyboardBuilder()
     re_builder.add(types.KeyboardButton(text="🔄 СТВОРИТИ НОВУ ЗАЯВКУ"))
+    
     await message.answer(
         f"✅ Дякуємо! Заявку успішно відправлено!\nМи зв'яжемося з Вами найближчим часом 😊\n\n"
         f"<b>Деталі вашої заявки:</b>\n"
