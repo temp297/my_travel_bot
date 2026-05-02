@@ -16,6 +16,8 @@ from aiogram.types import BufferedInputFile
 from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from aiogram.exceptions import TelegramBadRequest
+from aiogram.fsm.storage.redis import RedisStorage
+from redis.asyncio import Redis
 
 pool = None
 
@@ -24,14 +26,16 @@ API_TOKEN = os.getenv("API_TOKEN")
 DATABASE_URL = os.getenv("DATABASE_URL")
 ADMIN_ID = int(os.getenv("ADMIN_ID", "7185133060"))
 REVIEWS_CHAT_ID = int(os.getenv("REVIEWS_CHAT_ID", "-1003818943967"))
-FEEDBACK_HOUR = int(os.getenv("FEEDBACK_HOUR", "10")) 
+FEEDBACK_HOUR = int(os.getenv("FEEDBACK_HOUR", "10"))
 
 if not API_TOKEN or not DATABASE_URL:
     raise ValueError("Помилка: API_TOKEN або DATABASE_URL не встановлені в Environment Variables!")
 
 logging.basicConfig(level=logging.INFO)
 bot = Bot(token=API_TOKEN)
-dp = Dispatcher()
+redis = Redis(host='localhost')
+storage = RedisStorage(redis=redis)
+dp = Dispatcher(storage=storage)
 ukraine_tz = pytz.timezone('Europe/Kyiv')
 scheduler = AsyncIOScheduler(timezone=ukraine_tz)
 
@@ -130,7 +134,7 @@ def rating_kb():
     builder = InlineKeyboardBuilder()
     for i in range(1, 6):
         builder.add(types.InlineKeyboardButton(text=f"{i}⭐", callback_data=f"rate_{i}"))
-    builder.adjust(5) 
+    builder.adjust(5)
     return builder.as_markup()
 
 def stars_kb():
@@ -152,35 +156,47 @@ def meals_kb():
     builder.adjust(1)
     return builder.as_markup()
 
+def generate_discount():
+    chance = random.random()
+    if chance < 0.70:
+        return random.randint(2, 3)
+    elif chance < 0.95:
+        return 4
+    else:
+        return 5
+
 # --- ОБРОБНИКИ АНКЕТИ ---
 @dp.message(CommandStart())
 async def cmd_start(message: types.Message, state: FSMContext, command: CommandObject):
-    # Отримуємо аргумент
     args = command.args
-    await save_user(message.from_user)
+    user_id = message.from_user.id
     
-    # Скидаємо старий стан, щоб почати з чистого листа
+    await save_user(message.from_user)
     await state.clear()
     
-    # 1. Зберігаємо інформацію про знижку в state
+    # Якщо прийшли з посиланням на знижку
     if args == "discount":
-        await state.update_data(has_discount=True)
-        await message.answer("Вітаємо! Ви активували знижку. Давайте підберемо вам тур.")
+        discount = generate_discount()  # Генеруємо рандомну знижку
+        
+        async with pool.acquire() as conn:
+            # Зберігаємо або оновлюємо знижку в БД
+            await conn.execute("""
+                INSERT INTO discounts (user_id, discount_value, is_used) 
+                VALUES ($1, $2, FALSE) 
+                ON CONFLICT (user_id) DO UPDATE 
+                SET discount_value = EXCLUDED.discount_value, is_used = FALSE
+            """, user_id, discount)
+            
+        await message.answer(f"Вітаємо! Ви активували знижку {discount}%. Давайте підберемо вам тур.")
     else:
-        await state.update_data(has_discount=False)
         await message.answer(f"Вітаємо, {message.from_user.first_name}! Я допоможу вам підібрати тур.")
         
-    # 2. Показуємо кнопку для продовження (це важливо для вашого коду)
     msg = await message.answer(
         "Натисніть кнопку нижче, щоб розпочати:", 
         reply_markup=start_inline_kb()
     )
-    
-    # Зберігаємо повідомлення, щоб видалити їх пізніше
     await save_msg(message, state)
     await save_msg(msg, state)
-    
-    # 3. Перехід до першого кроку заповнення
     await state.set_state(TourRequest.start_confirmed)
 
 @dp.message(Command("cancel"))
@@ -378,7 +394,7 @@ async def process_contact(message: types.Message, state: FSMContext):
     data = await state.get_data()
     user = message.from_user
 
-    # --- ПЕРЕВІРКА ЗНИЖКИ В БД ---
+    # Тепер ми просто перевіряємо БД - це єдине джерело правди
     async with pool.acquire() as conn:
         discount_row = await conn.fetchrow(
             "SELECT discount_value FROM discounts WHERE user_id = $1 AND is_used = FALSE", 
@@ -386,7 +402,6 @@ async def process_contact(message: types.Message, state: FSMContext):
         )
     
     discount_status = f"{discount_row['discount_value']}%" if discount_row else "Немає"
-    # -----------------------------
 
     info_table = (
         f"🌍 <b>Напрямок:</b> {data.get('destination')}\n"
