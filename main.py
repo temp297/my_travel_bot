@@ -12,6 +12,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.utils.keyboard import ReplyKeyboardBuilder, InlineKeyboardBuilder
 from aiogram_calendar import SimpleCalendar, SimpleCalendarCallback
+from aiogram.types import BufferedInputFile
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from aiogram.exceptions import TelegramBadRequest
 pool = None
@@ -689,15 +690,38 @@ async def on_shutdown(dispatcher: Dispatcher):
     logging.info("Планувальник зупинено.")
 
 # --- ТЕХНІЧНИЙ БЛОК ---
-async def handle(request): return web.Response(text="Live")
 
 async def main():
     await init_db()
+
+    # Отримуємо налаштування з оточення
+    WEBHOOK_URL = os.getenv("WEBHOOK_URL")
+    # Додайте цю змінну в Render, або вона буде "secret" за замовчуванням
+    WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "super_secret_key")
+
+    # 1. Встановлюємо вебхук
+    await bot.set_webhook(
+        url=f"{WEBHOOK_URL}/webhook",
+        secret_token=WEBHOOK_SECRET
+    )
+
     app = web.Application()
-    app.router.add_get("/", handle)
-    runner = web.AppRunner(app)
-    await runner.setup()
-    await web.TCPSite(runner, "0.0.0.0", int(os.environ.get("PORT", 8080))).start()
+
+    # 2. Налаштовуємо обробник вебхуків (SimpleRequestHandler)
+    webhook_requests_handler = SimpleRequestHandler(
+        dispatcher=dp,
+        bot=bot,
+        secret_token=WEBHOOK_SECRET,
+    )
+    webhook_requests_handler.register(app, path="/webhook")
+
+    # 3. Реєструємо диспетчер в додатку
+    setup_application(app, dp, bot=bot)
+    
+    # Реєструємо функцію завершення
+    app.on_shutdown.append(on_shutdown)
+
+    # 4. Налаштування команд
     await bot.set_my_commands([
         types.BotCommand(command="start", description="🚀 Почати підбір туру"), 
         types.BotCommand(command="discount", description="🎁 Моя знижка"),
@@ -707,10 +731,20 @@ async def main():
         types.BotCommand(command="users", description="👥 Список туристів"),
         types.BotCommand(command="cancel", description="❌ Скасувати дію")
     ])
+
+    # 5. Запуск планувальника
     scheduler.add_job(check_returns, 'cron', hour=FEEDBACK_HOUR, minute=0)
     scheduler.start()
-    dp.shutdown.register(on_shutdown)
-    await dp.start_polling(bot)
+
+    # 6. Запуск aiohttp сервера (Render вимагає веб-сервер)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    port = int(os.environ.get("PORT", 8080))
+    site = web.TCPSite(runner, "0.0.0.0", port)
+    await site.start()
+
+    # Це утримує бота запущеним, поки Render не вимкне контейнер
+    await asyncio.Event().wait()
 
 if __name__ == "__main__":
     asyncio.run(main())
