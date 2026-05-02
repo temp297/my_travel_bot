@@ -519,21 +519,53 @@ async def check_active_discounts(message: types.Message):
     await message.answer(text, parse_mode="HTML")
 
 @dp.message(Command("use_discount"), F.from_user.id == ADMIN_ID)
-async def use_discount_admin(message: types.Message):
-    args = message.text.split()
-    if len(args) < 2:
-        return await message.answer("❌ Використання: /use_discount <user_id>")
-    
-    user_id = int(args[1])
+async def cmd_use_discount_list(message: types.Message):
     conn = await asyncpg.connect(DATABASE_URL)
-    result = await conn.execute("UPDATE discounts SET is_used = TRUE WHERE user_id = $1 AND is_used = FALSE", user_id)
+    # Отримуємо список лише тих, у кого знижка ще не використана
+    rows = await conn.fetch("""
+        SELECT u.user_id, u.full_name, d.discount_value 
+        FROM discounts d
+        JOIN users u ON d.user_id = u.user_id
+        WHERE d.is_used = FALSE
+    """)
     await conn.close()
 
-    if result == "UPDATE 1":
-        await message.answer(f"✅ Знижку для клієнта {user_id} позначено як <b>ВИКОРИСТАНУ</b>.\nТепер клієнт зможе знову отримати нову знижку.", parse_mode="HTML")
-    else:
-        await message.answer("❌ Знижку не знайдено або вона вже використана.")
+    if not rows:
+        return await message.answer("❌ Наразі немає клієнтів з активними знижками.")
 
+    builder = InlineKeyboardBuilder()
+    for row in rows:
+        # Назва кнопки: "Ім'я (Знижка%)"
+        button_text = f"{row['full_name']} ({row['discount_value']}%)"
+        # callback_data містить ID, щоб ми знали, кому саме скасувати
+        builder.add(types.InlineKeyboardButton(
+            text=button_text, 
+            callback_data=f"apply_{row['user_id']}"
+        ))
+    
+    builder.adjust(1) # Кнопки одна під одною
+    await message.answer("🎁 Оберіть клієнта, якому потрібно позначити знижку як використану:", reply_markup=builder.as_markup())
+
+@dp.callback_query(F.data.startswith("apply_"), F.from_user.id == ADMIN_ID)
+async def apply_discount_callback(callback_query: types.CallbackQuery):
+    # Отримуємо ID користувача з callback_data
+    user_id = int(callback_query.data.split("_")[1])
+    
+    conn = await asyncpg.connect(DATABASE_URL)
+    # Оновлюємо базу даних
+    result = await conn.execute(
+        "UPDATE discounts SET is_used = TRUE WHERE user_id = $1 AND is_used = FALSE", 
+        user_id
+    )
+    await conn.close()
+
+    # Перевіряємо, чи оновився рядок
+    if result == "UPDATE 1":
+        await callback_query.message.edit_text(f"✅ Знижку для клієнта (ID: `{user_id}`) успішно використано!")
+    else:
+        await callback_query.message.edit_text("❌ Знижку вже було використано раніше або клієнта не знайдено.")
+    
+    await callback_query.answer() # Обов'язково відповідаємо на callback
 
 # --- ПАНЕЛЬ АДМІНА ---
 
