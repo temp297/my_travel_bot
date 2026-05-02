@@ -1,7 +1,6 @@
 aiogram
 aiogram_calendar
 aiohttp
-aiosqlite
 apscheduler
 pytz
 asyncpg
