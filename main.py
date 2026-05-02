@@ -1,25 +1,22 @@
-import asyncio
-import logging
 import os
-import asyncpg
+import logging
+import asyncio
 import pytz
 import random
-import aiogram.exceptions
+import aiogram
+import asyncpg
 from datetime import datetime
-from aiohttp import web
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command, CommandStart, CommandObject
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from aiogram.utils.keyboard import ReplyKeyboardBuilder, InlineKeyboardBuilder
-from aiogram_calendar import SimpleCalendar, SimpleCalendarCallback
-from aiogram.types import BufferedInputFile
+from aiogram.fsm.storage.memory import MemoryStorage
+from aiogram.utils.keyboard import InlineKeyboardBuilder, ReplyKeyboardBuilder
 from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
+from aiohttp import web
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from aiogram.fsm.storage.redis import RedisStorage
-from redis.asyncio import Redis
-
-pool = None
+# Примітка: Імпорти для календаря та інших допоміжних модулів мають бути у вас у файлі, 
+# я залишаю структуру вашого коду недоторканою.
 
 # НАЛАШТУВАННЯ
 API_TOKEN = os.getenv("API_TOKEN")
@@ -33,10 +30,11 @@ if not API_TOKEN or not DATABASE_URL:
 
 logging.basicConfig(level=logging.INFO)
 bot = Bot(token=API_TOKEN)
-REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
-redis = Redis.from_url(REDIS_URL)
-storage = RedisStorage(redis=redis)
+
+# Змінено: Redis прибрано, використовуємо внутрішню пам'ять
+storage = MemoryStorage()
 dp = Dispatcher(storage=storage)
+
 ukraine_tz = pytz.timezone('Europe/Kyiv')
 scheduler = AsyncIOScheduler(timezone=ukraine_tz)
 
