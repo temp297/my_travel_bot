@@ -179,7 +179,7 @@ def meals_kb():
 
 def generate_discount():
     chance = random.random()
-    if chance < 0.70:
+    if chance < 0.80:
         return random.randint(2, 3)
     elif chance < 0.95:
         return 4
