@@ -405,12 +405,15 @@ async def process_contact(message: types.Message, state: FSMContext):
     
     await bot.send_message(ADMIN_ID, report, parse_mode="HTML")
 
+    # Отримуємо список ID для видалення
     msgs_to_delete = data.get("msgs_to_delete", [])
-    for m_id in msgs_to_delete:
-        try:
-            await bot.delete_message(chat_id=message.chat.id, message_id=m_id)
-        except Exception:
-            pass
+
+    # Створюємо список завдань на видалення
+    tasks = [bot.delete_message(chat_id=message.chat.id, message_id=m_id) for m_id in msgs_to_delete]
+
+    # Виконуємо всі завдання одночасно
+    if tasks:
+        await asyncio.gather(*tasks, return_exceptions=True)
 
     re_builder = ReplyKeyboardBuilder()
     re_builder.add(types.KeyboardButton(text="🔄 СТВОРИТИ НОВУ ЗАЯВКУ"))
@@ -602,11 +605,10 @@ async def process_admin_date(callback_query: types.CallbackQuery, callback_data:
             await conn.execute("INSERT INTO feedbacks (user_id, return_date) VALUES ($1, $2)", client_id, formatted)
         
         msgs_to_delete = data.get("msgs_to_delete", [])
-        for m_id in msgs_to_delete:
-            try:
-                await bot.delete_message(chat_id=callback_query.message.chat.id, message_id=m_id)
-            except Exception:
-                pass
+        tasks = [bot.delete_message(chat_id=callback_query.message.chat.id, message_id=m_id) for m_id in msgs_to_delete]
+        
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
 
         await callback_query.message.answer(
             f"✅ <b>Запит на відгук заплановано!</b>\n"
