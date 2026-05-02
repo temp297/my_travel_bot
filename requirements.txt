@@ -1,7 +1,8 @@
-aiogram
-aiogram_calendar
+aiogram>=3.0.0
+asyncpg
+pytz
 aiohttp
 apscheduler
-pytz
-asyncpg
+redis
+aiogram-calendar
 python-dotenv
