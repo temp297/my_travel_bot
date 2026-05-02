@@ -72,27 +72,28 @@ async def save_msg(message: types.Message, state: FSMContext):
 async def init_db():
     global pool
     pool = await asyncpg.create_pool(DATABASE_URL)
-    await pool.execute("""
-        CREATE TABLE IF NOT EXISTS discounts (
-            user_id BIGINT PRIMARY KEY,
-            discount_value INTEGER,
-            is_used BOOLEAN DEFAULT FALSE
-            )
+    async with pool.acquire() as conn:
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS discounts (
+                user_id BIGINT PRIMARY KEY,
+                discount_value INTEGER,
+                is_used BOOLEAN DEFAULT FALSE
+                )
         """)
         await conn.execute("""
-        CREATE TABLE IF NOT EXISTS feedbacks (
-            id SERIAL PRIMARY KEY,
-            user_id BIGINT,
-            return_date TEXT,
-            sent INTEGER DEFAULT 0
-            )
+            CREATE TABLE IF NOT EXISTS feedbacks (
+                id SERIAL PRIMARY KEY,
+                user_id BIGINT,
+                return_date TEXT,
+                sent INTEGER DEFAULT 0
+                )
         """)
         await conn.execute("""
-        CREATE TABLE IF NOT EXISTS users (
-            user_id BIGINT PRIMARY KEY,
-            username TEXT,
-            full_name TEXT
-            )
+            CREATE TABLE IF NOT EXISTS users (
+                user_id BIGINT PRIMARY KEY,
+                username TEXT,
+                full_name TEXT
+                )
         """)
         try:
             await conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS full_name TEXT")
@@ -117,26 +118,26 @@ async def get_user_discount(user_id: int):
 async def check_returns():
     today = datetime.now(pytz.timezone('Europe/Kyiv')).strftime("%d.%m.%Y")
     async with pool.acquire() as conn:
-    rows = await conn.fetch(
-        "SELECT id, user_id FROM feedbacks WHERE return_date = $1 AND sent = 0", 
-        today
-    )
-    for row in rows:
-        record_id = row['id']
-        user_id = row['user_id']
-        try:
-            await bot.send_message(
-                user_id,
-                "✈️ З поверненням! Сподіваємося, Ваш відпочинок був чудовим.\n\nБудь ласка, оцініть нашу роботу:",
-                reply_markup=rating_kb()
-            )
-            await conn.execute("UPDATE feedbacks SET sent = 1 WHERE id = $1", record_id)
-            await asyncio.sleep(0.05)
-        except TelegramForbidden:
-            logging.warning(f"Користувач {user_id} заблокував бота.")
-            await conn.execute("DELETE FROM feedbacks WHERE id = $1", record_id)
-        except Exception as e:
-            logging.error(f"Помилка при надсиланні відгуку {user_id}: {e}")
+        rows = await conn.fetch(
+            "SELECT id, user_id FROM feedbacks WHERE return_date = $1 AND sent = 0", 
+            today
+        )
+        for row in rows:
+            record_id = row['id']
+            user_id = row['user_id']
+            try:
+                await bot.send_message(
+                    user_id,
+                    "✈️ З поверненням! Сподіваємося, Ваш відпочинок був чудовим.\n\nБудь ласка, оцініть нашу роботу:",
+                    reply_markup=rating_kb()
+                )
+                await conn.execute("UPDATE feedbacks SET sent = 1 WHERE id = $1", record_id)
+                await asyncio.sleep(0.05)
+            except TelegramForbidden:
+                logging.warning(f"Користувач {user_id} заблокував бота.")
+                await conn.execute("DELETE FROM feedbacks WHERE id = $1", record_id)
+            except Exception as e:
+                logging.error(f"Помилка при надсиланні відгуку {user_id}: {e}")
 
 # КЛАВІАТУРИ
 def start_inline_kb():
@@ -495,36 +496,36 @@ async def process_feedback_text(message: types.Message, state: FSMContext):
 async def cmd_discount(message: types.Message, state: FSMContext):
     user_id = message.from_user.id
     async with pool.acquire() as conn:
-    row = await conn.fetchrow("SELECT discount_value FROM discounts WHERE user_id = $1 AND is_used = FALSE", user_id)
-    if row:
-        discount = row['discount_value']
-        text = f"🎁 У вас є активна знижка: **{discount}%**\nВикористайте її під час бронювання наступного туру!"
-    else:
-        chance = random.random()
-        if chance < 0.70:
-            discount = random.randint(2, 3)
-        elif chance < 0.95:
-            discount = 4
+        row = await conn.fetchrow("SELECT discount_value FROM discounts WHERE user_id = $1 AND is_used = FALSE", user_id)
+        if row:
+            discount = row['discount_value']
+            text = f"🎁 У вас є активна знижка: **{discount}%**\nВикористайте її під час бронювання наступного туру!"
         else:
-            discount = 5
-        await conn.execute("""
-        INSERT INTO discounts (user_id, discount_value, is_used) 
-        VALUES ($1, $2, FALSE)
-        ON CONFLICT (user_id) DO UPDATE SET discount_value = $2, is_used = FALSE
-        """, user_id, discount)
-        text = f"Вітаємо! Ви виграли знижку на наступну подорож: **{discount}%** 🎉"
+            chance = random.random()
+            if chance < 0.70:
+                discount = random.randint(2, 3)
+            elif chance < 0.95:
+                discount = 4
+            else:
+                discount = 5
+            await conn.execute("""
+            INSERT INTO discounts (user_id, discount_value, is_used) 
+            VALUES ($1, $2, FALSE)
+            ON CONFLICT (user_id) DO UPDATE SET discount_value = $2, is_used = FALSE
+            """, user_id, discount)
+            text = f"Вітаємо! Ви виграли знижку на наступну подорож: **{discount}%** 🎉"
     await message.answer(text, parse_mode="Markdown")
 
 @dp.message(Command("check_discounts"), F.from_user.id == ADMIN_ID)
 async def check_active_discounts(message: types.Message):
     async with pool.acquire() as conn:
         rows = await conn.fetch("SELECT user_id, discount_value FROM discounts WHERE is_used = FALSE")
-    if not rows:
-        return await message.answer("Активних знижок зараз немає.")
-    text = "🎁 <b>Список клієнтів з активними знижками:</b>\n"
-    for row in rows:
-        text += f"👤 ID: <code>{row['user_id']}</code> — {row['discount_value']}%\n"
-    await message.answer(text, parse_mode="HTML")
+        if not rows:
+            return await message.answer("Активних знижок зараз немає.")
+        text = "🎁 <b>Список клієнтів з активними знижками:</b>\n"
+        for row in rows:
+            text += f"👤 ID: <code>{row['user_id']}</code> — {row['discount_value']}%\n"
+        await message.answer(text, parse_mode="HTML")
 
 @dp.message(Command("use_discount"), F.from_user.id == ADMIN_ID)
 async def cmd_use_discount_list(message: types.Message):
