@@ -196,21 +196,30 @@ async def cmd_start(message: types.Message, state: FSMContext, command: CommandO
     name = user.full_name or "Мандрівник"
     await save_user(user)
     await state.clear()
+    
     if args == "discount":
-        discount = generate_discount()
-        await pool.execute("""
-            INSERT INTO discounts (user_id, discount_value, is_used) 
-            VALUES ($1, $2, FALSE) 
-            ON CONFLICT (user_id) DO UPDATE 
-            SET discount_value = EXCLUDED.discount_value, is_used = FALSE
-            """, user.id, discount)
-        greeting = f"Вітаємо, {name}! 🎁 Ви активували знижку {discount}%."
+        # ПЕРЕВІРКА: чи є вже активна знижка
+        existing_discount = await get_user_discount(user.id)
+        if existing_discount:
+            discount = existing_discount['discount_value']
+            greeting = f"Вітаємо, {name}! 🎁 У вас вже є активна знижка: {discount}%."
+        else:
+            # Тільки якщо немає активної знижки — генеруємо нову
+            discount = generate_discount()
+            await pool.execute("""
+                INSERT INTO discounts (user_id, discount_value, is_used) 
+                VALUES ($1, $2, FALSE) 
+                ON CONFLICT (user_id) DO UPDATE 
+                SET discount_value = EXCLUDED.discount_value, is_used = FALSE
+                """, user.id, discount)
+            greeting = f"Вітаємо, {name}! 🎁 Ви активували знижку {discount}%."
     else:
         discount_row = await get_user_discount(user.id)
         if discount_row:
             greeting = f"Вітаємо, {name}! 🎁 Ваша знижка: {discount_row['discount_value']}%."
         else:
             greeting = f"Вітаємо, {name}! Я допоможу вам підібрати тур."
+    
     await message.answer(greeting)
     await state.set_state(TourRequest.start_confirmed)
     msg = await message.answer("Натисніть кнопку нижче, щоб розпочати:", reply_markup=start_inline_kb())
@@ -402,7 +411,6 @@ async def process_meals(callback_query: types.CallbackQuery, state: FSMContext):
 async def process_budget(message: types.Message, state: FSMContext):
     budget_raw = message.text.lower().replace(" ", "").replace("грн", "").replace("$", "").replace("usd", "").replace("eur", "")
     
-    # ВАЛІДАЦІЯ: перевірка на цифри
     if not budget_raw.isdigit():
         msg = await message.answer("⚠️ Будь ласка, введіть бюджет лише цифрами (наприклад: 20000):")
         await save_msg(msg, state)
