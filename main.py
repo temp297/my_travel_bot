@@ -38,7 +38,7 @@ if not API_TOKEN or not DATABASE_URL:
 logging.basicConfig(level=logging.INFO)
 bot = Bot(token=API_TOKEN)
 
-# Використовуємо внутрішню пам'ять (для деплою на сервери краще змінити на Redis)
+# Використовуємо внутрішню пам'ять
 storage = MemoryStorage()
 dp = Dispatcher(storage=storage)
 
@@ -198,13 +198,11 @@ async def cmd_start(message: types.Message, state: FSMContext, command: CommandO
     await state.clear()
     
     if args == "discount":
-        # ПЕРЕВІРКА: чи є вже активна знижка
         existing_discount = await get_user_discount(user.id)
         if existing_discount:
             discount = existing_discount['discount_value']
             greeting = f"Вітаємо, {name}! 🎁 У вас вже є активна знижка: {discount}%."
         else:
-            # Тільки якщо немає активної знижки — генеруємо нову
             discount = generate_discount()
             await pool.execute("""
                 INSERT INTO discounts (user_id, discount_value, is_used) 
@@ -242,8 +240,10 @@ async def check_start_input(message: types.Message, state: FSMContext):
     msg = await message.answer("⚠️ Будь ласка, натисніть на кнопку «🚀 ПОЧАТИ ПІДБІР ТУРУ»")
     await save_msg(msg, state)
 
-@dp.callback_query(F.data == "start_selection", TourRequest.start_confirmed)
+# ОНОВЛЕНО: Тепер при виборі "ПОЧАТИ ПІДБІР" стан гарантовано скидається
+@dp.callback_query(F.data == "start_selection")
 async def process_start_callback(callback_query: types.CallbackQuery, state: FSMContext):
+    await state.clear() # Скидаємо все старе
     await callback_query.message.edit_reply_markup(reply_markup=None)
     msg = await callback_query.message.answer("🌍 Вкажіть пріоритетну країну та назву готелю (якщо визначилися)", reply_markup=types.ReplyKeyboardRemove())
     await save_msg(msg, state)
