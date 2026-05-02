@@ -1,4 +1,4 @@
-aiogram
+aiogram==3.15.0
 asyncpg
 pytz
 aiohttp
