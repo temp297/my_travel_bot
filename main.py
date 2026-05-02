@@ -4,6 +4,7 @@ import os
 import asyncpg
 import pytz
 import random
+import aiogram.exceptions
 from datetime import datetime
 from aiohttp import web
 from aiogram import Bot, Dispatcher, types, F
@@ -15,7 +16,6 @@ from aiogram_calendar import SimpleCalendar, SimpleCalendarCallback
 from aiogram.types import BufferedInputFile
 from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from aiogram.exceptions import TelegramBadRequest, TelegramForbidden
 from aiogram.fsm.storage.redis import RedisStorage
 from redis.asyncio import Redis
 
@@ -134,7 +134,7 @@ async def check_returns():
                 )
                 await conn.execute("UPDATE feedbacks SET sent = 1 WHERE id = $1", record_id)
                 await asyncio.sleep(0.05)
-            except TelegramForbidden:
+            except aiogram.exceptions.TelegramForbidden:
                 logging.warning(f"Користувач {user_id} заблокував бота.")
                 await conn.execute("DELETE FROM feedbacks WHERE id = $1", record_id)
             except Exception as e:
