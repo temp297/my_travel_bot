@@ -82,6 +82,7 @@ async def init_db():
         """)
         await conn.execute("""
         CREATE TABLE IF NOT EXISTS feedbacks (
+            id SERIAL PRIMARY KEY,
             user_id BIGINT,
             return_date TEXT,
             sent INTEGER DEFAULT 0
