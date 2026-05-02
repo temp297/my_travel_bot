@@ -21,16 +21,13 @@ pool = None
 # Отримуємо дані зі змінних оточення (Render -> Environment)
 API_TOKEN = os.getenv("API_TOKEN")
 DATABASE_URL = os.getenv("DATABASE_URL")
-
 # Використовуємо .get, щоб задати значення за замовчуванням або викликати помилку, якщо їх немає
 ADMIN_ID = int(os.getenv("ADMIN_ID", "7185133060"))
 REVIEWS_CHAT_ID = int(os.getenv("REVIEWS_CHAT_ID", "-1003818943967"))
 FEEDBACK_HOUR = int(os.getenv("FEEDBACK_HOUR", "10")) # Вкажіть годину тут
-
 # Валідація: якщо токен або база не задані, бот не запуститься і ви одразу побачите помилку
 if not API_TOKEN or not DATABASE_URL:
     raise ValueError("Помилка: API_TOKEN або DATABASE_URL не встановлені в Environment Variables!")
-
 logging.basicConfig(level=logging.INFO)
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher()
@@ -52,11 +49,9 @@ class TourRequest(StatesGroup):
     meal_type = State()
     budget = State()
     contact = State()
-
 class AdminPanel(StatesGroup):
     waiting_for_client_info = State()
     waiting_for_date = State()
-
 class FeedbackState(StatesGroup):
     waiting_for_rating = State()
     waiting_for_text = State()
@@ -73,7 +68,6 @@ async def init_db():
     global pool
     # Створюємо пул з'єднань
     pool = await asyncpg.create_pool(DATABASE_URL)
-    
     async with pool.acquire() as conn:
         # Таблиця знижок
         await conn.execute("""
@@ -103,7 +97,6 @@ async def init_db():
             await conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS full_name TEXT")
         except Exception as e:
             logging.info(f"Колонка full_name вже існує: {e}")
-
 async def save_user(user: types.User):
     async with pool.acquire() as conn:
         await conn.execute(
@@ -112,7 +105,6 @@ async def save_user(user: types.User):
             "username = EXCLUDED.username, full_name = EXCLUDED.full_name",
             user.id, user.username, user.full_name
         )
-
 async def check_returns():
     today = datetime.now(pytz.timezone('Europe/Kyiv')).strftime("%d.%m.%Y")
     async with pool.acquire() as conn:
@@ -134,14 +126,12 @@ def start_inline_kb():
     builder = InlineKeyboardBuilder()
     builder.add(types.InlineKeyboardButton(text="🚀 ПОЧАТИ ПІДБІР ТУРУ", callback_data="start_selection"))
     return builder.as_markup()
-
 def rating_kb():
     builder = InlineKeyboardBuilder()
     for i in range(1, 6):
         builder.add(types.InlineKeyboardButton(text=f"{i}⭐", callback_data=f"rate_{i}"))
     builder.adjust(5) 
     return builder.as_markup()
-
 def stars_kb():
     builder = InlineKeyboardBuilder()
     builder.add(types.InlineKeyboardButton(text="3*", callback_data="star_3"),
@@ -150,7 +140,6 @@ def stars_kb():
     builder.add(types.InlineKeyboardButton(text="Будь-яка", callback_data="star_any"))
     builder.adjust(3, 1)
     return builder.as_markup()
-
 def meals_kb():
     builder = InlineKeyboardBuilder()
     builder.add(types.InlineKeyboardButton(text="Сніданки (BB)", callback_data="meal_BB"),
@@ -167,7 +156,6 @@ async def cmd_start(message: types.Message, state: FSMContext, command: CommandO
     args = command.args  # Отримує текст після ?start=
     await save_user(message.from_user)
     await state.clear()
-
     # 1. Якщо перейшли за посиланням на знижку
     if args == "discount":
         await cmd_discount(message, state) # Викликаємо вашу існуючу функцію знижки
@@ -192,7 +180,6 @@ async def cmd_start(message: types.Message, state: FSMContext, command: CommandO
         await save_msg(message, state)
         await save_msg(msg, state)
         await state.set_state(TourRequest.start_confirmed)
-
 @dp.message(Command("cancel"))
 async def cmd_cancel(message: types.Message, state: FSMContext):
     await state.clear()
@@ -236,7 +223,6 @@ async def process_dest(message: types.Message, state: FSMContext):
     }
     final_destination = replacements.get(text, message.text.strip().capitalize())
     await state.update_data(destination=final_destination)
-    
     builder = InlineKeyboardBuilder()
     builder.add(types.InlineKeyboardButton(text="1", callback_data="adults_1"),
                 types.InlineKeyboardButton(text="2", callback_data="adults_2"),
@@ -246,7 +232,6 @@ async def process_dest(message: types.Message, state: FSMContext):
     await save_msg(msg1, state)
     await save_msg(msg2, state)
     await state.set_state(TourRequest.adults_count)
-
 @dp.message(TourRequest.adults_count)
 async def check_adults_input(message: types.Message, state: FSMContext):
     await save_msg(message, state)
@@ -268,7 +253,6 @@ async def process_adults(callback_query: types.CallbackQuery, state: FSMContext)
     await save_msg(msg1, state)
     await save_msg(msg2, state)
     await state.set_state(TourRequest.children_count)
-
 @dp.message(TourRequest.children_count)
 async def check_children_input(message: types.Message, state: FSMContext):
     await save_msg(message, state)
@@ -403,7 +387,6 @@ async def process_contact(message: types.Message, state: FSMContext):
         await asyncio.gather(*tasks, return_exceptions=True)
     re_builder = ReplyKeyboardBuilder()
     re_builder.add(types.KeyboardButton(text="🔄 СТВОРИТИ НОВУ ЗАЯВКУ"))
-    
     await message.answer(
         f"✅ Дякуємо! Заявку успішно відправлено!\nМи зв'яжемося з Вами найближчим часом 😊\n\n"
         f"<b>Деталі вашої заявки:</b>\n"
@@ -414,7 +397,7 @@ async def process_contact(message: types.Message, state: FSMContext):
         reply_markup=re_builder.as_markup(resize_keyboard=True)
     )
     await state.clear()
-
+    
 # --- ОБРОБНИКИ ВІДГУКІВ ---
 @dp.callback_query(F.data.startswith("rate_"))
 async def process_rating(callback_query: types.CallbackQuery, state: FSMContext):
@@ -425,7 +408,6 @@ async def process_rating(callback_query: types.CallbackQuery, state: FSMContext)
         "Будь ласка, напишіть декілька слів про Вашу подорож (Ваш відгук буде опубліковано у чаті мандрівників):"
     )
     await state.set_state(FeedbackState.waiting_for_text)
-
 async def delayed_feedback_reply(forwarded_msg, rating):
     wait_time = random.randint(60, 600)  # Випадковий час від 1 до 10 хвилин
     await asyncio.sleep(wait_time)       # Затримка працює у фоні, не блокуючи бота
@@ -463,7 +445,6 @@ async def process_feedback_text(message: types.Message, state: FSMContext):
     asyncio.create_task(delayed_feedback_reply(forwarded_msg, rating))
 
 # --- ОБРОБНИКИ ЗНИЖОК ---
-
 @dp.message(Command("discount"))
 async def cmd_discount(message: types.Message, state: FSMContext):
     user_id = message.from_user.id
@@ -491,7 +472,6 @@ async def cmd_discount(message: types.Message, state: FSMContext):
             """, user_id, discount)
             text = f"Вітаємо! Ви виграли знижку на наступну подорож: **{discount}%** 🎉"
     await message.answer(text, parse_mode="Markdown")
-
 @dp.message(Command("check_discounts"), F.from_user.id == ADMIN_ID)
 async def check_active_discounts(message: types.Message):
     async with pool.acquire() as conn:
@@ -502,7 +482,6 @@ async def check_active_discounts(message: types.Message):
     for row in rows:
         text += f"👤 ID: <code>{row['user_id']}</code> — {row['discount_value']}%\n"
     await message.answer(text, parse_mode="HTML")
-
 @dp.message(Command("use_discount"), F.from_user.id == ADMIN_ID)
 async def cmd_use_discount_list(message: types.Message):
     async with pool.acquire() as conn:
@@ -522,7 +501,6 @@ async def cmd_use_discount_list(message: types.Message):
         ))
     builder.adjust(1)
     await message.answer("🎁 Оберіть клієнта, якому потрібно позначити знижку як використану:", reply_markup=builder.as_markup())
-
 @dp.callback_query(F.data.startswith("apply_"), F.from_user.id == ADMIN_ID)
 async def apply_discount_callback(callback_query: types.CallbackQuery):
     user_id = int(callback_query.data.split("_")[1])
@@ -538,7 +516,6 @@ async def apply_discount_callback(callback_query: types.CallbackQuery):
     await callback_query.answer()
 
 # --- ПАНЕЛЬ АДМІНА ---
-
 @dp.message(Command("admin"), F.from_user.id == ADMIN_ID)
 async def admin_start(message: types.Message, state: FSMContext):
     await state.clear()
@@ -578,7 +555,6 @@ async def process_admin_search(message: types.Message, state: FSMContext):
     else:
         msg = await message.answer("❌ Клієнта не знайдено в базі і введений текст не є ID. Спробуйте ще раз:")
         await save_msg(msg, state)
-
 @dp.callback_query(SimpleCalendarCallback.filter(), AdminPanel.waiting_for_date)
 async def process_admin_date(callback_query: types.CallbackQuery, callback_data: SimpleCalendarCallback, state: FSMContext):
     selected, date = await SimpleCalendar().process_selection(callback_query, callback_data)
@@ -603,7 +579,6 @@ async def process_admin_date(callback_query: types.CallbackQuery, callback_data:
             parse_mode="HTML"
         )
         await state.clear()
-
 @dp.message(Command("users"), F.from_user.id == ADMIN_ID)
 async def list_users(message: types.Message):
     async with pool.acquire() as conn:
@@ -621,20 +596,17 @@ async def list_users(message: types.Message):
         discount_text = f" | 🎁 {row['discount_value']}%" if row['discount_value'] else ""
         text += f"👤 <b>{name}</b> — {username} (<code>{row['user_id']}</code>){discount_text}\n"
     await message.answer(text, parse_mode="HTML")
-
 async def on_shutdown(dispatcher: Dispatcher):
     global pool
     # Закриваємо пул
     if pool:
         await pool.close()
         logging.info("Пул БД закрито.")
-        
     # Зупиняємо планувальник
     scheduler.shutdown()
     logging.info("Планувальник зупинено.")
 
 # --- ТЕХНІЧНИЙ БЛОК ---
-
 async def main():
     await init_db()
     # Отримуємо налаштування з оточення
@@ -647,7 +619,6 @@ async def main():
         secret_token=WEBHOOK_SECRET
     )
     app = web.Application()
-
     # 2. Налаштовуємо обробник вебхуків (SimpleRequestHandler)
     webhook_requests_handler = SimpleRequestHandler(
         dispatcher=dp,
@@ -655,13 +626,10 @@ async def main():
         secret_token=WEBHOOK_SECRET,
     )
     webhook_requests_handler.register(app, path="/webhook")
-
     # 3. Реєструємо диспетчер в додатку
     setup_application(app, dp, bot=bot)
-    
     # Реєструємо функцію завершення
     app.on_shutdown.append(on_shutdown)
-
     # 4. Налаштування команд
     await bot.set_my_commands([
         types.BotCommand(command="start", description="🚀 Почати підбір туру"), 
@@ -672,20 +640,16 @@ async def main():
         types.BotCommand(command="users", description="👥 Список туристів"),
         types.BotCommand(command="cancel", description="❌ Скасувати дію")
     ])
-
     # 5. Запуск планувальника
     scheduler.add_job(check_returns, 'cron', hour=FEEDBACK_HOUR, minute=0)
     scheduler.start()
-
     # 6. Запуск aiohttp сервера (Render вимагає веб-сервер)
     runner = web.AppRunner(app)
     await runner.setup()
     port = int(os.environ.get("PORT", 8080))
     site = web.TCPSite(runner, "0.0.0.0", port)
     await site.start()
-
     # Це утримує бота запущеним, поки Render не вимкне контейнер
     await asyncio.Event().wait()
-
 if __name__ == "__main__":
     asyncio.run(main())
