@@ -162,7 +162,6 @@ def meals_kb():
     return builder.as_markup()
 
 # --- ОБРОБНИКИ АНКЕТИ ---
-
 @dp.message(CommandStart())
 async def cmd_start(message: types.Message, state: FSMContext, command: CommandObject):
     args = command.args  # Отримує текст після ?start=
@@ -173,7 +172,6 @@ async def cmd_start(message: types.Message, state: FSMContext, command: CommandO
     if args == "discount":
         await cmd_discount(message, state) # Викликаємо вашу існуючу функцію знижки
         return
-
     # 2. Якщо перейшли за посиланням на тур
     elif args == "tour":
         msg = await message.answer(
@@ -184,7 +182,6 @@ async def cmd_start(message: types.Message, state: FSMContext, command: CommandO
         await save_msg(message, state)
         await save_msg(msg, state)
         await state.set_state(TourRequest.start_confirmed)
-
     # 3. Звичайний запуск (без посилання)
     else:
         msg = await message.answer(
@@ -203,7 +200,6 @@ async def cmd_cancel(message: types.Message, state: FSMContext):
         "❌ Дія скасована. Тепер ви можете вільно користуватися іншими командами.", 
         reply_markup=types.ReplyKeyboardRemove()
     )
-
 @dp.message(TourRequest.start_confirmed)
 async def check_start_input(message: types.Message, state: FSMContext):
     if message.text and message.text.startswith("/"):
@@ -211,7 +207,6 @@ async def check_start_input(message: types.Message, state: FSMContext):
     await save_msg(message, state)
     msg = await message.answer("⚠️ Будь ласка, натисніть на кнопку «🚀 ПОЧАТИ ПІДБІР ТУРУ»")
     await save_msg(msg, state)
-
 @dp.callback_query(F.data == "start_selection", TourRequest.start_confirmed)
 async def process_start_callback(callback_query: types.CallbackQuery, state: FSMContext):
     await callback_query.message.edit_reply_markup(reply_markup=None)
@@ -219,7 +214,6 @@ async def process_start_callback(callback_query: types.CallbackQuery, state: FSM
     msg = await callback_query.message.answer("🌍 Вкажіть пріоритетну країну та назву готелю (якщо визначилися)", reply_markup=types.ReplyKeyboardRemove())
     await save_msg(msg, state)
     await state.set_state(TourRequest.destination)
-
 @dp.message(TourRequest.destination)
 async def process_dest(message: types.Message, state: FSMContext):
     await save_msg(message, state)
@@ -228,7 +222,6 @@ async def process_dest(message: types.Message, state: FSMContext):
         msg = await message.answer("⚠️ Введіть назву країни літерами.")
         await save_msg(msg, state)
         return
-
     replacements = {
         "турция": "Туреччина", "туреччина": "Туреччина", "турція": "Туреччина", "анталія": "Туреччина (Анталія)", "анталия": "Туреччина (Анталія)", "кемер": "Туреччина (Кемер)", "аланія": "Туреччина (Аланія)", "белек": "Туреччина (Белек)",
         "египет": "Єгипет", "єгипет": "Єгипет", "егіпет": "Єгипет", "єгіпет": "Єгипет", "египт": "Єгипет", "єгіпєт": "Єгипет", "егіпєт": "Єгипет", "шарм": "Єгипет (Шарм-ель-Шейх)", "хургада": "Єгипет (Хургада)", "марса": "Єгипет (Марса-Алам)",
@@ -259,21 +252,17 @@ async def check_adults_input(message: types.Message, state: FSMContext):
     await save_msg(message, state)
     msg = await message.answer("⚠️ Будь ласка, оберіть кількість дорослих натиснувши кнопку вище.")
     await save_msg(msg, state)
-
 @dp.callback_query(F.data.startswith("adults_"), TourRequest.adults_count)
 async def process_adults(callback_query: types.CallbackQuery, state: FSMContext):
     await callback_query.message.edit_reply_markup(reply_markup=None)
-    
     count = callback_query.data.split("_")[1]
     await state.update_data(adults=count)
-    
     builder = InlineKeyboardBuilder()
     builder.add(types.InlineKeyboardButton(text="Без дітей (0)", callback_data="child_0"))
     builder.add(types.InlineKeyboardButton(text="1", callback_data="child_1"),
                 types.InlineKeyboardButton(text="2", callback_data="child_2"),
                 types.InlineKeyboardButton(text="3+", callback_data="child_3"))
     builder.adjust(1, 3)
-    
     msg1 = await callback_query.message.answer(f"👤 Дорослих: {count}")
     msg2 = await callback_query.message.answer(f"👶 Скільки буде дітей?", reply_markup=builder.as_markup())
     await save_msg(msg1, state)
@@ -285,14 +274,11 @@ async def check_children_input(message: types.Message, state: FSMContext):
     await save_msg(message, state)
     msg = await message.answer("⚠️ Будь ласка, оберіть кількість дітей натиснувши кнопку вище.")
     await save_msg(msg, state)
-
 @dp.callback_query(F.data.startswith("child_"), TourRequest.children_count)
 async def process_children(callback_query: types.CallbackQuery, state: FSMContext):
     await callback_query.message.edit_reply_markup(reply_markup=None)
-    
     count = callback_query.data.split("_")[1]
     await state.update_data(children=count)
-    
     msg1 = await callback_query.message.answer(f"👶 Дітей: {count}")
     msg2 = await callback_query.message.answer(
         f"📅 Оберіть дату, з якої можна планувати виліт (З):", 
@@ -301,13 +287,11 @@ async def process_children(callback_query: types.CallbackQuery, state: FSMContex
     await save_msg(msg1, state)
     await save_msg(msg2, state)
     await state.set_state(TourRequest.date_from) 
-
 @dp.message(TourRequest.date_from)
 async def check_date_from_input(message: types.Message, state: FSMContext):
     await save_msg(message, state)
     msg = await message.answer("⚠️ Будь ласка, оберіть дату на календарі вище.")
     await save_msg(msg, state)
-
 @dp.callback_query(SimpleCalendarCallback.filter(), TourRequest.date_from)
 async def process_date_from(callback_query: types.CallbackQuery, callback_data: SimpleCalendarCallback, state: FSMContext):
     selected, date = await SimpleCalendar().process_selection(callback_query, callback_data)
@@ -322,26 +306,22 @@ async def process_date_from(callback_query: types.CallbackQuery, callback_data: 
         await save_msg(msg1, state)
         await save_msg(msg2, state)
         await state.set_state(TourRequest.date_to)
-
 @dp.message(TourRequest.date_to)
 async def check_date_to_input(message: types.Message, state: FSMContext):
     await save_msg(message, state)
     msg = await message.answer("⚠️ Будь ласка, оберіть дату на календарі вище.")
     await save_msg(msg, state)
-
 @dp.callback_query(SimpleCalendarCallback.filter(), TourRequest.date_to)
 async def process_date_to(callback_query: types.CallbackQuery, callback_data: SimpleCalendarCallback, state: FSMContext):
     selected, date = await SimpleCalendar().process_selection(callback_query, callback_data)
     if selected:
         formatted = date.strftime("%d.%m.%Y")
         await state.update_data(date_to=formatted)
-        
         msg1 = await callback_query.message.answer(f"✅ Дата вильоту (ПО): {formatted}")
         msg2 = await callback_query.message.answer(f"🌙 На скільки ночей плануєте відпочинок?")
         await save_msg(msg1, state)
         await save_msg(msg2, state)
         await state.set_state(TourRequest.nights_count)
-
 @dp.message(TourRequest.nights_count)
 async def process_nights(message: types.Message, state: FSMContext):
     await save_msg(message, state)
@@ -349,17 +329,14 @@ async def process_nights(message: types.Message, state: FSMContext):
     msg = await message.answer("⭐ Оберіть категорію готелю", reply_markup=stars_kb())
     await save_msg(msg, state)
     await state.set_state(TourRequest.hotel_stars)
-
 @dp.message(TourRequest.hotel_stars)
 async def check_stars_input(message: types.Message, state: FSMContext):
     await save_msg(message, state)
     msg = await message.answer("⚠️ Будь ласка, оберіть категорію готелю кнопкою.")
     await save_msg(msg, state)
-
 @dp.callback_query(F.data.startswith("star_"), TourRequest.hotel_stars)
 async def process_stars(callback_query: types.CallbackQuery, state: FSMContext):
     await callback_query.message.edit_reply_markup(reply_markup=None)
-    
     star = callback_query.data.split("_")[1]
     label = "Будь-яка" if star == "any" else f"{star}*"
     await state.update_data(stars=label)
@@ -368,17 +345,14 @@ async def process_stars(callback_query: types.CallbackQuery, state: FSMContext):
     await save_msg(msg1, state)
     await save_msg(msg2, state)
     await state.set_state(TourRequest.meal_type)
-
 @dp.message(TourRequest.meal_type)
 async def check_meals_input(message: types.Message, state: FSMContext):
     await save_msg(message, state)
     msg = await message.answer("⚠️ Будь ласка, оберіть тип харчування кнопкою.")
     await save_msg(msg, state)
-
 @dp.callback_query(F.data.startswith("meal_"), TourRequest.meal_type)
 async def process_meals(callback_query: types.CallbackQuery, state: FSMContext):
     await callback_query.message.edit_reply_markup(reply_markup=None)
-    
     meal_map = {"BB": "Сніданки", "HB": "Сніданок+вечеря", "AI": "Все включено", "UAI": "Ультра все включено", "RO": "Без харчування"}
     meal_text = meal_map.get(callback_query.data.split("_")[1], "Будь-яке")
     await state.update_data(meals=meal_text)
@@ -387,7 +361,6 @@ async def process_meals(callback_query: types.CallbackQuery, state: FSMContext):
     await save_msg(msg1, state)
     await save_msg(msg2, state)
     await state.set_state(TourRequest.budget)
-
 @dp.message(TourRequest.budget)
 async def process_budget(message: types.Message, state: FSMContext):
     await save_msg(message, state)
@@ -395,13 +368,11 @@ async def process_budget(message: types.Message, state: FSMContext):
     msg = await message.answer("📞 Ваш номер телефону або нікнейм для зв'язку:")
     await save_msg(msg, state)
     await state.set_state(TourRequest.contact)
-
 @dp.message(TourRequest.contact)
 async def process_contact(message: types.Message, state: FSMContext):
     await save_msg(message, state)
     data = await state.get_data()
     user = message.from_user
-    
     info_table = (
         f"🌍 <b>Напрямок:</b> {data.get('destination')}\n"
         f"👥 <b>Склад:</b> {data.get('adults')} дор. + {data.get('children')} діт.\n"
@@ -412,7 +383,6 @@ async def process_contact(message: types.Message, state: FSMContext):
         f"💰 <b>Бюджет:</b> {data.get('budget')} ГРН\n"
         f"📱 <b>Контакт:</b> {message.text}"
     )
-
     report = (
         f"🔥 <b>НОВА ЗАЯВКА НА ТУР!</b>\n"
         f"━━━━━━━━━━━━━━━\n"
@@ -423,19 +393,14 @@ async def process_contact(message: types.Message, state: FSMContext):
         f"🆔 <b>ID для відгуку:</b> <code>{user.id}</code>\n"
         f"━━━━━━━━━━━━━━━"
     )
-    
     await bot.send_message(ADMIN_ID, report, parse_mode="HTML")
-
     # Отримуємо список ID для видалення
     msgs_to_delete = data.get("msgs_to_delete", [])
-
     # Створюємо список завдань на видалення
     tasks = [bot.delete_message(chat_id=message.chat.id, message_id=m_id) for m_id in msgs_to_delete]
-
     # Виконуємо всі завдання одночасно
     if tasks:
         await asyncio.gather(*tasks, return_exceptions=True)
-
     re_builder = ReplyKeyboardBuilder()
     re_builder.add(types.KeyboardButton(text="🔄 СТВОРИТИ НОВУ ЗАЯВКУ"))
     
@@ -451,7 +416,6 @@ async def process_contact(message: types.Message, state: FSMContext):
     await state.clear()
 
 # --- ОБРОБНИКИ ВІДГУКІВ ---
-
 @dp.callback_query(F.data.startswith("rate_"))
 async def process_rating(callback_query: types.CallbackQuery, state: FSMContext):
     rating = int(callback_query.data.split("_")[1])
@@ -465,7 +429,6 @@ async def process_rating(callback_query: types.CallbackQuery, state: FSMContext)
 async def delayed_feedback_reply(forwarded_msg, rating):
     wait_time = random.randint(60, 600)  # Випадковий час від 1 до 10 хвилин
     await asyncio.sleep(wait_time)       # Затримка працює у фоні, не блокуючи бота
-    
     if rating == 5:
         reply_text = "😍 Неймовірно! Ми дуже раді, що відпочинок пройшов ідеально. Дякуємо, що обираєте нас! ❤️"
     elif rating == 4:
@@ -478,13 +441,11 @@ async def delayed_feedback_reply(forwarded_msg, rating):
         await forwarded_msg.reply(reply_text)
     except Exception as e:
         logging.error(f"Error sending delayed reply: {e}")
-
 @dp.message(FeedbackState.waiting_for_text)
 async def process_feedback_text(message: types.Message, state: FSMContext):
     data = await state.get_data()
     rating = data.get("user_rating")
     user = message.from_user
-    
     feedback_header = (
         f"🌟 <b>НОВИЙ ВІДГУК!</b>\n"
         f"👤 <b>Від:</b> {user.full_name}\n"
@@ -492,12 +453,11 @@ async def process_feedback_text(message: types.Message, state: FSMContext):
         f"⭐ <b>Оцінка:</b> {rating}⭐\n"
         f"━━━━━━━━━━━━━━━"
     )
-    
     await bot.send_message(REVIEWS_CHAT_ID, feedback_header, parse_mode="HTML")
     forwarded_msg = await message.forward(chat_id=REVIEWS_CHAT_ID)
     await message.answer("❤️ Дякуємо за Ваш відгук! Його опубліковано у чаті мандрівників.")
     await state.clear()
-    
+
     # ЗАПУСКАЄМО ФОНОВЕ ЗАВДАННЯ
     # Це дозволяє боту продовжити роботу одразу, не чекаючи завершення таймера
     asyncio.create_task(delayed_feedback_reply(forwarded_msg, rating))
@@ -524,7 +484,6 @@ async def cmd_discount(message: types.Message, state: FSMContext):
             else:
                 # Решта 5% шанс: знижка 5%
                 discount = 5
-            
             await conn.execute("""
                 INSERT INTO discounts (user_id, discount_value, is_used) 
                 VALUES ($1, $2, FALSE)
@@ -537,10 +496,8 @@ async def cmd_discount(message: types.Message, state: FSMContext):
 async def check_active_discounts(message: types.Message):
     async with pool.acquire() as conn:
         rows = await conn.fetch("SELECT user_id, discount_value FROM discounts WHERE is_used = FALSE")
-    
     if not rows:
         return await message.answer("Активних знижок зараз немає.")
-
     text = "🎁 <b>Список клієнтів з активними знижками:</b>\n"
     for row in rows:
         text += f"👤 ID: <code>{row['user_id']}</code> — {row['discount_value']}%\n"
@@ -555,17 +512,14 @@ async def cmd_use_discount_list(message: types.Message):
             JOIN users u ON d.user_id = u.user_id
             WHERE d.is_used = FALSE
         """)
-    
     if not rows:
         return await message.answer("❌ Наразі немає клієнтів з активними знижками.")
-
     builder = InlineKeyboardBuilder()
     for row in rows:
         builder.add(types.InlineKeyboardButton(
             text=f"{row['full_name']} ({row['discount_value']}%)", 
             callback_data=f"apply_{row['user_id']}"
         ))
-    
     builder.adjust(1)
     await message.answer("🎁 Оберіть клієнта, якому потрібно позначити знижку як використану:", reply_markup=builder.as_markup())
 
@@ -592,14 +546,12 @@ async def admin_start(message: types.Message, state: FSMContext):
     await save_msg(message, state)
     await save_msg(msg, state)
     await state.set_state(AdminPanel.waiting_for_client_info)
-
 @dp.message(AdminPanel.waiting_for_client_info)
 async def process_admin_search(message: types.Message, state: FSMContext):
     await save_msg(message, state)
     input_data = message.text.strip().replace("@", "").lower()
     target_id = None
     username = "невідомий"
-
     async with pool.acquire() as conn:
         if input_data.isdigit():
             row = await conn.fetchrow("SELECT user_id, username FROM users WHERE user_id = $1", int(input_data))
@@ -614,7 +566,6 @@ async def process_admin_search(message: types.Message, state: FSMContext):
             if row:
                 target_id = row['user_id']
                 username = f"@{row['username']}"
-
     if target_id:
         await state.update_data(client_id=target_id, client_username=username)
         msg = await message.answer(
@@ -636,16 +587,12 @@ async def process_admin_date(callback_query: types.CallbackQuery, callback_data:
         data = await state.get_data()
         client_id = data.get('client_id')
         username = data.get('client_username')
-        
         async with pool.acquire() as conn:
             await conn.execute("INSERT INTO feedbacks (user_id, return_date) VALUES ($1, $2)", client_id, formatted)
-        
         msgs_to_delete = data.get("msgs_to_delete", [])
         tasks = [bot.delete_message(chat_id=callback_query.message.chat.id, message_id=m_id) for m_id in msgs_to_delete]
-        
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
-
         await callback_query.message.answer(
             f"✅ <b>Запит на відгук заплановано!</b>\n"
             f"━━━━━━━━━━━━━━━\n"
@@ -665,10 +612,8 @@ async def list_users(message: types.Message):
             FROM users u 
             LEFT JOIN discounts d ON u.user_id = d.user_id AND d.is_used = FALSE
         """)
-    
     if not rows:
         return await message.answer("База даних поки порожня.")
-    
     text = "👥 <b>Список туристів:</b>\n━━━━━━━━━━━━━━━\n"
     for row in rows:
         username = f"@{row['username']}" if row['username'] else "немає"
@@ -677,14 +622,13 @@ async def list_users(message: types.Message):
         text += f"👤 <b>{name}</b> — {username} (<code>{row['user_id']}</code>){discount_text}\n"
     await message.answer(text, parse_mode="HTML")
 
-
 async def on_shutdown(dispatcher: Dispatcher):
     global pool
     # Закриваємо пул
     if pool:
         await pool.close()
         logging.info("Пул БД закрито.")
-    
+        
     # Зупиняємо планувальник
     scheduler.shutdown()
     logging.info("Планувальник зупинено.")
@@ -693,18 +637,15 @@ async def on_shutdown(dispatcher: Dispatcher):
 
 async def main():
     await init_db()
-
     # Отримуємо налаштування з оточення
     WEBHOOK_URL = os.getenv("WEBHOOK_URL")
     # Додайте цю змінну в Render, або вона буде "secret" за замовчуванням
     WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "super_secret_key")
-
     # 1. Встановлюємо вебхук
     await bot.set_webhook(
         url=f"{WEBHOOK_URL}/webhook",
         secret_token=WEBHOOK_SECRET
     )
-
     app = web.Application()
 
     # 2. Налаштовуємо обробник вебхуків (SimpleRequestHandler)
