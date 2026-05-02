@@ -461,6 +461,23 @@ async def process_rating(callback_query: types.CallbackQuery, state: FSMContext)
     )
     await state.set_state(FeedbackState.waiting_for_text)
 
+async def delayed_feedback_reply(forwarded_msg, rating):
+    wait_time = random.randint(60, 600)  # Випадковий час від 1 до 10 хвилин
+    await asyncio.sleep(wait_time)       # Затримка працює у фоні, не блокуючи бота
+    
+    if rating == 5:
+        reply_text = "😍 Неймовірно! Ми дуже раді, що відпочинок пройшов ідеально. Дякуємо, що обираєте нас! ❤️"
+    elif rating == 4:
+        reply_text = "😊 Дякуємо за відгук! Раді, що вам сподобалося. Будемо чекати на вас знову! ✨"
+    elif rating == 3:
+        reply_text = "🙏 Дякуємо за ваш відгук. Ми обов'язково врахуємо ваші зауваження, щоб стати кращими!"
+    else: 
+        reply_text = "😔 Нам дуже прикро, що ви залишилися незадоволені. Менеджер вже вивчає ситуацію, щоб зв'язатися з вами та все владнати."
+    try:
+        await forwarded_msg.reply(reply_text)
+    except Exception as e:
+        logging.error(f"Error sending delayed reply: {e}")
+
 @dp.message(FeedbackState.waiting_for_text)
 async def process_feedback_text(message: types.Message, state: FSMContext):
     data = await state.get_data()
@@ -480,22 +497,9 @@ async def process_feedback_text(message: types.Message, state: FSMContext):
     await message.answer("❤️ Дякуємо за Ваш відгук! Його опубліковано у чаті мандрівників.")
     await state.clear()
     
-    wait_time = random.randint(60, 600)
-    await asyncio.sleep(wait_time)
-    
-    if rating == 5:
-        reply_text = "😍 Неймовірно! Ми дуже раді, що відпочинок пройшов ідеально. Дякуємо, що обираєте нас! ❤️"
-    elif rating == 4:
-        reply_text = "😊 Дякуємо за відгук! Раді, що вам сподобалося. Будемо чекати на вас знову! ✨"
-    elif rating == 3:
-        reply_text = "🙏 Дякуємо за ваш відгук. Ми обов'язково врахуємо ваші зауваження, щоб стати кращими!"
-    else: 
-        reply_text = "😔 Нам дуже прикро, що ви залишилися незадоволені. Менеджер вже вивчає ситуацію, щоб зв'язатися з вами та все владнати."
-        
-    try:
-        await forwarded_msg.reply(reply_text)
-    except Exception as e:
-        logging.error(f"Error replying: {e}")
+    # ЗАПУСКАЄМО ФОНОВЕ ЗАВДАННЯ
+    # Це дозволяє боту продовжити роботу одразу, не чекаючи завершення таймера
+    asyncio.create_task(delayed_feedback_reply(forwarded_msg, rating))
 
 # --- ОБРОБНИКИ ЗНИЖОК ---
 
@@ -508,7 +512,18 @@ async def cmd_discount(message: types.Message, state: FSMContext):
             discount = row['discount_value']
             text = f"🎁 У вас є активна знижка: **{discount}%**\nВикористайте її під час бронювання наступного туру!"
         else:
-            discount = random.randint(1, 5)
+            # Логіка розподілу знижок:
+            chance = random.random()
+            if chance < 0.70:
+                # 70% шанс: знижка 2 або 3%
+                discount = random.randint(2, 3)
+            elif chance < 0.95:
+                # 25% шанс: знижка 4%
+                discount = 4
+            else:
+                # Решта 5% шанс: знижка 5%
+                discount = 5
+            
             await conn.execute("""
                 INSERT INTO discounts (user_id, discount_value, is_used) 
                 VALUES ($1, $2, FALSE)
@@ -664,10 +679,14 @@ async def list_users(message: types.Message):
 
 async def on_shutdown(dispatcher: Dispatcher):
     global pool
+    # Закриваємо пул
     if pool:
-        await pool.close() # <-- Додайте цей рядок
+        await pool.close()
+        logging.info("Пул БД закрито.")
+    
+    # Зупиняємо планувальник
     scheduler.shutdown()
-    logging.info("Бот зупинився, пул БД закрито.")
+    logging.info("Планувальник зупинено.")
 
 # --- ТЕХНІЧНИЙ БЛОК ---
 async def handle(request): return web.Response(text="Live")
