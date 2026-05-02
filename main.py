@@ -622,6 +622,9 @@ async def on_shutdown(dispatcher: Dispatcher):
 
 # --- ТЕХНІЧНИЙ БЛОК ---
 async def main():
+    # Очищення конфліктів вебхуків
+    await bot.delete_webhook(drop_pending_updates=True)
+    
     await init_db()
     WEBHOOK_URL = os.getenv("WEBHOOK_URL")
     WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "super_secret_key")
