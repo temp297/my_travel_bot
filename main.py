@@ -185,10 +185,10 @@ def generate_discount():
 @dp.message(CommandStart())
 async def cmd_start(message: types.Message, state: FSMContext, command: CommandObject):
     args = command.args
-    user_id = message.from_user.id
-    await save_user(message.from_user)
+    user = message.from_user
+    name = user.full_name or "Мандрівник"
+    await save_user(user)  # Оновлюємо ім'я в БД
     await state.clear()
-    
     if args == "discount":
         discount = generate_discount()
         await pool.execute("""
@@ -196,15 +196,17 @@ async def cmd_start(message: types.Message, state: FSMContext, command: CommandO
             VALUES ($1, $2, FALSE) 
             ON CONFLICT (user_id) DO UPDATE 
             SET discount_value = EXCLUDED.discount_value, is_used = FALSE
-            """, user_id, discount)
-        await message.answer(f"Вітаємо! Ви активували знижку {discount}%. Давайте підберемо вам тур.")
-        await state.set_state(TourRequest.start_confirmed)
-        msg = await message.answer("Натисніть кнопку, щоб почати:", reply_markup=start_inline_kb())
+            """, user.id, discount)
+        greeting = f"Вітаємо, {name}! 🎁 Ви активували знижку {discount}%."
     else:
-        await message.answer(f"Вітаємо, {message.from_user.first_name}! Я допоможу вам підібрати тур.")
-        await state.set_state(TourRequest.start_confirmed)
-        msg = await message.answer("Натисніть кнопку нижче, щоб розпочати:", reply_markup=start_inline_kb())
-        
+        discount_row = await get_user_discount(user.id)
+        if discount_row:
+            greeting = f"Вітаємо, {name}! 🎁 Ваша знижка: {discount_row['discount_value']}%."
+        else:
+            greeting = f"Вітаємо, {name}! Я допоможу вам підібрати тур."
+    await message.answer(greeting)
+    await state.set_state(TourRequest.start_confirmed)
+    msg = await message.answer("Натисніть кнопку нижче, щоб розпочати:", reply_markup=start_inline_kb())
     await save_msg(message, state)
     await save_msg(msg, state)
 
@@ -212,8 +214,8 @@ async def cmd_start(message: types.Message, state: FSMContext, command: CommandO
 async def cmd_cancel(message: types.Message, state: FSMContext):
     await state.clear()
     await message.answer(
-    "❌ Дія скасована. Тепер ви можете вільно користуватися іншими командами.", 
-    reply_markup=types.ReplyKeyboardRemove()
+        "❌ Дія скасована. Тепер ви можете вільно користуватися іншими командами.", 
+        reply_markup=types.ReplyKeyboardRemove()
     )
 
 @dp.message(TourRequest.start_confirmed)
