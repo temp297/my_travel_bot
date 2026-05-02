@@ -189,13 +189,13 @@ def generate_discount():
         return 5
 
 # ОБРОБНИКИ АНКЕТИ
-@dp.message(CommandStart())
+@dp.message(CommandStart(), state="*")
 async def cmd_start(message: types.Message, state: FSMContext, command: CommandObject):
+    await state.clear()
     args = command.args
     user = message.from_user
     name = user.full_name or "Мандрівник"
     await save_user(user)
-    await state.clear()
     
     if args == "discount":
         existing_discount = await get_user_discount(user.id)
@@ -224,7 +224,7 @@ async def cmd_start(message: types.Message, state: FSMContext, command: CommandO
     await save_msg(message, state)
     await save_msg(msg, state)
 
-@dp.message(Command("cancel"))
+@dp.message(Command("cancel"), state="*")
 async def cmd_cancel(message: types.Message, state: FSMContext):
     await state.clear()
     await message.answer(
@@ -240,10 +240,9 @@ async def check_start_input(message: types.Message, state: FSMContext):
     msg = await message.answer("⚠️ Будь ласка, натисніть на кнопку «🚀 ПОЧАТИ ПІДБІР ТУРУ»")
     await save_msg(msg, state)
 
-# ОНОВЛЕНО: Тепер при виборі "ПОЧАТИ ПІДБІР" стан гарантовано скидається
 @dp.callback_query(F.data == "start_selection")
 async def process_start_callback(callback_query: types.CallbackQuery, state: FSMContext):
-    await state.clear() # Скидаємо все старе
+    await state.clear() 
     await callback_query.message.edit_reply_markup(reply_markup=None)
     msg = await callback_query.message.answer("🌍 Вкажіть пріоритетну країну та назву готелю (якщо визначилися)", reply_markup=types.ReplyKeyboardRemove())
     await save_msg(msg, state)
@@ -267,7 +266,7 @@ async def process_dest(message: types.Message, state: FSMContext):
     "оае": "ОАЕ", "оаэ": "ОАЕ", "емираты": "ОАЕ", "емірати": "ОАЕ", "дубай": "ОАЕ (Дубай)", "дубаи": "ОАЕ (Дубай)",
     "таїланд": "Таїланд", "thailand": "Таїланд", "тайланд": "Таїланд", "тай": "Таїланд", "пхукет": "Таїланд (Пхукет)",
     "мальдіви": "Мальдіви", "мальдивы": "Мальдіви", "мальдиви": "Мальдіви", "домінікана": "Домінікана", "доминикана": "Домінікана",
-    "занзібар": "Занзібар", "занзибар": "Занзібар", "шрі ланка": "Шрі-Ланка", "шри ланка": "Шрі-Ланка", "балі": "Балі (Індонезія)", "бали": "Балі (Індонезія)"
+    "занзібар": "Занзібар", "занзибар": "Занзибар", "шрі ланка": "Шрі-Ланка", "шри ланка": "Шрі-Ланка", "балі": "Балі (Індонезія)", "бали": "Балі (Індонезія)"
     }
     final_destination = replacements.get(text, message.text.strip().capitalize())
     await state.update_data(destination=final_destination)
@@ -518,8 +517,9 @@ f"━━━━━━━━━━━━━━━"
     asyncio.create_task(delayed_feedback_reply(forwarded_msg, rating))
 
 # ОБРОБНИКИ ЗНИЖОК
-@dp.message(Command("discount"))
+@dp.message(Command("discount"), state="*")
 async def cmd_discount(message: types.Message, state: FSMContext):
+    await state.clear()
     user = message.from_user
     name = user.full_name or "Мандрівник"
     user_id = user.id
@@ -545,8 +545,9 @@ async def cmd_discount(message: types.Message, state: FSMContext):
     await state.set_state(TourRequest.start_confirmed)
     await message.answer(text, parse_mode="Markdown", reply_markup=start_inline_kb())
 
-@dp.message(Command("check_discounts"), F.from_user.id == ADMIN_ID)
-async def check_active_discounts(message: types.Message):
+@dp.message(Command("check_discounts"), state="*", F.from_user.id == ADMIN_ID)
+async def check_active_discounts(message: types.Message, state: FSMContext):
+    await state.clear()
     async with pool.acquire() as conn:
         rows = await conn.fetch("SELECT user_id, discount_value FROM discounts WHERE is_used = FALSE")
         if not rows:
@@ -556,8 +557,9 @@ async def check_active_discounts(message: types.Message):
             text += f"👤 ID: <code>{row['user_id']}</code> — {row['discount_value']}%\n"
         await message.answer(text, parse_mode="HTML")
 
-@dp.message(Command("use_discount"), F.from_user.id == ADMIN_ID)
-async def cmd_use_discount_list(message: types.Message):
+@dp.message(Command("use_discount"), state="*", F.from_user.id == ADMIN_ID)
+async def cmd_use_discount_list(message: types.Message, state: FSMContext):
+    await state.clear()
     async with pool.acquire() as conn:
         rows = await conn.fetch("""
         SELECT u.user_id, u.full_name, d.discount_value 
@@ -591,7 +593,7 @@ async def apply_discount_callback(callback_query: types.CallbackQuery):
     await callback_query.answer()
 
 # ПАНЕЛЬ АДМІНА
-@dp.message(Command("admin"), F.from_user.id == ADMIN_ID)
+@dp.message(Command("admin"), state="*", F.from_user.id == ADMIN_ID)
 async def admin_start(message: types.Message, state: FSMContext):
     await state.clear()
     msg = await message.answer("🛠 <b>Панель менеджера</b>\n\nВведіть <b>ID</b> клієнта або його <b>@username</b>:", parse_mode="HTML")
@@ -656,8 +658,9 @@ parse_mode="HTML"
 )
     await state.clear()
 
-@dp.message(Command("users"), F.from_user.id == ADMIN_ID)
-async def list_users(message: types.Message):
+@dp.message(Command("users"), state="*", F.from_user.id == ADMIN_ID)
+async def list_users(message: types.Message, state: FSMContext):
+    await state.clear()
     async with pool.acquire() as conn:
         rows = await conn.fetch("""
         SELECT u.user_id, u.username, u.full_name, d.discount_value 
