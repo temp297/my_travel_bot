@@ -62,6 +62,15 @@ async def save_msg(message: types.Message, state: FSMContext):
 # --- БАЗА ДАНИХ ТА ПЛАНУВАЛЬНИК ---
 async def init_db():
     conn = await asyncpg.connect(DATABASE_URL)
+
+    # 0. Створюємо таблицю для для знижок:
+    await conn.execute("""
+        CREATE TABLE IF NOT EXISTS discounts (
+            user_id BIGINT PRIMARY KEY,
+            discount_value INTEGER,
+            is_used BOOLEAN DEFAULT FALSE
+        )
+    """)
     
     # 1. Створюємо таблицю для відгуків (це те, що було пропущено)
     await conn.execute("""
@@ -482,6 +491,66 @@ async def process_feedback_text(message: types.Message, state: FSMContext):
     except Exception as e:
         logging.error(f"Error replying: {e}")
 
+# --- ОБРОБНИКИ ЗНИЖОК ---
+
+@dp.message(Command("discount"))
+async def cmd_discount(message: types.Message, state: FSMContext):
+    user_id = message.from_user.id
+    conn = await asyncpg.connect(DATABASE_URL)
+    
+    # Шукаємо активну (невикористану) знижку
+    row = await conn.fetchrow("SELECT discount_value FROM discounts WHERE user_id = $1 AND is_used = FALSE", user_id)
+    
+    if row:
+        discount = row['discount_value']
+        text = f"🎁 У вас є активна знижка: **{discount}%**\nВикористайте її під час бронювання наступного туру!"
+    else:
+        # Генеруємо нову (від 1 до 5%)
+        discount = random.randint(1, 5)
+        # Використовуємо UPSERT, щоб оновити, якщо запис існував (але був використаний)
+        await conn.execute("""
+            INSERT INTO discounts (user_id, discount_value, is_used) 
+            VALUES ($1, $2, FALSE)
+            ON CONFLICT (user_id) DO UPDATE SET discount_value = $2, is_used = FALSE
+        """, user_id, discount)
+        text = f"Вітаємо! Ви виграли знижку на наступну подорож: **{discount}%** 🎉\nПокажіть це повідомлення менеджеру при бронюванні!"
+    
+    await conn.close()
+    await message.answer(text, parse_mode="Markdown")
+
+@dp.message(Command("check_discounts"), F.from_user.id == ADMIN_ID)
+async def check_active_discounts(message: types.Message):
+    conn = await asyncpg.connect(DATABASE_URL)
+    rows = await conn.fetch("SELECT user_id, discount_value FROM discounts WHERE is_used = FALSE")
+    await conn.close()
+
+    if not rows:
+        return await message.answer("Активних знижок зараз немає.")
+
+    text = "🎁 <b>Список клієнтів з активними знижками:</b>\n"
+    for row in rows:
+        text += f"👤 ID: <code>{row['user_id']}</code> — {row['discount_value']}%\n"
+    await message.answer(text, parse_mode="HTML")
+
+@dp.message(Command("use_discount"), F.from_user.id == ADMIN_ID)
+async def use_discount_admin(message: types.Message):
+    # Команда: /use_discount ID
+    args = message.text.split()
+    if len(args) < 2:
+        return await message.answer("❌ Використання: /use_discount <user_id>")
+    
+    user_id = int(args[1])
+    conn = await asyncpg.connect(DATABASE_URL)
+    # Оновлюємо статус
+    result = await conn.execute("UPDATE discounts SET is_used = TRUE WHERE user_id = $1 AND is_used = FALSE", user_id)
+    await conn.close()
+
+    if result == "UPDATE 1":
+        await message.answer(f"✅ Знижку для клієнта {user_id} позначено як <b>ВИКОРИСТАНУ</b>.\nТепер клієнт зможе знову отримати нову знижку.", parse_mode="HTML")
+    else:
+        await message.answer("❌ Знижку не знайдено або вона вже використана.")
+
+
 # --- ПАНЕЛЬ АДМІНА ---
 
 @dp.message(Command("admin"), F.from_user.id == ADMIN_ID)
@@ -601,7 +670,10 @@ async def main():
     await web.TCPSite(runner, "0.0.0.0", int(os.environ.get("PORT", 8080))).start()
     await bot.set_my_commands([
         types.BotCommand(command="start", description="🚀 Почати підбір туру"), 
+        types.BotCommand(command="discount", description="🎁 Моя знижка"),
         types.BotCommand(command="admin", description="🛠 Панель менеджера"),
+        types.BotCommand(command="check_discounts", description="📊 Активні знижки (Admin)"),
+        types.BotCommand(command="use_discount", description="✅ Використати знижку (Admin)"),
         types.BotCommand(command="users", description="👥 Список туристів"),
         types.BotCommand(command="cancel", description="❌ Скасувати дію")
     ])
