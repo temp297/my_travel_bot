@@ -18,7 +18,6 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.fsm.storage.redis import RedisStorage
 from redis.asyncio import Redis
-
 pool = None
 
 # НАЛАШТУВАННЯ
@@ -182,12 +181,10 @@ async def cmd_start(message: types.Message, state: FSMContext, command: CommandO
     await save_user(message.from_user)
     await state.clear()
 
-    # Якщо прийшли з посиланням на знижку
     if args == "discount":
-        discount = generate_discount()  # Генеруємо рандомну знижку
+        discount = generate_discount()
 
         async with pool.acquire() as conn:
-            # Зберігаємо або оновлюємо знижку в БД
             await conn.execute("""
                 INSERT INTO discounts (user_id, discount_value, is_used) 
                 VALUES ($1, $2, FALSE) 
@@ -402,7 +399,6 @@ async def process_contact(message: types.Message, state: FSMContext):
     data = await state.get_data()
     user = message.from_user
 
-    # Тепер ми просто перевіряємо БД - це єдине джерело правди
     async with pool.acquire() as conn:
         discount_row = await conn.fetchrow(
             "SELECT discount_value FROM discounts WHERE user_id = $1 AND is_used = FALSE", 
@@ -665,7 +661,6 @@ async def on_shutdown(dispatcher: Dispatcher):
 
 # ТЕХНІЧНИЙ БЛОК
 async def main():
-    # Очищення конфліктів вебхуків
     await bot.delete_webhook(drop_pending_updates=True)
 
     await init_db()
