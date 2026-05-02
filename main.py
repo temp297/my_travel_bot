@@ -119,28 +119,26 @@ async def get_user_discount(user_id: int):
 async def check_returns():
     today = datetime.now(pytz.timezone('Europe/Kyiv')).strftime("%d.%m.%Y")
     async with pool.acquire() as conn:
-        rows = await conn.fetch(
-            "SELECT id, user_id FROM feedbacks WHERE return_date = $1 AND sent = 0", 
-            today
-        )
-        for row in rows:
-            record_id = row['id']
-            user_id = row['user_id']
-            
-            # ТЕПЕР TRY ВСЕРЕДИНІ ЦИКЛУ
-            try:
-                await bot.send_message(
-                    user_id,
-                    "✈️ З поверненням! Сподіваємося, Ваш відпочинок був чудовим.\n\nБудь ласка, оцініть нашу роботу:",
-                    reply_markup=rating_kb()
-                )
-                await conn.execute("UPDATE feedbacks SET sent = 1 WHERE id = $1", record_id)
-                await asyncio.sleep(0.05)
-            except TelegramForbidden:
-                logging.warning(f"Користувач {user_id} заблокував бота.")
-                await conn.execute("DELETE FROM feedbacks WHERE id = $1", record_id)
-            except Exception as e:
-                logging.error(f"Помилка при надсиланні відгуку {user_id}: {e}")
+    rows = await conn.fetch(
+        "SELECT id, user_id FROM feedbacks WHERE return_date = $1 AND sent = 0", 
+        today
+    )
+    for row in rows:
+        record_id = row['id']
+        user_id = row['user_id']
+        try:
+            await bot.send_message(
+                user_id,
+                "✈️ З поверненням! Сподіваємося, Ваш відпочинок був чудовим.\n\nБудь ласка, оцініть нашу роботу:",
+                reply_markup=rating_kb()
+            )
+            await conn.execute("UPDATE feedbacks SET sent = 1 WHERE id = $1", record_id)
+            await asyncio.sleep(0.05)
+        except TelegramForbidden:
+            logging.warning(f"Користувач {user_id} заблокував бота.")
+            await conn.execute("DELETE FROM feedbacks WHERE id = $1", record_id)
+        except Exception as e:
+            logging.error(f"Помилка при надсиланні відгуку {user_id}: {e}")
 
 # КЛАВІАТУРИ
 def start_inline_kb():
@@ -158,8 +156,8 @@ def rating_kb():
 def stars_kb():
     builder = InlineKeyboardBuilder()
     builder.add(types.InlineKeyboardButton(text="3*", callback_data="star_3"),
-            types.InlineKeyboardButton(text="4*", callback_data="star_4"),
-            types.InlineKeyboardButton(text="5*", callback_data="star_5"))
+        types.InlineKeyboardButton(text="4*", callback_data="star_4"),
+        types.InlineKeyboardButton(text="5*", callback_data="star_5"))
     builder.add(types.InlineKeyboardButton(text="Будь-яка", callback_data="star_any"))
     builder.adjust(3, 1)
     return builder.as_markup()
@@ -167,10 +165,10 @@ def stars_kb():
 def meals_kb():
     builder = InlineKeyboardBuilder()
     builder.add(types.InlineKeyboardButton(text="Сніданки (BB)", callback_data="meal_BB"),
-            types.InlineKeyboardButton(text="Сніданок+вечеря (HB)", callback_data="meal_HB"),
-            types.InlineKeyboardButton(text="Все включено (AI)", callback_data="meal_AI"),
-            types.InlineKeyboardButton(text="Ультра все включено (UAI)", callback_data="meal_UAI"),
-            types.InlineKeyboardButton(text="Без харчування (RO)", callback_data="meal_RO"))
+        types.InlineKeyboardButton(text="Сніданок+вечеря (HB)", callback_data="meal_HB"),
+        types.InlineKeyboardButton(text="Все включено (AI)", callback_data="meal_AI"),
+        types.InlineKeyboardButton(text="Ультра все включено (UAI)", callback_data="meal_UAI"),
+        types.InlineKeyboardButton(text="Без харчування (RO)", callback_data="meal_RO"))
     builder.adjust(1)
     return builder.as_markup()
 
@@ -194,10 +192,10 @@ async def cmd_start(message: types.Message, state: FSMContext, command: CommandO
         discount = generate_discount()
         async with pool.acquire() as conn:
             await conn.execute("""
-                INSERT INTO discounts (user_id, discount_value, is_used) 
-                VALUES ($1, $2, FALSE) 
-                ON CONFLICT (user_id) DO UPDATE 
-                SET discount_value = EXCLUDED.discount_value, is_used = FALSE
+            INSERT INTO discounts (user_id, discount_value, is_used) 
+            VALUES ($1, $2, FALSE) 
+            ON CONFLICT (user_id) DO UPDATE 
+            SET discount_value = EXCLUDED.discount_value, is_used = FALSE
             """, user_id, discount)
         await message.answer(f"Вітаємо! Ви активували знижку {discount}%. Давайте підберемо вам тур.")
     else:
@@ -410,9 +408,7 @@ async def process_contact(message: types.Message, state: FSMContext):
         "SELECT discount_value FROM discounts WHERE user_id = $1 AND is_used = FALSE", 
         user.id
         )
-
     discount_status = f"{discount_row['discount_value']}%" if discount_row else "Немає"
-
     info_table = (
         f"🌍 <b>Напрямок:</b> {data.get('destination')}\n"
         f"👥 <b>Склад:</b> {data.get('adults')} дор. + {data.get('children')} діт.\n"
@@ -424,7 +420,6 @@ async def process_contact(message: types.Message, state: FSMContext):
         f"🎁 <b>Знижка:</b> {discount_status}\n"
         f"📱 <b>Контакт:</b> {message.text}"
     )
-
     report = (
         f"🔥 <b>НОВА ЗАЯВКА НА ТУР!</b>\n"
         f"━━━━━━━━━━━━━━━\n"
@@ -435,17 +430,13 @@ async def process_contact(message: types.Message, state: FSMContext):
         f"🆔 <b>ID для відгуку:</b> <code>{user.id}</code>\n"
         f"━━━━━━━━━━━━━━━"
     )
-
     await bot.send_message(ADMIN_ID, report, parse_mode="HTML")
-
     msgs_to_delete = data.get("msgs_to_delete", [])
     tasks = [bot.delete_message(chat_id=message.chat.id, message_id=m_id) for m_id in msgs_to_delete]
     if tasks:
         await asyncio.gather(*tasks, return_exceptions=True)
-
     re_builder = ReplyKeyboardBuilder()
     re_builder.add(types.KeyboardButton(text="🔄 СТВОРИТИ НОВУ ЗАЯВКУ"))
-
     await message.answer(
         f"✅ Дякуємо! Заявку успішно відправлено!\nМи зв'яжемося з Вами найближчим часом 😊\n\n"
         f"<b>Деталі вашої заявки:</b>\n"
@@ -520,9 +511,9 @@ async def cmd_discount(message: types.Message, state: FSMContext):
         else:
             discount = 5
         await conn.execute("""
-            INSERT INTO discounts (user_id, discount_value, is_used) 
-            VALUES ($1, $2, FALSE)
-            ON CONFLICT (user_id) DO UPDATE SET discount_value = $2, is_used = FALSE
+        INSERT INTO discounts (user_id, discount_value, is_used) 
+        VALUES ($1, $2, FALSE)
+        ON CONFLICT (user_id) DO UPDATE SET discount_value = $2, is_used = FALSE
         """, user_id, discount)
         text = f"Вітаємо! Ви виграли знижку на наступну подорож: **{discount}%** 🎉"
     await message.answer(text, parse_mode="Markdown")
@@ -542,10 +533,10 @@ async def check_active_discounts(message: types.Message):
 async def cmd_use_discount_list(message: types.Message):
     async with pool.acquire() as conn:
         rows = await conn.fetch("""
-            SELECT u.user_id, u.full_name, d.discount_value 
-            FROM discounts d
-            JOIN users u ON d.user_id = u.user_id
-            WHERE d.is_used = FALSE
+        SELECT u.user_id, u.full_name, d.discount_value 
+        FROM discounts d
+        JOIN users u ON d.user_id = u.user_id
+        WHERE d.is_used = FALSE
         """)
     if not rows:
         return await message.answer("❌ Наразі немає клієнтів з активними знижками.")
@@ -629,13 +620,13 @@ async def process_admin_date(callback_query: types.CallbackQuery, callback_data:
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
         await callback_query.message.answer(
-            f"✅ <b>Запит на відгук заплановано!</b>\n"
-            f"━━━━━━━━━━━━━━━\n"
-            f"📅 <b>Дата:</b> {formatted}\n"
-            f"⏰ <b>Час:</b> {FEEDBACK_HOUR}:00\n"
-            f"👤 <b>Клієнт:</b> {username} (<code>{client_id}</code>)\n"
-            f"━━━━━━━━━━━━━━━",
-            parse_mode="HTML"
+        f"✅ <b>Запит на відгук заплановано!</b>\n"
+        f"━━━━━━━━━━━━━━━\n"
+        f"📅 <b>Дата:</b> {formatted}\n"
+        f"⏰ <b>Час:</b> {FEEDBACK_HOUR}:00\n"
+        f"👤 <b>Клієнт:</b> {username} (<code>{client_id}</code>)\n"
+        f"━━━━━━━━━━━━━━━",
+        parse_mode="HTML"
         )
         await state.clear()
 
@@ -643,9 +634,9 @@ async def process_admin_date(callback_query: types.CallbackQuery, callback_data:
 async def list_users(message: types.Message):
     async with pool.acquire() as conn:
         rows = await conn.fetch("""
-            SELECT u.user_id, u.username, u.full_name, d.discount_value 
-            FROM users u 
-            LEFT JOIN discounts d ON u.user_id = d.user_id AND d.is_used = FALSE
+        SELECT u.user_id, u.username, u.full_name, d.discount_value 
+        FROM users u 
+        LEFT JOIN discounts d ON u.user_id = d.user_id AND d.is_used = FALSE
         """)
     if not rows:
         return await message.answer("База даних поки порожня.")
