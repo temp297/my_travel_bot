@@ -72,8 +72,7 @@ async def save_msg(message: types.Message, state: FSMContext):
 async def init_db():
     global pool
     pool = await asyncpg.create_pool(DATABASE_URL)
-    async with pool.acquire() as conn:
-        await conn.execute("""
+    await pool.execute("""
         CREATE TABLE IF NOT EXISTS discounts (
             user_id BIGINT PRIMARY KEY,
             discount_value INTEGER,
@@ -101,8 +100,7 @@ async def init_db():
             logging.info(f"Колонка full_name вже існує: {e}")
 
 async def save_user(user: types.User):
-    async with pool.acquire() as conn:
-        await conn.execute(
+    await pool.execute(
         "INSERT INTO users (user_id, username, full_name) VALUES ($1, $2, $3) "
         "ON CONFLICT (user_id) DO UPDATE SET "
         "username = EXCLUDED.username, full_name = EXCLUDED.full_name",
@@ -190,8 +188,7 @@ async def cmd_start(message: types.Message, state: FSMContext, command: CommandO
     await state.clear()
     if args == "discount":
         discount = generate_discount()
-        async with pool.acquire() as conn:
-            await conn.execute("""
+        await pool.execute("""
             INSERT INTO discounts (user_id, discount_value, is_used) 
             VALUES ($1, $2, FALSE) 
             ON CONFLICT (user_id) DO UPDATE 
@@ -613,8 +610,7 @@ async def process_admin_date(callback_query: types.CallbackQuery, callback_data:
         data = await state.get_data()
         client_id = data.get('client_id')
         username = data.get('client_username')
-        async with pool.acquire() as conn:
-            await conn.execute("INSERT INTO feedbacks (user_id, return_date) VALUES ($1, $2)", client_id, formatted)
+        await pool.execute("INSERT INTO feedbacks (user_id, return_date) VALUES ($1, $2)", client_id, formatted)
         msgs_to_delete = data.get("msgs_to_delete", [])
         tasks = [bot.delete_message(chat_id=callback_query.message.chat.id, message_id=m_id) for m_id in msgs_to_delete]
         if tasks:
