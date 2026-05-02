@@ -14,13 +14,22 @@ from aiogram.utils.keyboard import ReplyKeyboardBuilder, InlineKeyboardBuilder
 from aiogram_calendar import SimpleCalendar, SimpleCalendarCallback
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from aiogram.exceptions import TelegramBadRequest
-DATABASE_URL = "postgresql://travel_db_mfal_user:Huoul9HzfcOK6pdyIt1tTNRUtFT2S1Ss@dpg-d7k8pse8bjmc73fcflb0-a/travel_db_mfal"
 
 # --- НАЛАШТУВАННЯ ---
-API_TOKEN = '8742210436:AAEX2p71Tpp4V1cKsm10WnPZ385ZTolRVok'
-ADMIN_ID = 7185133060
-REVIEWS_CHAT_ID = -1003818943967
-FEEDBACK_HOUR = 10  # Вкажіть годину тут
+import os
+
+# Отримуємо дані зі змінних оточення (Render -> Environment)
+API_TOKEN = os.getenv("API_TOKEN")
+DATABASE_URL = os.getenv("DATABASE_URL")
+
+# Використовуємо .get, щоб задати значення за замовчуванням або викликати помилку, якщо їх немає
+ADMIN_ID = int(os.getenv("ADMIN_ID", "7185133060"))
+REVIEWS_CHAT_ID = int(os.getenv("REVIEWS_CHAT_ID", "-1003818943967"))
+FEEDBACK_HOUR = int(os.getenv("FEEDBACK_HOUR", "10")) # Вкажіть годину тут
+
+# Валідація: якщо токен або база не задані, бот не запуститься і ви одразу побачите помилку
+if not API_TOKEN or not DATABASE_URL:
+    raise ValueError("Помилка: API_TOKEN або DATABASE_URL не встановлені в Environment Variables!")
 
 logging.basicConfig(level=logging.INFO)
 bot = Bot(token=API_TOKEN)
