@@ -1,11 +1,14 @@
 import os
 import logging
 import asyncio
-import pytz
 import random
-import aiogram
-import asyncpg
 from datetime import datetime
+import pytz
+from aiohttp import web
+import asyncpg
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+
+import aiogram
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command, CommandStart, CommandObject
 from aiogram.fsm.context import FSMContext
@@ -13,17 +16,21 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.utils.keyboard import InlineKeyboardBuilder, ReplyKeyboardBuilder
 from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
-from aiohttp import web
-from apscheduler.schedulers.asyncio import AsyncIOScheduler
-# Примітка: Імпорти для календаря та інших допоміжних модулів мають бути у вас у файлі, 
-# я залишаю структуру вашого коду недоторканою.
+
+# Використовуємо бібліотеку aiogram-calendar
+from aiogram_calendar import SimpleCalendar, SimpleCalendarCallback
 
 # НАЛАШТУВАННЯ
 API_TOKEN = os.getenv("API_TOKEN")
 DATABASE_URL = os.getenv("DATABASE_URL")
-ADMIN_ID = int(os.getenv("ADMIN_ID", "7185133060"))
-REVIEWS_CHAT_ID = int(os.getenv("REVIEWS_CHAT_ID", "-1003818943967"))
-FEEDBACK_HOUR = int(os.getenv("FEEDBACK_HOUR", "10"))
+
+# Безпечне отримання ID з валідацією
+try:
+    ADMIN_ID = int(os.getenv("ADMIN_ID", "7185133060"))
+    REVIEWS_CHAT_ID = int(os.getenv("REVIEWS_CHAT_ID", "-1003818943967"))
+    FEEDBACK_HOUR = int(os.getenv("FEEDBACK_HOUR", "10"))
+except ValueError:
+    raise ValueError("ADMIN_ID, REVIEWS_CHAT_ID та FEEDBACK_HOUR мають бути цілими числами!")
 
 if not API_TOKEN or not DATABASE_URL:
     raise ValueError("Помилка: API_TOKEN або DATABASE_URL не встановлені в Environment Variables!")
@@ -31,7 +38,7 @@ if not API_TOKEN or not DATABASE_URL:
 logging.basicConfig(level=logging.INFO)
 bot = Bot(token=API_TOKEN)
 
-# Змінено: Redis прибрано, використовуємо внутрішню пам'ять
+# Використовуємо внутрішню пам'ять (для деплою на сервери краще змінити на Redis)
 storage = MemoryStorage()
 dp = Dispatcher(storage=storage)
 
@@ -68,6 +75,8 @@ async def save_msg(message: types.Message, state: FSMContext):
     await state.update_data(msgs_to_delete=msgs)
 
 # БАЗА ДАНИХ ТА ПЛАНУВАЛЬНИК
+pool = None
+
 async def init_db():
     global pool
     pool = await asyncpg.create_pool(DATABASE_URL)
@@ -97,7 +106,7 @@ async def init_db():
         try:
             await conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS full_name TEXT")
         except Exception as e:
-            logging.info(f"Колонка full_name вже існує: {e}")
+            logging.info(f"Колонка full_name вже існує або помилка: {e}")
 
 async def save_user(user: types.User):
     await pool.execute(
@@ -185,7 +194,7 @@ async def cmd_start(message: types.Message, state: FSMContext, command: CommandO
     args = command.args
     user = message.from_user
     name = user.full_name or "Мандрівник"
-    await save_user(user)  # Оновлюємо ім'я в БД
+    await save_user(user)
     await state.clear()
     if args == "discount":
         discount = generate_discount()
@@ -391,9 +400,16 @@ async def process_meals(callback_query: types.CallbackQuery, state: FSMContext):
 
 @dp.message(TourRequest.budget)
 async def process_budget(message: types.Message, state: FSMContext):
+    budget_raw = message.text.lower().replace(" ", "").replace("грн", "").replace("$", "").replace("usd", "").replace("eur", "")
+    
+    # ВАЛІДАЦІЯ: перевірка на цифри
+    if not budget_raw.isdigit():
+        msg = await message.answer("⚠️ Будь ласка, введіть бюджет лише цифрами (наприклад: 20000):")
+        await save_msg(msg, state)
+        return
+
     await save_msg(message, state)
-    budget = message.text.lower().replace(" ", "").replace("грн", "").replace("$", "").replace("usd", "").replace("eur", "")
-    await state.update_data(budget=budget)
+    await state.update_data(budget=budget_raw)
     msg = await message.answer("📞 Ваш номер телефону або нікнейм для зв'язку:")
     await save_msg(msg, state)
     await state.set_state(TourRequest.contact)
@@ -497,7 +513,6 @@ f"━━━━━━━━━━━━━━━"
 @dp.message(Command("discount"))
 async def cmd_discount(message: types.Message, state: FSMContext):
     user = message.from_user
-    # Визначаємо ім'я: full_name або "Мандрівник"
     name = user.full_name or "Мандрівник"
     user_id = user.id
     async with pool.acquire() as conn:
@@ -659,13 +674,11 @@ async def on_shutdown(app: web.Application):
     scheduler.shutdown()
     logging.info("Планувальник зупинено.")
 
-# ТЕХНІЧНИЙ БЛОК
 async def main():
-    logging.info("--- БОТ ЗАПУСКАЄТЬСЯ ---") # Додано
+    logging.info("--- БОТ ЗАПУСКАЄТЬСЯ ---")
     await bot.delete_webhook(drop_pending_updates=True)
     await init_db()
     WEBHOOK_URL = os.getenv("WEBHOOK_URL")
-    logging.info(f"Webhook URL: {WEBHOOK_URL}/webhook") # Додано - ви побачите це в логах!
     WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "super_secret_key")
     await bot.set_webhook(
         url=f"{WEBHOOK_URL}/webhook",
