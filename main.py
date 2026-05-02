@@ -21,7 +21,7 @@ from redis.asyncio import Redis
 
 pool = None
 
-# --- НАЛАШТУВАННЯ ---
+# НАЛАШТУВАННЯ
 API_TOKEN = os.getenv("API_TOKEN")
 DATABASE_URL = os.getenv("DATABASE_URL")
 ADMIN_ID = int(os.getenv("ADMIN_ID", "7185133060"))
@@ -40,7 +40,7 @@ dp = Dispatcher(storage=storage)
 ukraine_tz = pytz.timezone('Europe/Kyiv')
 scheduler = AsyncIOScheduler(timezone=ukraine_tz)
 
-# --- СТАНИ ---
+# СТАНИ
 class TourRequest(StatesGroup):
     start_confirmed = State()
     destination = State()
@@ -62,14 +62,14 @@ class FeedbackState(StatesGroup):
     waiting_for_rating = State()
     waiting_for_text = State()
 
-# --- ФУНКЦІЯ ЗБЕРЕЖЕННЯ ПОВІДОМЛЕНЬ ДЛЯ ВИДАЛЕННЯ ---
+# ФУНКЦІЯ ЗБЕРЕЖЕННЯ ПОВІДОМЛЕНЬ ДЛЯ ВИДАЛЕННЯ
 async def save_msg(message: types.Message, state: FSMContext):
     data = await state.get_data()
     msgs = data.get("msgs_to_delete", [])
     msgs.append(message.message_id)
     await state.update_data(msgs_to_delete=msgs)
 
-# --- БАЗА ДАНИХ ТА ПЛАНУВАЛЬНИК ---
+# БАЗА ДАНИХ ТА ПЛАНУВАЛЬНИК
 async def init_db():
     global pool
     pool = await asyncpg.create_pool(DATABASE_URL)
@@ -132,7 +132,7 @@ async def check_returns():
             except Exception as e:
                 logging.error(f"Error sending feedback request: {e}")
 
-# --- КЛАВІАТУРИ ---
+# КЛАВІАТУРИ
 def start_inline_kb():
     builder = InlineKeyboardBuilder()
     builder.add(types.InlineKeyboardButton(text="🚀 ПОЧАТИ ПІДБІР ТУРУ", callback_data="start_selection"))
@@ -173,7 +173,7 @@ def generate_discount():
     else:
         return 5
 
-# --- ОБРОБНИКИ АНКЕТИ ---
+# ОБРОБНИКИ АНКЕТИ
 @dp.message(CommandStart())
 async def cmd_start(message: types.Message, state: FSMContext, command: CommandObject):
     args = command.args
@@ -455,7 +455,7 @@ async def process_contact(message: types.Message, state: FSMContext):
     )
     await state.clear()
 
-# --- ОБРОБНИКИ ВІДГУКІВ ---
+# ОБРОБНИКИ ВІДГУКІВ
 @dp.callback_query(F.data.startswith("rate_"))
 async def process_rating(callback_query: types.CallbackQuery, state: FSMContext):
     rating = int(callback_query.data.split("_")[1])
@@ -500,7 +500,7 @@ async def process_feedback_text(message: types.Message, state: FSMContext):
     await state.clear()
     asyncio.create_task(delayed_feedback_reply(forwarded_msg, rating))
 
-# --- ОБРОБНИКИ ЗНИЖОК ---
+# ОБРОБНИКИ ЗНИЖОК
 @dp.message(Command("discount"))
 async def cmd_discount(message: types.Message, state: FSMContext):
     user_id = message.from_user.id
@@ -570,7 +570,7 @@ async def apply_discount_callback(callback_query: types.CallbackQuery):
         await callback_query.message.edit_text("❌ Знижку вже було використано раніше або клієнта не знайдено.")
     await callback_query.answer()
 
-# --- ПАНЕЛЬ АДМІНА ---
+# ПАНЕЛЬ АДМІНА
 @dp.message(Command("admin"), F.from_user.id == ADMIN_ID)
 async def admin_start(message: types.Message, state: FSMContext):
     await state.clear()
@@ -663,7 +663,7 @@ async def on_shutdown(dispatcher: Dispatcher):
     scheduler.shutdown()
     logging.info("Планувальник зупинено.")
 
-# --- ТЕХНІЧНИЙ БЛОК ---
+# ТЕХНІЧНИЙ БЛОК
 async def main():
     # Очищення конфліктів вебхуків
     await bot.delete_webhook(drop_pending_updates=True)
