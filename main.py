@@ -7,7 +7,7 @@ import random
 from datetime import datetime
 from aiohttp import web
 from aiogram import Bot, Dispatcher, types, F
-from aiogram.filters import Command
+from aiogram.filters import Command, CommandStart, CommandObject
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.utils.keyboard import ReplyKeyboardBuilder, InlineKeyboardBuilder
@@ -162,18 +162,38 @@ def meals_kb():
 
 # --- ОБРОБНИКИ АНКЕТИ ---
 
-@dp.message(Command("start"))
-@dp.message(F.text == "🔄 СТВОРИТИ НОВУ ЗАЯВКУ")
-async def cmd_start(message: types.Message, state: FSMContext):
+@dp.message(CommandStart())
+async def cmd_start(message: types.Message, state: FSMContext, command: CommandObject):
+    args = command.args  # Отримує текст після ?start=
     await save_user(message.from_user)
     await state.clear()
-    msg = await message.answer(
-        f"👋 Вітаю, {message.from_user.first_name}!\nЯ допоможу Вам підібрати ідеальний тур. Натисніть кнопку нижче:", 
-        reply_markup=start_inline_kb()
-    )
-    await save_msg(message, state)
-    await save_msg(msg, state)
-    await state.set_state(TourRequest.start_confirmed)
+
+    # 1. Якщо перейшли за посиланням на знижку
+    if args == "discount":
+        await cmd_discount(message, state) # Викликаємо вашу існуючу функцію знижки
+        return
+
+    # 2. Якщо перейшли за посиланням на тур
+    elif args == "tour":
+        msg = await message.answer(
+            f"👋 Вітаю, {message.from_user.first_name}!\n"
+            "Ви перейшли до підбору туру. Натисніть кнопку нижче:", 
+            reply_markup=start_inline_kb()
+        )
+        await save_msg(message, state)
+        await save_msg(msg, state)
+        await state.set_state(TourRequest.start_confirmed)
+
+    # 3. Звичайний запуск (без посилання)
+    else:
+        msg = await message.answer(
+            f"👋 Вітаю, {message.from_user.first_name}!\n"
+            "Я допоможу Вам підібрати ідеальний тур. Натисніть кнопку нижче:", 
+            reply_markup=start_inline_kb()
+        )
+        await save_msg(message, state)
+        await save_msg(msg, state)
+        await state.set_state(TourRequest.start_confirmed)
 
 @dp.message(Command("cancel"))
 async def cmd_cancel(message: types.Message, state: FSMContext):
