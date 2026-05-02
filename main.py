@@ -14,6 +14,7 @@ from aiogram.utils.keyboard import ReplyKeyboardBuilder, InlineKeyboardBuilder
 from aiogram_calendar import SimpleCalendar, SimpleCalendarCallback
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from aiogram.exceptions import TelegramBadRequest
+pool = None
 
 # --- НАЛАШТУВАННЯ ---
 # Отримуємо дані зі змінних оточення (Render -> Environment)
@@ -68,71 +69,64 @@ async def save_msg(message: types.Message, state: FSMContext):
 
 # --- БАЗА ДАНИХ ТА ПЛАНУВАЛЬНИК ---
 async def init_db():
-    conn = await asyncpg.connect(DATABASE_URL)
-
-    # 0. Створюємо таблицю для для знижок:
-    await conn.execute("""
-        CREATE TABLE IF NOT EXISTS discounts (
-            user_id BIGINT PRIMARY KEY,
-            discount_value INTEGER,
-            is_used BOOLEAN DEFAULT FALSE
-        )
-    """)
+    global pool
+    # Створюємо пул з'єднань
+    pool = await asyncpg.create_pool(DATABASE_URL)
     
-    # 1. Створюємо таблицю для відгуків
-    await conn.execute("""
-        CREATE TABLE IF NOT EXISTS feedbacks (
-            user_id BIGINT,
-            return_date TEXT,
-            sent INTEGER DEFAULT 0
-        )
-    """)
-    
-    # 2. Створюємо таблицю користувачів
-    await conn.execute("""
-        CREATE TABLE IF NOT EXISTS users (
-            user_id BIGINT PRIMARY KEY,
-            username TEXT,
-            full_name TEXT
-        )
-    """)
-    
-    # 3. Перевірка на випадок, якщо таблиця users вже була створена раніше без full_name
-    try:
-        await conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS full_name TEXT")
-    except Exception as e:
-        logging.info(f"Колонка full_name вже існує або сталася помилка: {e}")
-        
-    await conn.close()
+    async with pool.acquire() as conn:
+        # Таблиця знижок
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS discounts (
+                user_id BIGINT PRIMARY KEY,
+                discount_value INTEGER,
+                is_used BOOLEAN DEFAULT FALSE
+            )
+        """)
+        # Таблиця відгуків
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS feedbacks (
+                user_id BIGINT,
+                return_date TEXT,
+                sent INTEGER DEFAULT 0
+            )
+        """)
+        # Таблиця користувачів
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS users (
+                user_id BIGINT PRIMARY KEY,
+                username TEXT,
+                full_name TEXT
+            )
+        """)
+        try:
+            await conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS full_name TEXT")
+        except Exception as e:
+            logging.info(f"Колонка full_name вже існує: {e}")
 
 async def save_user(user: types.User):
-    conn = await asyncpg.connect(DATABASE_URL)
-    await conn.execute(
-        "INSERT INTO users (user_id, username, full_name) VALUES ($1, $2, $3) "
-        "ON CONFLICT (user_id) DO UPDATE SET "
-        "username = EXCLUDED.username, full_name = EXCLUDED.full_name",
-        user.id, user.username, user.full_name
-    )
-    await conn.close()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "INSERT INTO users (user_id, username, full_name) VALUES ($1, $2, $3) "
+            "ON CONFLICT (user_id) DO UPDATE SET "
+            "username = EXCLUDED.username, full_name = EXCLUDED.full_name",
+            user.id, user.username, user.full_name
+        )
 
 async def check_returns():
     today = datetime.now(pytz.timezone('Europe/Kyiv')).strftime("%d.%m.%Y")
-    conn = await asyncpg.connect(DATABASE_URL)
-    users = await conn.fetch("SELECT user_id FROM feedbacks WHERE return_date = $1 AND sent = 0", today)
-    
-    for row in users:
-        user_id = row['user_id']
-        try:
-            await bot.send_message(
-                user_id,
-                "✈️ З поверненням! Сподіваємося, Ваш відпочинок був чудовим.\n\n"
-                "Будь ласка, оцініть нашу роботу:",
-                reply_markup=rating_kb()
-            )
-            await conn.execute("UPDATE feedbacks SET sent = 1 WHERE user_id = $1", user_id)
-        except Exception as e:
-            logging.error(f"Error sending feedback request: {e}")
-    await conn.close()
+    async with pool.acquire() as conn:
+        users = await conn.fetch("SELECT user_id FROM feedbacks WHERE return_date = $1 AND sent = 0", today)
+        for row in users:
+            user_id = row['user_id']
+            try:
+                await bot.send_message(
+                    user_id,
+                    "✈️ З поверненням! Сподіваємося, Ваш відпочинок був чудовим.\n\nБудь ласка, оцініть нашу роботу:",
+                    reply_markup=rating_kb()
+                )
+                await conn.execute("UPDATE feedbacks SET sent = 1 WHERE user_id = $1", user_id)
+            except Exception as e:
+                logging.error(f"Error sending feedback request: {e}")
 
 # --- КЛАВІАТУРИ ---
 def start_inline_kb():
@@ -485,31 +479,26 @@ async def process_feedback_text(message: types.Message, state: FSMContext):
 @dp.message(Command("discount"))
 async def cmd_discount(message: types.Message, state: FSMContext):
     user_id = message.from_user.id
-    conn = await asyncpg.connect(DATABASE_URL)
-    
-    row = await conn.fetchrow("SELECT discount_value FROM discounts WHERE user_id = $1 AND is_used = FALSE", user_id)
-    
-    if row:
-        discount = row['discount_value']
-        text = f"🎁 У вас є активна знижка: **{discount}%**\nВикористайте її під час бронювання наступного туру!"
-    else:
-        discount = random.randint(1, 5)
-        await conn.execute("""
-            INSERT INTO discounts (user_id, discount_value, is_used) 
-            VALUES ($1, $2, FALSE)
-            ON CONFLICT (user_id) DO UPDATE SET discount_value = $2, is_used = FALSE
-        """, user_id, discount)
-        text = f"Вітаємо! Ви виграли знижку на наступну подорож: **{discount}%** 🎉\nПокажіть це повідомлення менеджеру при бронюванні!"
-    
-    await conn.close()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow("SELECT discount_value FROM discounts WHERE user_id = $1 AND is_used = FALSE", user_id)
+        if row:
+            discount = row['discount_value']
+            text = f"🎁 У вас є активна знижка: **{discount}%**\nВикористайте її під час бронювання наступного туру!"
+        else:
+            discount = random.randint(1, 5)
+            await conn.execute("""
+                INSERT INTO discounts (user_id, discount_value, is_used) 
+                VALUES ($1, $2, FALSE)
+                ON CONFLICT (user_id) DO UPDATE SET discount_value = $2, is_used = FALSE
+            """, user_id, discount)
+            text = f"Вітаємо! Ви виграли знижку на наступну подорож: **{discount}%** 🎉"
     await message.answer(text, parse_mode="Markdown")
 
 @dp.message(Command("check_discounts"), F.from_user.id == ADMIN_ID)
 async def check_active_discounts(message: types.Message):
-    conn = await asyncpg.connect(DATABASE_URL)
-    rows = await conn.fetch("SELECT user_id, discount_value FROM discounts WHERE is_used = FALSE")
-    await conn.close()
-
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("SELECT user_id, discount_value FROM discounts WHERE is_used = FALSE")
+    
     if not rows:
         return await message.answer("Активних знижок зараз немає.")
 
@@ -520,52 +509,40 @@ async def check_active_discounts(message: types.Message):
 
 @dp.message(Command("use_discount"), F.from_user.id == ADMIN_ID)
 async def cmd_use_discount_list(message: types.Message):
-    conn = await asyncpg.connect(DATABASE_URL)
-    # Отримуємо список лише тих, у кого знижка ще не використана
-    rows = await conn.fetch("""
-        SELECT u.user_id, u.full_name, d.discount_value 
-        FROM discounts d
-        JOIN users u ON d.user_id = u.user_id
-        WHERE d.is_used = FALSE
-    """)
-    await conn.close()
-
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("""
+            SELECT u.user_id, u.full_name, d.discount_value 
+            FROM discounts d
+            JOIN users u ON d.user_id = u.user_id
+            WHERE d.is_used = FALSE
+        """)
+    
     if not rows:
         return await message.answer("❌ Наразі немає клієнтів з активними знижками.")
 
     builder = InlineKeyboardBuilder()
     for row in rows:
-        # Назва кнопки: "Ім'я (Знижка%)"
-        button_text = f"{row['full_name']} ({row['discount_value']}%)"
-        # callback_data містить ID, щоб ми знали, кому саме скасувати
         builder.add(types.InlineKeyboardButton(
-            text=button_text, 
+            text=f"{row['full_name']} ({row['discount_value']}%)", 
             callback_data=f"apply_{row['user_id']}"
         ))
     
-    builder.adjust(1) # Кнопки одна під одною
+    builder.adjust(1)
     await message.answer("🎁 Оберіть клієнта, якому потрібно позначити знижку як використану:", reply_markup=builder.as_markup())
 
 @dp.callback_query(F.data.startswith("apply_"), F.from_user.id == ADMIN_ID)
 async def apply_discount_callback(callback_query: types.CallbackQuery):
-    # Отримуємо ID користувача з callback_data
     user_id = int(callback_query.data.split("_")[1])
-    
-    conn = await asyncpg.connect(DATABASE_URL)
-    # Оновлюємо базу даних
-    result = await conn.execute(
-        "UPDATE discounts SET is_used = TRUE WHERE user_id = $1 AND is_used = FALSE", 
-        user_id
-    )
-    await conn.close()
-
-    # Перевіряємо, чи оновився рядок
+    async with pool.acquire() as conn:
+        result = await conn.execute(
+            "UPDATE discounts SET is_used = TRUE WHERE user_id = $1 AND is_used = FALSE", 
+            user_id
+        )
     if result == "UPDATE 1":
         await callback_query.message.edit_text(f"✅ Знижку для клієнта (ID: `{user_id}`) успішно використано!")
     else:
         await callback_query.message.edit_text("❌ Знижку вже було використано раніше або клієнта не знайдено.")
-    
-    await callback_query.answer() # Обов'язково відповідаємо на callback
+    await callback_query.answer()
 
 # --- ПАНЕЛЬ АДМІНА ---
 
@@ -584,31 +561,26 @@ async def process_admin_search(message: types.Message, state: FSMContext):
     target_id = None
     username = "невідомий"
 
-    conn = await asyncpg.connect(DATABASE_URL)
-    
-    if input_data.isdigit():
-        row = await conn.fetchrow("SELECT user_id, username FROM users WHERE user_id = $1", int(input_data))
-        if row:
-            target_id = row['user_id']
-            username = f"@{row['username']}" if row['username'] else "без юзернейму"
+    async with pool.acquire() as conn:
+        if input_data.isdigit():
+            row = await conn.fetchrow("SELECT user_id, username FROM users WHERE user_id = $1", int(input_data))
+            if row:
+                target_id = row['user_id']
+                username = f"@{row['username']}" if row['username'] else "без юзернейму"
+            else:
+                target_id = int(input_data)
+                username = "Введено вручну (ID)"
         else:
-            target_id = int(input_data)
-            username = "Введено вручну (ID)"
-    else:
-        row = await conn.fetchrow("SELECT user_id, username FROM users WHERE LOWER(username) = $1", input_data)
-        if row:
-            target_id = row['user_id']
-            username = f"@{row['username']}"
-
-    await conn.close()
+            row = await conn.fetchrow("SELECT user_id, username FROM users WHERE LOWER(username) = $1", input_data)
+            if row:
+                target_id = row['user_id']
+                username = f"@{row['username']}"
 
     if target_id:
         await state.update_data(client_id=target_id, client_username=username)
-        
-        calendar_kb = await SimpleCalendar().start_calendar()
         msg = await message.answer(
             f"✅ Клієнта знайдено:\nID: <code>{target_id}</code>\nUser: {username}\n\nТепер оберіть дату повернення:", 
-            reply_markup=calendar_kb,
+            reply_markup=await SimpleCalendar().start_calendar(),
             parse_mode="HTML"
         )
         await save_msg(msg, state)
@@ -626,10 +598,9 @@ async def process_admin_date(callback_query: types.CallbackQuery, callback_data:
         client_id = data.get('client_id')
         username = data.get('client_username')
         
-        conn = await asyncpg.connect(DATABASE_URL)
-        await conn.execute("INSERT INTO feedbacks (user_id, return_date) VALUES ($1, $2)", client_id, formatted)
-        await conn.close()
-
+        async with pool.acquire() as conn:
+            await conn.execute("INSERT INTO feedbacks (user_id, return_date) VALUES ($1, $2)", client_id, formatted)
+        
         msgs_to_delete = data.get("msgs_to_delete", [])
         for m_id in msgs_to_delete:
             try:
@@ -650,31 +621,31 @@ async def process_admin_date(callback_query: types.CallbackQuery, callback_data:
 
 @dp.message(Command("users"), F.from_user.id == ADMIN_ID)
 async def list_users(message: types.Message):
-    conn = await asyncpg.connect(DATABASE_URL)
-    
-    # Використовуємо LEFT JOIN, щоб отримати знижку, якщо вона є
-    rows = await conn.fetch("""
-        SELECT u.user_id, u.username, u.full_name, d.discount_value 
-        FROM users u 
-        LEFT JOIN discounts d ON u.user_id = d.user_id AND d.is_used = FALSE
-    """)
-    await conn.close()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("""
+            SELECT u.user_id, u.username, u.full_name, d.discount_value 
+            FROM users u 
+            LEFT JOIN discounts d ON u.user_id = d.user_id AND d.is_used = FALSE
+        """)
     
     if not rows:
         return await message.answer("База даних поки порожня.")
     
-    text = "👥 <b>Список туристів:</b>\n"
-    text += "━━━━━━━━━━━━━━━\n"
+    text = "👥 <b>Список туристів:</b>\n━━━━━━━━━━━━━━━\n"
     for row in rows:
         username = f"@{row['username']}" if row['username'] else "немає"
         name = row['full_name'] if row['full_name'] else "Ім'я не вказано"
-        
-        # Додаємо відображення знижки, якщо вона існує
         discount_text = f" | 🎁 {row['discount_value']}%" if row['discount_value'] else ""
-        
         text += f"👤 <b>{name}</b> — {username} (<code>{row['user_id']}</code>){discount_text}\n"
-    
     await message.answer(text, parse_mode="HTML")
+
+
+async def on_shutdown(dispatcher: Dispatcher):
+    global pool
+    if pool:
+        await pool.close() # <-- Додайте цей рядок
+    scheduler.shutdown()
+    logging.info("Бот зупинився, пул БД закрито.")
 
 # --- ТЕХНІЧНИЙ БЛОК ---
 async def handle(request): return web.Response(text="Live")
@@ -697,6 +668,7 @@ async def main():
     ])
     scheduler.add_job(check_returns, 'cron', hour=FEEDBACK_HOUR, minute=0)
     scheduler.start()
+    dp.shutdown.register(on_shutdown)
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
