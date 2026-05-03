@@ -711,6 +711,7 @@ async def main():
     ])
     scheduler.add_job(check_returns, 'cron', hour=FEEDBACK_HOUR, minute=0)
     scheduler.start()
+    app.router.add_get("/", lambda request: web.Response(text="Bot is running!"))
     runner = web.AppRunner(app)
     await runner.setup()
     site = web.TCPSite(runner, '0.0.0.0', 8080)
