@@ -199,7 +199,7 @@ async def cmd_start(message: types.Message, state: FSMContext, command: CommandO
         existing_discount = await get_user_discount(user.id)
         if existing_discount:
             discount = existing_discount['discount_value']
-            greeting = f"Вітаємо, {name}! 🎁 У вас вже є активна знижка: {discount}%."
+            greeting = f"Вітаємо, {name}! 🎁 У вас вже є активна знижка: {discount}%.\nВикористайте її під час бронювання наступного туру!"
         else:
             discount = generate_discount()
             await pool.execute("""
@@ -254,7 +254,7 @@ async def cmd_discount(message: types.Message, state: FSMContext):
             VALUES ($1, $2, FALSE)
             ON CONFLICT (user_id) DO UPDATE SET discount_value = $2, is_used = FALSE
             """, user_id, discount)
-            text = f"Вітаємо, {name}! 🎉 Ви виграли знижку на наступну подорож: **{discount}%**"
+            text = f"Вітаємо, {name}! 🎉 Ви виграли знижку на наступну подорож: **{discount}%.**\nВикористайте її під час бронювання наступного туру!"
     await state.set_state(TourRequest.start_confirmed)
     await message.answer(text, parse_mode="Markdown", reply_markup=start_inline_kb())
 
