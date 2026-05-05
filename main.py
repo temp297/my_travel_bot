@@ -701,13 +701,13 @@ async def main():
     setup_application(app, dp, bot=bot)
     app.on_shutdown.append(on_shutdown)
     await bot.set_my_commands([
-        types.BotCommand(command="start", description="🚀 Почати підбір туру"), 
-        types.BotCommand(command="discount", description="🎁 Моя знижка"),
-        types.BotCommand(command="admin", description="🛠 Панель менеджера"),
-        types.BotCommand(command="check_discounts", description="📊 Активні знижки (Admin)"),
-        types.BotCommand(command="use_discount", description="✅ Використати знижку (Admin)"),
-        types.BotCommand(command="users", description="👥 Список туристів"),
-        types.BotCommand(command="cancel", description="❌ Скасувати дію")
+        types.BotCommand(command="start", description="🚀 Почати підбір туру (Турист)"), 
+        types.BotCommand(command="discount", description="🎁 Моя знижка (Турист)"),
+        types.BotCommand(command="cancel", description="❌ Скасувати дію (Турист)"),
+        types.BotCommand(command="admin", description="🛠 Панель менеджера (Менеджер)"),
+        types.BotCommand(command="check_discounts", description="📊 Активні знижки (Менеджер)"),
+        types.BotCommand(command="use_discount", description="✅ Використати знижку (Менеджер)"),
+        types.BotCommand(command="users", description="👥 Список туристів (Менеджер)")
     ])
     scheduler.add_job(check_returns, 'cron', hour=FEEDBACK_HOUR, minute=0)
     scheduler.start()
