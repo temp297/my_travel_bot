@@ -707,7 +707,7 @@ async def main():
     user_commands = [
         types.BotCommand(command="start", description="🚀 Почати підбір туру"), 
         types.BotCommand(command="discount", description="🎁 Моя знижка"),
-        types.BotCommand(command="cancel", description="❌ Скасувати дію")
+       # types.BotCommand(command="cancel", description="❌ Скасувати дію")
     ]
 
     # 2. Створюємо список команд для адміна (додаємо до користувацьких адмінські)
