@@ -685,12 +685,14 @@ async def main():
     logging.info("--- БОТ ЗАПУСКАЄТЬСЯ ---")
     await bot.delete_webhook(drop_pending_updates=True)
     await init_db()
+    
     WEBHOOK_URL = os.getenv("WEBHOOK_URL")
     WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "super_secret_key")
     await bot.set_webhook(
         url=f"{WEBHOOK_URL}/webhook",
         secret_token=WEBHOOK_SECRET
     )
+    
     app = web.Application()
     webhook_requests_handler = SimpleRequestHandler(
         dispatcher=dp,
@@ -700,22 +702,39 @@ async def main():
     webhook_requests_handler.register(app, path="/webhook")
     setup_application(app, dp, bot=bot)
     app.on_shutdown.append(on_shutdown)
-    await bot.set_my_commands([
-        types.BotCommand(command="start", description="🚀 Почати підбір туру (Турист)"), 
-        types.BotCommand(command="discount", description="🎁 Моя знижка (Турист)"),
-        types.BotCommand(command="cancel", description="❌ Скасувати дію (Турист)"),
-        types.BotCommand(command="admin", description="🛠 Панель менеджера (Менеджер)"),
-        types.BotCommand(command="check_discounts", description="📊 Активні знижки (Менеджер)"),
-        types.BotCommand(command="use_discount", description="✅ Використати знижку (Менеджер)"),
-        types.BotCommand(command="users", description="👥 Список туристів (Менеджер)")
-    ])
+
+    # 1. Створюємо список команд для звичайних користувачів
+    user_commands = [
+        types.BotCommand(command="start", description="🚀 Почати підбір туру"), 
+        types.BotCommand(command="discount", description="🎁 Моя знижка"),
+        types.BotCommand(command="cancel", description="❌ Скасувати дію")
+    ]
+
+    # 2. Створюємо список команд для адміна (додаємо до користувацьких адмінські)
+    admin_commands = user_commands + [
+        types.BotCommand(command="admin", description="🛠 Панель менеджера"),
+        types.BotCommand(command="check_discounts", description="📊 Активні знижки"),
+        types.BotCommand(command="use_discount", description="✅ Використати знижку"),
+        types.BotCommand(command="users", description="👥 Список туристів")
+    ]
+
+    # 3. Встановлюємо меню для всіх (Default)
+    await bot.set_my_commands(user_commands, scope=types.BotCommandScopeDefault())
+    
+    # 4. Встановлюємо окреме меню для Адміна (Chat)
+    await bot.set_my_commands(admin_commands, scope=types.BotCommandScopeChat(chat_id=ADMIN_ID))
+
     scheduler.add_job(check_returns, 'cron', hour=FEEDBACK_HOUR, minute=0)
     scheduler.start()
+    
     app.router.add_get("/", lambda request: web.Response(text="Bot is running!"))
     runner = web.AppRunner(app)
     await runner.setup()
-    site = web.TCPSite(runner, '0.0.0.0', 8080)
+    
+    port = int(os.environ.get("PORT", 8000))
+    site = web.TCPSite(runner, '0.0.0.0', port)
     await site.start()
+    
     await asyncio.Event().wait()
 
 if __name__ == "__main__":
