@@ -301,22 +301,50 @@ async def admin_start(message: types.Message, state: FSMContext):
 
 @dp.message(Command("users"), F.from_user.id == ADMIN_ID, StateFilter("*"))
 async def list_users(message: types.Message, state: FSMContext):
-    await state.clear()
+    # 1. Отримуємо дані зі стану, щоб знайти ID попередніх повідомлень
+    data = await state.get_data()
+    last_users_msg = data.get("last_users_msg")
+    last_users_cmd = data.get("last_users_cmd")
+
+    # 2. Видаляємо попередній список і попередню команду адміна (якщо вони існують)
+    if last_users_msg:
+        try:
+            await bot.delete_message(chat_id=message.chat.id, message_id=last_users_msg)
+        except Exception:
+            pass # Повідомлення могло бути вже видалене вручну
+            
+    if last_users_cmd:
+        try:
+            await bot.delete_message(chat_id=message.chat.id, message_id=last_users_cmd)
+        except Exception:
+            pass
+
+    # 3. Отримуємо дані з бази (ваш існуючий код)
     async with pool.acquire() as conn:
         rows = await conn.fetch("""
         SELECT u.user_id, u.username, u.full_name, d.discount_value 
         FROM users u 
         LEFT JOIN discounts d ON u.user_id = d.user_id AND d.is_used = FALSE
         """)
+    
     if not rows:
         return await message.answer("База даних поки порожня.")
+
     text = "👥 <b>Список туристів:</b>\n━━━━━━━━━━━━━━━\n"
     for row in rows:
         username = f"@{row['username']}" if row['username'] else "немає"
         name = row['full_name'] if row['full_name'] else "Ім'я не вказано"
         discount_text = f" | 🎁 {row['discount_value']}%" if row['discount_value'] else ""
         text += f"👤 <b>{name}</b> — {username} (<code>{row['user_id']}</code>){discount_text}\n"
-    await message.answer(text, parse_mode="HTML")
+
+    # 4. Надсилаємо новий список
+    new_msg = await message.answer(text, parse_mode="HTML")
+
+    # 5. Зберігаємо ID поточної команди та нового повідомлення в стан
+    await state.update_data(
+        last_users_msg=new_msg.message_id,
+        last_users_cmd=message.message_id
+    )
 
 # --- ОБРОБНИКИ СТАНІВ (З ФІЛЬТРАЦІЄЮ КОМАНД) ---
 
