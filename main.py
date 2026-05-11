@@ -101,7 +101,9 @@ async def show_admin_base(message: types.Message, state: FSMContext):
             name = row['full_name'] or "Ім'я не вказано"
             discount = f" | 🎁 {row['discount_value']}%" if row['discount_value'] else ""
             text += f"👤 <b>{name}</b> — {username} (<code>{row['user_id']}</code>){discount}\n"
+    
     new_msg = await bot.send_message(chat_id=message.chat.id, text=text, parse_mode="HTML")
+    
     data = await state.get_data()
     current_msgs = data.get("admin_msgs_to_clean", [])
     current_msgs.append(new_msg.message_id)
@@ -141,16 +143,15 @@ async def init_db():
             logging.info(f"Колонка full_name вже існує або помилка: {e}")
 
 async def save_user(user: types.User):
-    global pool  # Додай цей рядок
-    await pool.execute(
-        "INSERT INTO users (user_id, username, full_name) VALUES ($1, $2, $3) "
-        "ON CONFLICT (user_id) DO UPDATE SET "
-        "username = EXCLUDED.username, full_name = EXCLUDED.full_name",
-        user.id, user.username, user.full_name
-    )
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "INSERT INTO users (user_id, username, full_name) VALUES ($1, $2, $3) "
+            "ON CONFLICT (user_id) DO UPDATE SET "
+            "username = EXCLUDED.username, full_name = EXCLUDED.full_name",
+            user.id, user.username, user.full_name
+        )
 
 async def get_user_discount(user_id: int):
-    global pool  # Додай цей рядок
     async with pool.acquire() as conn:
         return await conn.fetchrow(
             "SELECT discount_value FROM discounts WHERE user_id = $1 AND is_used = FALSE", 
@@ -314,7 +315,7 @@ async def check_active_discounts(message: types.Message, state: FSMContext):
 @dp.message(Command("admin"), F.from_user.id == ADMIN_ID, StateFilter("*"))
 async def admin_start(message: types.Message, state: FSMContext):
     await clean_admin_messages(state, message.chat.id)
-    try: await message.delete()
+    try: await message.delete() # Видаляємо текст "/admin"
     except: pass
     await state.clear()
     msg = await message.answer("🛠 <b>Панель менеджера</b>\n\nВведіть <b>ID</b> або <b>Username</b> клієнта:", parse_mode="HTML")
@@ -325,7 +326,7 @@ async def admin_start(message: types.Message, state: FSMContext):
 @dp.message(Command("users"), F.from_user.id == ADMIN_ID, StateFilter("*"))
 async def list_users(message: types.Message, state: FSMContext):
     await clean_admin_messages(state, message.chat.id)
-    try: await message.delete()
+    try: await message.delete() # Видаляємо текст "/users"
     except: pass
     await show_admin_base(message, state)
 
@@ -679,6 +680,18 @@ async def process_admin_search(message: types.Message, state: FSMContext):
             reply_markup=await SimpleCalendar().start_calendar(),
             parse_mode="HTML"
         )
+        # Зберігаємо повідомлення адміна та відповідь бота для видалення пізніше
+        data = await state.get_data()
+        msgs = data.get("admin_msgs_to_clean", [])
+        msgs.extend([message.message_id, msg.message_id])
+        await state.update_data(admin_msgs_to_clean=msgs)
+        await state.set_state(AdminPanel.waiting_for_date)
+    else:
+        msg = await message.answer("❌ Клієнта не знайдено в базі. Спробуйте ще раз:")
+        data = await state.get_data()
+        msgs = data.get("admin_msgs_to_clean", [])
+        msgs.extend([message.message_id, msg.message_id])
+        await state.update_data(admin_msgs_to_clean=msgs)
         
         # --- ОНОВЛЕННЯ ТУТ ---
         # Отримуємо поточний список повідомлень на видалення
@@ -711,10 +724,9 @@ async def process_admin_date(callback_query: types.CallbackQuery, callback_data:
         async with pool.acquire() as conn:
             await conn.execute("INSERT INTO feedbacks (user_id, return_date) VALUES ($1, $2)", client_id, formatted)
         
-        # 1. Спочатку чистимо всі робочі повідомлення (пошук та календар)
+        # Видаляємо все зайве: попередні списки, пошук, календар
         await clean_admin_messages(state, callback_query.message.chat.id)
         
-        # 2. Надсилаємо звіт про успіх
         msg = await callback_query.message.answer(
             f"✅ <b>Запит на відгук заплановано!</b>\n"
             f"━━━━━━━━━━━━━━━\n"
@@ -725,13 +737,10 @@ async def process_admin_date(callback_query: types.CallbackQuery, callback_data:
             parse_mode="HTML"
         )
         
-        # 3. Додаємо ID звіту в список на очищення для наступної команди
+        # Додаємо звіт в список на видалення для наступного разу
         await state.update_data(admin_msgs_to_clean=[msg.message_id])
-        
-        # 4. Виводимо список туристів у самий низ
+        # Оновлюємо список туристів внизу
         await show_admin_base(callback_query.message, state)
-        
-        # 5. Очищуємо стан
         await state.set_state(None)
 
 async def on_shutdown(app: web.Application):
