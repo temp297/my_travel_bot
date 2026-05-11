@@ -640,10 +640,10 @@ async def apply_discount_callback(callback_query: types.CallbackQuery):
 
 @dp.message(AdminPanel.waiting_for_client_info, ~CommandFilter(commands=BOT_COMMANDS))
 async def process_admin_search(message: types.Message, state: FSMContext):
-    await save_msg(message, state)
     input_data = message.text.strip().replace("@", "").lower()
     target_id = None
     username = "невідомий"
+    
     async with pool.acquire() as conn:
         if input_data.isdigit():
             row = await conn.fetchrow("SELECT user_id, username FROM users WHERE user_id = $1", int(input_data))
@@ -658,6 +658,7 @@ async def process_admin_search(message: types.Message, state: FSMContext):
             if row:
                 target_id = row['user_id']
                 username = f"@{row['username']}"
+
     if target_id:
         await state.update_data(client_id=target_id, client_username=username)
         msg = await message.answer(
@@ -665,11 +666,25 @@ async def process_admin_search(message: types.Message, state: FSMContext):
             reply_markup=await SimpleCalendar().start_calendar(),
             parse_mode="HTML"
         )
-        await save_msg(msg, state)
+        
+        # --- ОНОВЛЕННЯ ТУТ ---
+        # Отримуємо поточний список повідомлень на видалення
+        data = await state.get_data()
+        msgs = data.get("admin_msgs_to_clean", [])
+        # Додаємо ID введеного адміном тексту та ID відповіді бота ("Клієнта знайдено")
+        msgs.extend([message.message_id, msg.message_id])
+        await state.update_data(admin_msgs_to_clean=msgs)
+        # ---------------------
+        
         await state.set_state(AdminPanel.waiting_for_date)
     else:
-        msg = await message.answer("❌ Клієнта не знайдено в базі і введений текст не є ID. Спробуйте ще раз:")
-        await save_msg(msg, state)
+        msg = await message.answer("❌ Клієнта не знайдено в базі. Спробуйте ще раз:")
+        
+        # Додаємо повідомлення про помилку до списку на видалення
+        data = await state.get_data()
+        msgs = data.get("admin_msgs_to_clean", [])
+        msgs.extend([message.message_id, msg.message_id])
+        await state.update_data(admin_msgs_to_clean=msgs)
 
 @dp.callback_query(SimpleCalendarCallback.filter(), AdminPanel.waiting_for_date)
 async def process_admin_date(callback_query: types.CallbackQuery, callback_data: SimpleCalendarCallback, state: FSMContext):
