@@ -720,11 +720,10 @@ async def process_admin_date(callback_query: types.CallbackQuery, callback_data:
         data = await state.get_data()
         client_id = data.get('client_id')
         username = data.get('client_username')
-        
         async with pool.acquire() as conn:
             await conn.execute("INSERT INTO feedbacks (user_id, return_date) VALUES ($1, $2)", client_id, formatted)
         await clean_admin_messages(state, callback_query.message.chat.id)
-        await callback_query.message.answer(
+        report_msg = await callback_query.message.answer(
             f"✅ <b>Запит на відгук заплановано!</b>\n"
             f"━━━━━━━━━━━━━━━\n"
             f"📅 <b>Дата:</b> {formatted}\n"
@@ -733,6 +732,8 @@ async def process_admin_date(callback_query: types.CallbackQuery, callback_data:
             f"━━━━━━━━━━━━━━━",
             parse_mode="HTML"
         )
+        msgs = [report_msg.message_id]
+        await state.update_data(admin_msgs_to_clean=msgs)
         await show_admin_base(callback_query.message, state)
         await state.set_state(None)
 
