@@ -107,20 +107,34 @@ async def update_or_send_users_list(message: types.Message, state: FSMContext):
     data = await state.get_data()
     last_msg_id = data.get("main_users_msg_id")
 
+    # Спробуємо відредагувати існуюче повідомлення
     if last_msg_id:
         try:
-            # Намагаємося просто відредагувати старе повідомлення
             await bot.edit_message_text(
                 chat_id=message.chat.id,
                 message_id=last_msg_id,
                 text=text,
                 parse_mode="HTML"
             )
-            # Видаляємо саму команду користувача, щоб було красиво
-            await bot.delete_message(chat_id=message.chat.id, message_id=message.message_id)
-            return
+            # Якщо це був виклик через команду (текст), видаляємо саму команду
+            if message.text: 
+                try:
+                    await bot.delete_message(chat_id=message.chat.id, message_id=message.message_id)
+                except:
+                    pass
+            return # Виходимо, бо оновлення пройшло успішно
         except Exception:
-            # Якщо повідомлення застаріло або видалене — переходимо до надсилання нового
+            pass # Якщо повідомлення видалене — йдемо далі створювати нове
+
+    # Якщо старого повідомлення немає або не вдалося змінити — надсилаємо нове
+    new_msg = await message.answer(text, parse_mode="HTML")
+    await state.update_data(main_users_msg_id=new_msg.message_id)
+    
+    # Видаляємо команду користувача (якщо це була команда)
+    if message.text:
+        try:
+            await bot.delete_message(chat_id=message.chat.id, message_id=message.message_id)
+        except:
             pass
 
     # Якщо редагування не вдалося або повідомлення ще не було
@@ -665,7 +679,7 @@ async def apply_discount_callback(callback_query: types.CallbackQuery, state: FS
     
     if result == "UPDATE 1":
         await callback_query.answer("✅ Знижку використано!")
-        # Викликаємо оновлення списку прямо тут!
+        # Оновлюємо старий список (функція знайде його за ID у state)
         await update_or_send_users_list(callback_query.message, state)
     else:
         await callback_query.answer("❌ Знижку вже використано.", show_alert=True)
