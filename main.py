@@ -73,7 +73,7 @@ async def save_msg(message: types.Message, state: FSMContext):
     await state.update_data(msgs_to_delete=msgs)
 
 async def clean_admin_messages(state: FSMContext, chat_id: int):
-    """Повне очищення: видаляє всі повідомлення бота та попередні списки"""
+    """Видаляє всі зареєстровані тимчасові повідомлення"""
     data = await state.get_data()
     msgs_to_delete = data.get("admin_msgs_to_clean", [])
     for msg_id in msgs_to_delete:
@@ -697,10 +697,8 @@ async def process_admin_date(callback_query: types.CallbackQuery, callback_data:
         
         async with pool.acquire() as conn:
             await conn.execute("INSERT INTO feedbacks (user_id, return_date) VALUES ($1, $2)", client_id, formatted)
-        
         await clean_admin_messages(state, callback_query.message.chat.id)
-        
-        msg = await callback_query.message.answer(
+        await callback_query.message.answer(
             f"✅ <b>Запит на відгук заплановано!</b>\n"
             f"━━━━━━━━━━━━━━━\n"
             f"📅 <b>Дата:</b> {formatted}\n"
@@ -709,7 +707,6 @@ async def process_admin_date(callback_query: types.CallbackQuery, callback_data:
             f"━━━━━━━━━━━━━━━",
             parse_mode="HTML"
         )
-        await state.update_data(admin_msgs_to_clean=[msg.message_id])
         await show_admin_base(callback_query.message, state)
         await state.set_state(None)
 
