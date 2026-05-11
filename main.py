@@ -73,22 +73,30 @@ async def save_msg(message: types.Message, state: FSMContext):
     await state.update_data(msgs_to_delete=msgs)
 
 async def clean_admin_messages(state: FSMContext, chat_id: int):
-    """Видаляє всі попередні адмінські повідомлення, збережені у списку"""
+    """Видаляє всі повідомлення адміна та головний список"""
     data = await state.get_data()
-    msgs_to_delete = data.get("admin_msgs_to_clean", [])
     
+    # Збираємо всі ID повідомлень, які треба видалити
+    msgs_to_delete = data.get("admin_msgs_to_clean", [])
+    main_msg_id = data.get("main_users_msg_id")
+    
+    if main_msg_id:
+        msgs_to_delete.append(main_msg_id)
+
     for msg_id in msgs_to_delete:
         try:
             await bot.delete_message(chat_id=chat_id, message_id=msg_id)
         except Exception:
             pass
     
-    await state.update_data(admin_msgs_to_clean=[])
+    # Повністю очищуємо записи про повідомлення в пам'яті
+    await state.update_data(admin_msgs_to_clean=[], main_users_msg_id=None)
 
 async def update_or_send_users_list(message: types.Message, state: FSMContext):
-    """Оновлює існуюче повідомлення або надсилає ОДНЕ нове"""
+    # 1. Спочатку видаляємо ВСЕ старе (і команду, і минулі списки)
+    await clean_admin_messages(state, message.chat.id)
     
-    # Отримуємо дані з бази
+    # 2. Отримуємо свіжі дані з бази
     async with pool.acquire() as conn:
         rows = await conn.fetch("""
             SELECT u.user_id, u.username, u.full_name, d.discount_value 
@@ -106,33 +114,18 @@ async def update_or_send_users_list(message: types.Message, state: FSMContext):
             discount = f" | 🎁 {row['discount_value']}%" if row['discount_value'] else ""
             text += f"👤 <b>{name}</b> — {username} (<code>{row['user_id']}</code>){discount}\n"
 
-    data = await state.get_data()
-    main_msg_id = data.get("main_users_msg_id")
+    # 3. Надсилаємо НОВЕ повідомлення
+    new_msg = await bot.send_message(chat_id=message.chat.id, text=text, parse_mode="HTML")
+    
+    # 4. Зберігаємо його ID як головне
+    await state.update_data(main_users_msg_id=new_msg.message_id)
 
-    # ВАЖЛИВО: Видаляємо команду користувача (/users), щоб вона не висіла в чаті
-    if isinstance(message, types.Message) and message.text:
+    # 5. Видаляємо текст самої команди /users, якщо це було повідомлення
+    if isinstance(message, types.Message):
         try:
             await bot.delete_message(chat_id=message.chat.id, message_id=message.message_id)
         except:
             pass
-
-    # Спроба 1: Редагування
-    if main_msg_id:
-        try:
-            await bot.edit_message_text(
-                chat_id=message.chat.id,
-                message_id=main_msg_id,
-                text=text,
-                parse_mode="HTML"
-            )
-            return # Якщо вийшло — зупиняємо функцію
-        except Exception:
-            # Якщо не вдалося (повідомлення видалене), йдемо далі до Спроби 2
-            pass
-
-    # Спроба 2: Надсилання нового, якщо редагування не спрацювало
-    new_msg = await bot.send_message(chat_id=message.chat.id, text=text, parse_mode="HTML")
-    await state.update_data(main_users_msg_id=new_msg.message_id)
 
 pool = None
 
@@ -369,7 +362,7 @@ async def admin_start(message: types.Message, state: FSMContext):
 
 @dp.message(Command("users"), F.from_user.id == ADMIN_ID, StateFilter("*"))
 async def list_users(message: types.Message, state: FSMContext):
-    # Ми не чистимо чат повністю, а просто оновлюємо список
+    # Просто викликаємо нашу функцію, яка все підчистить і оновить
     await update_or_send_users_list(message, state)
 
 # --- ОБРОБНИКИ СТАНІВ (З ФІЛЬТРАЦІЄЮ КОМАНД) ---
