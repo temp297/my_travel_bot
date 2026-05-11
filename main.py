@@ -93,10 +93,18 @@ async def clean_admin_messages(state: FSMContext, chat_id: int):
     await state.update_data(admin_msgs_to_clean=[], main_users_msg_id=None)
 
 async def update_or_send_users_list(message: types.Message, state: FSMContext):
-    # 1. Спочатку видаляємо ВСЕ старе (і команду, і минулі списки)
-    await clean_admin_messages(state, message.chat.id)
-    
-    # 2. Отримуємо свіжі дані з бази
+    """Видаляє старий список і надсилає новий в кінець чату"""
+    data = await state.get_data()
+    main_msg_id = data.get("main_users_msg_id")
+
+    # 1. Видаляємо попередній список, де б він не був
+    if main_msg_id:
+        try:
+            await bot.delete_message(chat_id=message.chat.id, message_id=main_msg_id)
+        except:
+            pass
+
+    # 2. Отримуємо дані з бази
     async with pool.acquire() as conn:
         rows = await conn.fetch("""
             SELECT u.user_id, u.username, u.full_name, d.discount_value 
@@ -114,18 +122,9 @@ async def update_or_send_users_list(message: types.Message, state: FSMContext):
             discount = f" | 🎁 {row['discount_value']}%" if row['discount_value'] else ""
             text += f"👤 <b>{name}</b> — {username} (<code>{row['user_id']}</code>){discount}\n"
 
-    # 3. Надсилаємо НОВЕ повідомлення
+    # 3. Надсилаємо НОВИЙ список (він тепер останній в чаті)
     new_msg = await bot.send_message(chat_id=message.chat.id, text=text, parse_mode="HTML")
-    
-    # 4. Зберігаємо його ID як головне
     await state.update_data(main_users_msg_id=new_msg.message_id)
-
-    # 5. Видаляємо текст самої команди /users, якщо це було повідомлення
-    if isinstance(message, types.Message):
-        try:
-            await bot.delete_message(chat_id=message.chat.id, message_id=message.message_id)
-        except:
-            pass
 
 pool = None
 
@@ -356,9 +355,15 @@ async def cmd_use_discount_list(message: types.Message, state: FSMContext):
 async def admin_start(message: types.Message, state: FSMContext):
     await clean_admin_messages(state, message.chat.id)
     await state.clear()
-    msg = await message.answer("🛠 <b>Панель менеджера</b>\n\nВведіть <b>ID</b> клієнта або його <b>@username</b>:", parse_mode="HTML")
+    
+    msg = await message.answer("🛠 <b>Панель менеджера</b>\n\nВведіть <b>ID</b> клієнта:")
+    
+    # Зберігаємо ID на видалення, а в кінці додаємо оновлення списку
     await state.update_data(admin_msgs_to_clean=[message.message_id, msg.message_id])
     await state.set_state(AdminPanel.waiting_for_client_info)
+    
+    # ОНОВЛЮЄМО СПИСОК (щоб він "стрибнув" під повідомлення панелі менеджера)
+    await update_or_send_users_list(message, state)
 
 @dp.message(Command("users"), F.from_user.id == ADMIN_ID, StateFilter("*"))
 async def list_users(message: types.Message, state: FSMContext):
@@ -725,10 +730,10 @@ async def process_admin_date(callback_query: types.CallbackQuery, callback_data:
         async with pool.acquire() as conn:
             await conn.execute("INSERT INTO feedbacks (user_id, return_date) VALUES ($1, $2)", client_id, formatted)
         
-        # Видаляємо всі проміжні повідомлення пошуку
+        # 1. Спочатку чистимо робочі повідомлення (пошук, календар)
         await clean_admin_messages(state, callback_query.message.chat.id)
         
-        # Надсилаємо фінальний звіт, який НЕ додаємо в admin_msgs_to_clean
+        # 2. Надсилаємо звіт про успіх
         await callback_query.message.answer(
             f"✅ <b>Запит на відгук заплановано!</b>\n"
             f"━━━━━━━━━━━━━━━\n"
@@ -738,6 +743,12 @@ async def process_admin_date(callback_query: types.CallbackQuery, callback_data:
             f"━━━━━━━━━━━━━━━",
             parse_mode="HTML"
         )
+        
+        # 3. !!! ВАЖЛИВО !!! Оновлюємо список туристів ПЕРЕД state.clear()
+        # Це змусить список "переїхати" в самий низ чату під ваш звіт
+        await update_or_send_users_list(callback_query.message, state)
+        
+        # 4. Тепер можна очистити стан
         await state.clear()
 
 async def on_shutdown(app: web.Application):
