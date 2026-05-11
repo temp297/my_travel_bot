@@ -657,6 +657,7 @@ f"━━━━━━━━━━━━━━━"
 @dp.callback_query(F.data.startswith("apply_"), F.from_user.id == ADMIN_ID)
 async def apply_discount_callback(callback_query: types.CallbackQuery, state: FSMContext):
     user_id = int(callback_query.data.split("_")[1])
+    
     async with pool.acquire() as conn:
         result = await conn.execute(
             "UPDATE discounts SET is_used = TRUE WHERE user_id = $1 AND is_used = FALSE", 
@@ -665,10 +666,24 @@ async def apply_discount_callback(callback_query: types.CallbackQuery, state: FS
     
     if result == "UPDATE 1":
         await callback_query.answer("✅ Знижку використано!")
-        # Оновлюємо старий список (функція знайде його за ID у state)
+        
+        # --- ОНОВЛЕННЯ ТУТ ---
+        # 1. Видаляємо саме повідомлення з кнопкою, на яку натиснули
+        try:
+            await callback_query.message.delete()
+        except:
+            pass
+            
+        # 2. Оновлюємо головний список (він видалить стару версію і надішле нову в кінець)
         await update_or_send_users_list(callback_query.message, state)
+        # ---------------------
     else:
-        await callback_query.answer("❌ Знижку вже використано.", show_alert=True)
+        await callback_query.answer("❌ Знижку вже використано або не знайдено.", show_alert=True)
+        # Якщо знижки вже немає, теж видаляємо неактуальну кнопку
+        try:
+            await callback_query.message.delete()
+        except:
+            pass
 
 @dp.message(AdminPanel.waiting_for_client_info, ~CommandFilter(commands=BOT_COMMANDS))
 async def process_admin_search(message: types.Message, state: FSMContext):
