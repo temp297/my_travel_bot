@@ -328,28 +328,45 @@ async def check_active_discounts(message: types.Message, state: FSMContext):
         await state.update_data(admin_msgs_to_clean=[message.message_id, new_msg.message_id])
 
 @dp.message(Command("use_discount"), F.from_user.id == ADMIN_ID, StateFilter("*"))
-async def cmd_use_discount_list(message: types.Message, state: FSMContext):
-    await clean_admin_messages(state, message.chat.id)
+async def start_use_discount(message: types.Message, state: FSMContext):
+    # 1. Видаляємо команду /use_discount відразу
+    try:
+        await message.delete()
+    except:
+        pass
+
     async with pool.acquire() as conn:
         rows = await conn.fetch("""
-        SELECT u.user_id, u.full_name, d.discount_value 
-        FROM discounts d
-        JOIN users u ON d.user_id = u.user_id
-        WHERE d.is_used = FALSE
+            SELECT u.user_id, u.full_name, d.discount_value 
+            FROM users u 
+            JOIN discounts d ON u.user_id = d.user_id 
+            WHERE d.is_used = FALSE
         """)
+
     if not rows:
-        msg = await message.answer("❌ Наразі немає клієнтів з активними знижками.")
-        await state.update_data(admin_msgs_to_clean=[message.message_id, msg.message_id])
+        msg = await message.answer("❌ Немає активних знижок для використання.")
+        # Додаємо це повідомлення в список на видалення
+        await state.update_data(admin_msgs_to_clean=[msg.message_id])
         return
-    builder = InlineKeyboardBuilder()
-    for row in rows:
-        builder.add(types.InlineKeyboardButton(
-            text=f"{row['full_name']} ({row['discount_value']}%)", 
-            callback_data=f"apply_{row['user_id']}"
-        ))
-    builder.adjust(1)
-    new_msg = await message.answer("🎁 Оберіть клієнта, якому потрібно позначити знижку як використану:", reply_markup=builder.as_markup())
-    await state.update_data(admin_msgs_to_clean=[message.message_id, new_msg.message_id])
+
+    # Створюємо кнопки
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=f"{row['full_name']} ({row['discount_value']}%)", 
+                              callback_data=f"apply_{row['user_id']}")]
+        for row in rows
+    ])
+
+    # 2. Зберігаємо повідомлення в змінну, щоб отримати його ID
+    new_msg = await message.answer(
+        "🎁 Оберіть клієнта, якому потрібно позначити знижку як використану:", 
+        reply_markup=keyboard
+    )
+    
+    # 3. Оновлюємо дані для чистки (сюди йде тільки повідомлення з кнопками)
+    await state.update_data(admin_msgs_to_clean=[new_msg.message_id])
+    
+    # 4. Оновлюємо головний список, щоб він "стрибнув" під кнопки
+    await update_or_send_users_list(message, state)
 
 @dp.message(Command("admin"), F.from_user.id == ADMIN_ID, StateFilter("*"))
 async def admin_start(message: types.Message, state: FSMContext):
