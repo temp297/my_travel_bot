@@ -384,7 +384,17 @@ async def admin_start(message: types.Message, state: FSMContext):
 
 @dp.message(Command("users"), F.from_user.id == ADMIN_ID, StateFilter("*"))
 async def list_users(message: types.Message, state: FSMContext):
-    # Просто викликаємо нашу функцію, яка все підчистить і оновить
+    # 1. СПЕРШУ ВИДАЛЯЄМО САМУ КОМАНДУ /users
+    try:
+        await message.delete()
+    except Exception as e:
+        print(f"Не вдалося видалити команду: {e}")
+
+    # 2. Очищуємо старі повідомлення адмінки
+    await clean_admin_messages(state, message.chat.id)
+    
+    # 3. Викликаємо функцію оновлення списку
+    # ВАЖЛИВО: всередині update_or_send_users_list теж має бути видалення
     await update_or_send_users_list(message, state)
 
 # --- ОБРОБНИКИ СТАНІВ (З ФІЛЬТРАЦІЄЮ КОМАНД) ---
