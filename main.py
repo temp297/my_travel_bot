@@ -662,6 +662,7 @@ f"━━━━━━━━━━━━━━━"
 @dp.callback_query(F.data.startswith("apply_"), F.from_user.id == ADMIN_ID)
 async def apply_discount_callback(callback_query: types.CallbackQuery, state: FSMContext):
     user_id = int(callback_query.data.split("_")[1])
+    await clean_admin_messages(state, callback_query.message.chat.id)
     async with pool.acquire() as conn:
         await conn.execute("UPDATE discounts SET is_used = TRUE WHERE user_id = $1", user_id)
     await callback_query.answer("✅ Знижку використано!")
