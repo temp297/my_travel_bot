@@ -137,15 +137,6 @@ async def update_or_send_users_list(message: types.Message, state: FSMContext):
         except:
             pass
 
-    # Якщо редагування не вдалося або повідомлення ще не було
-    new_msg = await message.answer(text, parse_mode="HTML")
-    await state.update_data(main_users_msg_id=new_msg.message_id)
-    # Видаляємо команду користувача
-    try:
-        await bot.delete_message(chat_id=message.chat.id, message_id=message.message_id)
-    except:
-        pass
-
 pool = None
 
 async def init_db():
