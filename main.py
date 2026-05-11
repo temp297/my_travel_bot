@@ -373,16 +373,13 @@ async def list_users(message: types.Message, state: FSMContext):
     # 1. Видаляємо стару пару (команда + відповідь)
     await clean_admin_messages(state, message.chat.id)
     
-    # 2. Отримуємо дані для тексту (можна винести в окрему функцію, тут для прикладу)
-    text = "👥 <b>Список туристів завантажується...</b>" 
-    
-    # 3. Надсилаємо відповідь
+    # 2. Надсилаємо відповідь
     new_msg = await message.answer(text, parse_mode="HTML")
     
-    # 4. Зберігаємо ID поточної команди та відповіді для видалення наступного разу
+    # 3. Зберігаємо ID поточної команди та відповіді для видалення наступного разу
     await state.update_data(admin_msgs_to_clean=[message.message_id, new_msg.message_id])
     
-    # 5. Оновлюємо сам список (він видалить стару копію і стане в самий низ)
+    # 4. Оновлюємо сам список (він видалить стару копію і стане в самий низ)
     await update_or_send_users_list(message, state)
 
 # --- ОБРОБНИКИ СТАНІВ (З ФІЛЬТРАЦІЄЮ КОМАНД) ---
