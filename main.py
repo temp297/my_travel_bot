@@ -324,8 +324,11 @@ async def check_active_discounts(message: types.Message, state: FSMContext):
 
 @dp.message(Command("use_discount"), F.from_user.id == ADMIN_ID, StateFilter("*"))
 async def start_use_discount(message: types.Message, state: FSMContext):
-    # 1. Чистимо чат від минулих дій
-    await clean_admin_messages(state, message.chat.id)
+    # 1. Скидаємо будь-який активний стан, щоб команда спрацювала "з чистого листа"
+    await state.clear()
+    
+    # 2. Очищуємо чат (використовуємо функцію, яку ми створили раніше)
+    await clean_admin_chat(message, state)
 
     async with pool.acquire() as conn:
         rows = await conn.fetch("""
@@ -336,22 +339,26 @@ async def start_use_discount(message: types.Message, state: FSMContext):
         """)
 
     if not rows:
-        msg = await message.answer("❌ Немає активних знижок.")
-        await state.update_data(admin_msgs_to_clean=[message.message_id, msg.message_id])
+        msg = await message.answer("❌ Немає активних знижок для використання.")
+        # Оновлюємо список туристів навіть якщо знижок немає
+        await update_or_send_users_list(message, state)
         return
 
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=f"{row['full_name']} ({row['discount_value']}%)", 
-                              callback_data=f"apply_{row['user_id']}")]
-        for row in rows
-    ])
+    # Формуємо клавіатуру зі списком клієнтів
+    keyboard_builder = InlineKeyboardBuilder()
+    for row in rows:
+        keyboard_builder.row(InlineKeyboardButton(
+            text=f"{row['full_name']} ({row['discount_value']}%)", 
+            callback_data=f"apply_{row['user_id']}"
+        ))
 
-    new_msg = await message.answer("🎁 Оберіть клієнта для знижки:", reply_markup=keyboard)
+    await message.answer(
+        "🎁 <b>Оберіть клієнта, якому потрібно позначити знижку як використану:</b>", 
+        reply_markup=keyboard_builder.as_markup(),
+        parse_mode="HTML"
+    )
     
-    # Зберігаємо ID команди та кнопок
-    await state.update_data(admin_msgs_to_clean=[message.message_id, new_msg.message_id])
-    
-    # Оновлюємо список туристів під кнопками
+    # Виводимо список туристів у самий низ
     await update_or_send_users_list(message, state)
 
 @dp.message(Command("admin"), F.from_user.id == ADMIN_ID, StateFilter("*"))
