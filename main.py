@@ -73,7 +73,7 @@ async def save_msg(message: types.Message, state: FSMContext):
     await state.update_data(msgs_to_delete=msgs)
 
 async def clean_admin_messages(state: FSMContext, chat_id: int):
-    """Видаляє всі повідомлення попереднього сеансу (команди та відповіді)"""
+    """Видаляє повідомлення попереднього сеансу (текст команди)"""
     data = await state.get_data()
     msgs_to_delete = data.get("admin_msgs_to_clean", [])
     
@@ -83,22 +83,21 @@ async def clean_admin_messages(state: FSMContext, chat_id: int):
         except Exception:
             pass
     
-    # Очищуємо список ID, щоб не видаляти їх повторно
     await state.update_data(admin_msgs_to_clean=[])
 
 async def update_or_send_users_list(message: types.Message, state: FSMContext):
-    """Перевідправляє список туристів у кінець чату"""
+    """Видаляє стару версію списку та надсилає нову в кінець чату"""
     data = await state.get_data()
     main_msg_id = data.get("main_users_msg_id")
 
-    # Видаляємо попередній екземпляр списку
+    # Видаляємо попередній екземпляр списку, щоб він не дублювався
     if main_msg_id:
         try:
             await bot.delete_message(chat_id=message.chat.id, message_id=main_msg_id)
         except:
             pass
 
-    # Отримуємо дані
+    # Отримуємо свіжі дані з бази
     async with pool.acquire() as conn:
         rows = await conn.fetch("""
             SELECT u.user_id, u.username, u.full_name, d.discount_value 
@@ -116,9 +115,10 @@ async def update_or_send_users_list(message: types.Message, state: FSMContext):
             discount = f" | 🎁 {row['discount_value']}%" if row['discount_value'] else ""
             text += f"👤 <b>{name}</b> — {username} (<code>{row['user_id']}</code>){discount}\n"
 
+    # Надсилаємо ОДИН актуальний список
     new_msg = await bot.send_message(chat_id=message.chat.id, text=text, parse_mode="HTML")
     
-    # Оновлюємо ID головного повідомлення в стані
+    # Оновлюємо ID головного повідомлення в пам'яті
     await state.update_data(main_users_msg_id=new_msg.message_id)
 
 pool = None
@@ -370,20 +370,15 @@ async def admin_start(message: types.Message, state: FSMContext):
 
 @dp.message(Command("users"), F.from_user.id == ADMIN_ID, StateFilter("*"))
 async def list_users(message: types.Message, state: FSMContext):
-    # 1. Видаляємо стару пару (команда + відповідь)
+    # 1. Видаляємо стару пару (попередню команду та її відповідь)
     await clean_admin_messages(state, message.chat.id)
     
-    # 2. Отримуємо дані для тексту (можна винести в окрему функцію, тут для прикладу)
-    text = "👥 <b>Список туристів завантажується...</b>" 
-    
-    # 3. Надсилаємо відповідь
-    new_msg = await message.answer(text, parse_mode="HTML")
-    
-    # 4. Зберігаємо ID поточної команди та відповіді для видалення наступного разу
-    await state.update_data(admin_msgs_to_clean=[message.message_id, new_msg.message_id])
-    
-    # 5. Оновлюємо сам список (він видалить стару копію і стане в самий низ)
+    # 2. Оновлюємо сам список туристів (він з'явиться в самому низу)
     await update_or_send_users_list(message, state)
+    
+    # 3. Зберігаємо ID поточної команди на видалення в майбутньому
+    # Оскільки ми прибрали проміжне повідомлення, зберігаємо лише ID повідомлення з командою
+    await state.update_data(admin_msgs_to_clean=[message.message_id])
 
 # --- ОБРОБНИКИ СТАНІВ (З ФІЛЬТРАЦІЄЮ КОМАНД) ---
 
