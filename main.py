@@ -73,38 +73,32 @@ async def save_msg(message: types.Message, state: FSMContext):
     await state.update_data(msgs_to_delete=msgs)
 
 async def clean_admin_messages(state: FSMContext, chat_id: int):
-    """Видаляє всі повідомлення адміна та головний список"""
+    """Видаляє всі повідомлення попереднього сеансу (команди та відповіді)"""
     data = await state.get_data()
-    
-    # Збираємо всі ID повідомлень, які треба видалити
     msgs_to_delete = data.get("admin_msgs_to_clean", [])
-    main_msg_id = data.get("main_users_msg_id")
     
-    if main_msg_id:
-        msgs_to_delete.append(main_msg_id)
-
     for msg_id in msgs_to_delete:
         try:
             await bot.delete_message(chat_id=chat_id, message_id=msg_id)
         except Exception:
             pass
     
-    # Повністю очищуємо записи про повідомлення в пам'яті
-    await state.update_data(admin_msgs_to_clean=[], main_users_msg_id=None)
+    # Очищуємо список ID, щоб не видаляти їх повторно
+    await state.update_data(admin_msgs_to_clean=[])
 
 async def update_or_send_users_list(message: types.Message, state: FSMContext):
-    """Видаляє старий список і надсилає новий в кінець чату"""
+    """Перевідправляє список туристів у кінець чату"""
     data = await state.get_data()
     main_msg_id = data.get("main_users_msg_id")
 
-    # 1. Видаляємо попередній список, де б він не був
+    # Видаляємо попередній екземпляр списку
     if main_msg_id:
         try:
             await bot.delete_message(chat_id=message.chat.id, message_id=main_msg_id)
         except:
             pass
 
-    # 2. Отримуємо дані з бази
+    # Отримуємо дані
     async with pool.acquire() as conn:
         rows = await conn.fetch("""
             SELECT u.user_id, u.username, u.full_name, d.discount_value 
@@ -122,8 +116,9 @@ async def update_or_send_users_list(message: types.Message, state: FSMContext):
             discount = f" | 🎁 {row['discount_value']}%" if row['discount_value'] else ""
             text += f"👤 <b>{name}</b> — {username} (<code>{row['user_id']}</code>){discount}\n"
 
-    # 3. Надсилаємо НОВИЙ список (він тепер останній в чаті)
     new_msg = await bot.send_message(chat_id=message.chat.id, text=text, parse_mode="HTML")
+    
+    # Оновлюємо ID головного повідомлення в стані
     await state.update_data(main_users_msg_id=new_msg.message_id)
 
 pool = None
@@ -329,11 +324,8 @@ async def check_active_discounts(message: types.Message, state: FSMContext):
 
 @dp.message(Command("use_discount"), F.from_user.id == ADMIN_ID, StateFilter("*"))
 async def start_use_discount(message: types.Message, state: FSMContext):
-    # 1. Видаляємо команду /use_discount відразу
-    try:
-        await message.delete()
-    except:
-        pass
+    # 1. Чистимо чат від минулих дій
+    await clean_admin_messages(state, message.chat.id)
 
     async with pool.acquire() as conn:
         rows = await conn.fetch("""
@@ -344,28 +336,22 @@ async def start_use_discount(message: types.Message, state: FSMContext):
         """)
 
     if not rows:
-        msg = await message.answer("❌ Немає активних знижок для використання.")
-        # Додаємо це повідомлення в список на видалення
-        await state.update_data(admin_msgs_to_clean=[msg.message_id])
+        msg = await message.answer("❌ Немає активних знижок.")
+        await state.update_data(admin_msgs_to_clean=[message.message_id, msg.message_id])
         return
 
-    # Створюємо кнопки
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text=f"{row['full_name']} ({row['discount_value']}%)", 
                               callback_data=f"apply_{row['user_id']}")]
         for row in rows
     ])
 
-    # 2. Зберігаємо повідомлення в змінну, щоб отримати його ID
-    new_msg = await message.answer(
-        "🎁 Оберіть клієнта, якому потрібно позначити знижку як використану:", 
-        reply_markup=keyboard
-    )
+    new_msg = await message.answer("🎁 Оберіть клієнта для знижки:", reply_markup=keyboard)
     
-    # 3. Оновлюємо дані для чистки (сюди йде тільки повідомлення з кнопками)
-    await state.update_data(admin_msgs_to_clean=[new_msg.message_id])
+    # Зберігаємо ID команди та кнопок
+    await state.update_data(admin_msgs_to_clean=[message.message_id, new_msg.message_id])
     
-    # 4. Оновлюємо головний список, щоб він "стрибнув" під кнопки
+    # Оновлюємо список туристів під кнопками
     await update_or_send_users_list(message, state)
 
 @dp.message(Command("admin"), F.from_user.id == ADMIN_ID, StateFilter("*"))
@@ -384,17 +370,19 @@ async def admin_start(message: types.Message, state: FSMContext):
 
 @dp.message(Command("users"), F.from_user.id == ADMIN_ID, StateFilter("*"))
 async def list_users(message: types.Message, state: FSMContext):
-    # 1. СПЕРШУ ВИДАЛЯЄМО САМУ КОМАНДУ /users
-    try:
-        await message.delete()
-    except Exception as e:
-        print(f"Не вдалося видалити команду: {e}")
-
-    # 2. Очищуємо старі повідомлення адмінки
+    # 1. Видаляємо стару пару (команда + відповідь)
     await clean_admin_messages(state, message.chat.id)
     
-    # 3. Викликаємо функцію оновлення списку
-    # ВАЖЛИВО: всередині update_or_send_users_list теж має бути видалення
+    # 2. Отримуємо дані для тексту (можна винести в окрему функцію, тут для прикладу)
+    text = "👥 <b>Список туристів завантажується...</b>" 
+    
+    # 3. Надсилаємо відповідь
+    new_msg = await message.answer(text, parse_mode="HTML")
+    
+    # 4. Зберігаємо ID поточної команди та відповіді для видалення наступного разу
+    await state.update_data(admin_msgs_to_clean=[message.message_id, new_msg.message_id])
+    
+    # 5. Оновлюємо сам список (він видалить стару копію і стане в самий низ)
     await update_or_send_users_list(message, state)
 
 # --- ОБРОБНИКИ СТАНІВ (З ФІЛЬТРАЦІЄЮ КОМАНД) ---
@@ -686,31 +674,18 @@ async def apply_discount_callback(callback_query: types.CallbackQuery, state: FS
     user_id = int(callback_query.data.split("_")[1])
     
     async with pool.acquire() as conn:
-        result = await conn.execute(
-            "UPDATE discounts SET is_used = TRUE WHERE user_id = $1 AND is_used = FALSE", 
-            user_id
-        )
+        await conn.execute("UPDATE discounts SET is_used = TRUE WHERE user_id = $1", user_id)
     
-    if result == "UPDATE 1":
-        await callback_query.answer("✅ Знижку використано!")
+    await callback_query.answer("✅ Знижку використано!")
+    
+    # Видаляємо повідомлення з кнопками, бо дія завершена
+    try:
+        await callback_query.message.delete()
+    except:
+        pass
         
-        # --- ОНОВЛЕННЯ ТУТ ---
-        # 1. Видаляємо саме повідомлення з кнопкою, на яку натиснули
-        try:
-            await callback_query.message.delete()
-        except:
-            pass
-            
-        # 2. Оновлюємо головний список (він видалить стару версію і надішле нову в кінець)
-        await update_or_send_users_list(callback_query.message, state)
-        # ---------------------
-    else:
-        await callback_query.answer("❌ Знижку вже використано або не знайдено.", show_alert=True)
-        # Якщо знижки вже немає, теж видаляємо неактуальну кнопку
-        try:
-            await callback_query.message.delete()
-        except:
-            pass
+    # Оновлюємо список туристів (тепер він буде останнім повідомленням)
+    await update_or_send_users_list(callback_query.message, state)
 
 @dp.message(AdminPanel.waiting_for_client_info, ~CommandFilter(commands=BOT_COMMANDS))
 async def process_admin_search(message: types.Message, state: FSMContext):
