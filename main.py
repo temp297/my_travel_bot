@@ -367,13 +367,15 @@ async def admin_start(message: types.Message, state: FSMContext):
     await clean_admin_messages(state, message.chat.id)
     await state.clear()
     
-    msg = await message.answer("🛠 <b>Панель менеджера</b>\n\nВведіть <b>ID</b> клієнта:")
+    # ДОДАНО parse_mode="HTML" нижче
+    msg = await message.answer(
+        "🛠 <b>Панель менеджера</b>\n\nВведіть <b>ID</b> клієнта:",
+        parse_mode="HTML"
+    )
     
-    # Зберігаємо ID на видалення, а в кінці додаємо оновлення списку
     await state.update_data(admin_msgs_to_clean=[message.message_id, msg.message_id])
     await state.set_state(AdminPanel.waiting_for_client_info)
     
-    # ОНОВЛЮЄМО СПИСОК (щоб він "стрибнув" під повідомлення панелі менеджера)
     await update_or_send_users_list(message, state)
 
 @dp.message(Command("users"), F.from_user.id == ADMIN_ID, StateFilter("*"))
