@@ -637,19 +637,13 @@ f"━━━━━━━━━━━━━━━"
 @dp.callback_query(F.data.startswith("apply_"), F.from_user.id == ADMIN_ID)
 async def apply_discount_callback(callback_query: types.CallbackQuery, state: FSMContext):
     user_id = int(callback_query.data.split("_")[1])
-    
     async with pool.acquire() as conn:
         await conn.execute("UPDATE discounts SET is_used = TRUE WHERE user_id = $1", user_id)
-    
     await callback_query.answer("✅ Знижку використано!")
-    
-    # Видаляємо повідомлення з кнопками, бо дія завершена
     try:
         await callback_query.message.delete()
     except:
         pass
-        
-    # Оновлюємо список туристів (тепер він буде останнім повідомленням)
     await show_admin_base(callback_query.message, state)
 
 @dp.message(AdminPanel.waiting_for_client_info, ~CommandFilter(commands=BOT_COMMANDS))
@@ -680,7 +674,6 @@ async def process_admin_search(message: types.Message, state: FSMContext):
             reply_markup=await SimpleCalendar().start_calendar(),
             parse_mode="HTML"
         )
-        # Зберігаємо повідомлення адміна та відповідь бота для видалення пізніше
         data = await state.get_data()
         msgs = data.get("admin_msgs_to_clean", [])
         msgs.extend([message.message_id, msg.message_id])
@@ -688,25 +681,6 @@ async def process_admin_search(message: types.Message, state: FSMContext):
         await state.set_state(AdminPanel.waiting_for_date)
     else:
         msg = await message.answer("❌ Клієнта не знайдено в базі. Спробуйте ще раз:")
-        data = await state.get_data()
-        msgs = data.get("admin_msgs_to_clean", [])
-        msgs.extend([message.message_id, msg.message_id])
-        await state.update_data(admin_msgs_to_clean=msgs)
-        
-        # --- ОНОВЛЕННЯ ТУТ ---
-        # Отримуємо поточний список повідомлень на видалення
-        data = await state.get_data()
-        msgs = data.get("admin_msgs_to_clean", [])
-        # Додаємо ID введеного адміном тексту та ID відповіді бота ("Клієнта знайдено")
-        msgs.extend([message.message_id, msg.message_id])
-        await state.update_data(admin_msgs_to_clean=msgs)
-        # ---------------------
-        
-        await state.set_state(AdminPanel.waiting_for_date)
-    else:
-        msg = await message.answer("❌ Клієнта не знайдено в базі. Спробуйте ще раз:")
-        
-        # Додаємо повідомлення про помилку до списку на видалення
         data = await state.get_data()
         msgs = data.get("admin_msgs_to_clean", [])
         msgs.extend([message.message_id, msg.message_id])
@@ -724,7 +698,6 @@ async def process_admin_date(callback_query: types.CallbackQuery, callback_data:
         async with pool.acquire() as conn:
             await conn.execute("INSERT INTO feedbacks (user_id, return_date) VALUES ($1, $2)", client_id, formatted)
         
-        # Видаляємо все зайве: попередні списки, пошук, календар
         await clean_admin_messages(state, callback_query.message.chat.id)
         
         msg = await callback_query.message.answer(
@@ -736,10 +709,7 @@ async def process_admin_date(callback_query: types.CallbackQuery, callback_data:
             f"━━━━━━━━━━━━━━━",
             parse_mode="HTML"
         )
-        
-        # Додаємо звіт в список на видалення для наступного разу
         await state.update_data(admin_msgs_to_clean=[msg.message_id])
-        # Оновлюємо список туристів внизу
         await show_admin_base(callback_query.message, state)
         await state.set_state(None)
 
@@ -773,14 +743,11 @@ async def main():
     setup_application(app, dp, bot=bot)
     app.on_shutdown.append(on_shutdown)
 
-    # 1. Створюємо список команд для звичайних користувачів
     user_commands = [
         types.BotCommand(command="start", description="🚀 Почати підбір туру"), 
         types.BotCommand(command="discount", description="🎁 Моя знижка")
-       # types.BotCommand(command="cancel", description="❌ Скасувати дію")
     ]
 
-    # 2. Створюємо список команд для адміна (додаємо до користувацьких адмінські)
     admin_commands = user_commands + [
         types.BotCommand(command="admin", description="🛠 Панель менеджера"),
         types.BotCommand(command="check_discounts", description="📊 Активні знижки"),
@@ -788,10 +755,7 @@ async def main():
         types.BotCommand(command="users", description="👥 Список туристів")
     ]
 
-    # 3. Встановлюємо меню для всіх (Default)
     await bot.set_my_commands(user_commands, scope=types.BotCommandScopeDefault())
-    
-    # 4. Встановлюємо окреме меню для Адміна (Chat)
     await bot.set_my_commands(admin_commands, scope=types.BotCommandScopeChat(chat_id=ADMIN_ID))
 
     scheduler.add_job(check_returns, 'cron', hour=FEEDBACK_HOUR, minute=0)
