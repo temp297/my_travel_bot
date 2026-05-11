@@ -85,6 +85,53 @@ async def clean_admin_messages(state: FSMContext, chat_id: int):
     
     await state.update_data(admin_msgs_to_clean=[])
 
+async def update_or_send_users_list(message: types.Message, state: FSMContext):
+    """Оновлює існуюче повідомлення зі списком або надсилає нове, якщо старого немає"""
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("""
+        SELECT u.user_id, u.username, u.full_name, d.discount_value 
+        FROM users u 
+        LEFT JOIN discounts d ON u.user_id = d.user_id AND d.is_used = FALSE
+        """)
+    
+    text = "👥 <b>Список туристів:</b>\n━━━━━━━━━━━━━━━\n"
+    if not rows:
+        text += "База порожня."
+    else:
+        for row in rows:
+            username = f"@{row['username']}" if row['username'] else "немає"
+            name = row['full_name'] or "Ім'я не вказано"
+            discount = f" | 🎁 {row['discount_value']}%" if row['discount_value'] else ""
+            text += f"👤 <b>{name}</b> — {username} (<code>{row['user_id']}</code>){discount}\n"
+
+    data = await state.get_data()
+    last_msg_id = data.get("main_users_msg_id")
+
+    if last_msg_id:
+        try:
+            # Намагаємося просто відредагувати старе повідомлення
+            await bot.edit_message_text(
+                chat_id=message.chat.id,
+                message_id=last_msg_id,
+                text=text,
+                parse_mode="HTML"
+            )
+            # Видаляємо саму команду користувача, щоб було красиво
+            await bot.delete_message(chat_id=message.chat.id, message_id=message.message_id)
+            return
+        except Exception:
+            # Якщо повідомлення застаріло або видалене — переходимо до надсилання нового
+            pass
+
+    # Якщо редагування не вдалося або повідомлення ще не було
+    new_msg = await message.answer(text, parse_mode="HTML")
+    await state.update_data(main_users_msg_id=new_msg.message_id)
+    # Видаляємо команду користувача
+    try:
+        await bot.delete_message(chat_id=message.chat.id, message_id=message.message_id)
+    except:
+        pass
+
 pool = None
 
 async def init_db():
@@ -320,25 +367,8 @@ async def admin_start(message: types.Message, state: FSMContext):
 
 @dp.message(Command("users"), F.from_user.id == ADMIN_ID, StateFilter("*"))
 async def list_users(message: types.Message, state: FSMContext):
-    await clean_admin_messages(state, message.chat.id)
-    async with pool.acquire() as conn:
-        rows = await conn.fetch("""
-        SELECT u.user_id, u.username, u.full_name, d.discount_value 
-        FROM users u 
-        LEFT JOIN discounts d ON u.user_id = d.user_id AND d.is_used = FALSE
-        """)
-    if not rows:
-        msg = await message.answer("База даних поки порожня.")
-        await state.update_data(admin_msgs_to_clean=[message.message_id, msg.message_id])
-        return
-    text = "👥 <b>Список туристів:</b>\n━━━━━━━━━━━━━━━\n"
-    for row in rows:
-        username = f"@{row['username']}" if row['username'] else "немає"
-        name = row['full_name'] if row['full_name'] else "Ім'я не вказано"
-        discount_text = f" | 🎁 {row['discount_value']}%" if row['discount_value'] else ""
-        text += f"👤 <b>{name}</b> — {username} (<code>{row['user_id']}</code>){discount_text}\n"
-    new_msg = await message.answer(text, parse_mode="HTML")
-    await state.update_data(admin_msgs_to_clean=[message.message_id, new_msg.message_id])
+    # Ми не чистимо чат повністю, а просто оновлюємо список
+    await update_or_send_users_list(message, state)
 
 # --- ОБРОБНИКИ СТАНІВ (З ФІЛЬТРАЦІЄЮ КОМАНД) ---
 
@@ -625,18 +655,20 @@ f"━━━━━━━━━━━━━━━"
     asyncio.create_task(delayed_feedback_reply(forwarded_msg, rating))
 
 @dp.callback_query(F.data.startswith("apply_"), F.from_user.id == ADMIN_ID)
-async def apply_discount_callback(callback_query: types.CallbackQuery):
+async def apply_discount_callback(callback_query: types.CallbackQuery, state: FSMContext):
     user_id = int(callback_query.data.split("_")[1])
     async with pool.acquire() as conn:
         result = await conn.execute(
             "UPDATE discounts SET is_used = TRUE WHERE user_id = $1 AND is_used = FALSE", 
             user_id
         )
+    
     if result == "UPDATE 1":
-        await callback_query.message.edit_text(f"✅ Знижку для клієнта (ID: `{user_id}`) успішно використано!")
+        await callback_query.answer("✅ Знижку використано!")
+        # Викликаємо оновлення списку прямо тут!
+        await update_or_send_users_list(callback_query.message, state)
     else:
-        await callback_query.message.edit_text("❌ Знижку вже було використано раніше або клієнта не знайдено.")
-    await callback_query.answer()
+        await callback_query.answer("❌ Знижку вже використано.", show_alert=True)
 
 @dp.message(AdminPanel.waiting_for_client_info, ~CommandFilter(commands=BOT_COMMANDS))
 async def process_admin_search(message: types.Message, state: FSMContext):
