@@ -155,18 +155,20 @@ async def init_db():
             logging.info(f"Колонка full_name вже існує або помилка: {e}")
 
 async def save_user(user: types.User):
+    global pool  # Додай цей рядок
     await pool.execute(
         "INSERT INTO users (user_id, username, full_name) VALUES ($1, $2, $3) "
         "ON CONFLICT (user_id) DO UPDATE SET "
         "username = EXCLUDED.username, full_name = EXCLUDED.full_name",
         user.id, user.username, user.full_name
-        )
+    )
 
 async def get_user_discount(user_id: int):
+    global pool  # Додай цей рядок
     async with pool.acquire() as conn:
         return await conn.fetchrow(
-        "SELECT discount_value FROM discounts WHERE user_id = $1 AND is_used = FALSE", 
-        user_id
+            "SELECT discount_value FROM discounts WHERE user_id = $1 AND is_used = FALSE", 
+            user_id
         )
 
 async def check_returns():
@@ -239,6 +241,7 @@ def generate_discount():
 @dp.message(CommandStart(), StateFilter("*"))
 async def cmd_start(message: types.Message, state: FSMContext, command: CommandObject):
     await state.clear()
+    global pool # Додай для впевненості
     args = command.args
     user = message.from_user
     name = user.full_name or "Мандрівник"
@@ -324,11 +327,11 @@ async def check_active_discounts(message: types.Message, state: FSMContext):
 
 @dp.message(Command("use_discount"), F.from_user.id == ADMIN_ID, StateFilter("*"))
 async def start_use_discount(message: types.Message, state: FSMContext):
-    # 1. Скидаємо будь-який активний стан, щоб команда спрацювала "з чистого листа"
+    # 1. Скидаємо стан
     await state.clear()
     
-    # 2. Очищуємо чат (використовуємо функцію, яку ми створили раніше)
-    await clean_admin_chat(message, state)
+    # 2. Очищуємо чат (ВИПРАВЛЕНО НАЗВУ ФУНКЦІЇ)
+    await clean_admin_messages(state, message.chat.id)
 
     async with pool.acquire() as conn:
         rows = await conn.fetch("""
@@ -340,14 +343,13 @@ async def start_use_discount(message: types.Message, state: FSMContext):
 
     if not rows:
         msg = await message.answer("❌ Немає активних знижок для використання.")
-        # Оновлюємо список туристів навіть якщо знижок немає
         await update_or_send_users_list(message, state)
         return
 
-    # Формуємо клавіатуру зі списком клієнтів
+    # Формуємо клавіатуру (ДОДАНО types. до InlineKeyboardButton)
     keyboard_builder = InlineKeyboardBuilder()
     for row in rows:
-        keyboard_builder.row(InlineKeyboardButton(
+        keyboard_builder.row(types.InlineKeyboardButton(
             text=f"{row['full_name']} ({row['discount_value']}%)", 
             callback_data=f"apply_{row['user_id']}"
         ))
@@ -358,7 +360,6 @@ async def start_use_discount(message: types.Message, state: FSMContext):
         parse_mode="HTML"
     )
     
-    # Виводимо список туристів у самий низ
     await update_or_send_users_list(message, state)
 
 @dp.message(Command("admin"), F.from_user.id == ADMIN_ID, StateFilter("*"))
