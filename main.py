@@ -86,9 +86,9 @@ async def clean_admin_messages(state: FSMContext, chat_id: int):
     await state.update_data(admin_msgs_to_clean=[])
 
 async def update_or_send_users_list(message: types.Message, state: FSMContext):
-    """Оновлює існуюче повідомлення або надсилає ОДНЕ нове, видаляючи зайві"""
+    """Оновлює існуюче повідомлення або надсилає ОДНЕ нове"""
     
-    # 1. Отримуємо дані з бази
+    # Отримуємо дані з бази
     async with pool.acquire() as conn:
         rows = await conn.fetch("""
             SELECT u.user_id, u.username, u.full_name, d.discount_value 
@@ -106,13 +106,17 @@ async def update_or_send_users_list(message: types.Message, state: FSMContext):
             discount = f" | 🎁 {row['discount_value']}%" if row['discount_value'] else ""
             text += f"👤 <b>{name}</b> — {username} (<code>{row['user_id']}</code>){discount}\n"
 
-    # 2. Очищуємо чат від усіх попередніх спроб (якщо вони були в admin_msgs_to_clean)
-    await clean_admin_messages(state, message.chat.id)
-
     data = await state.get_data()
     main_msg_id = data.get("main_users_msg_id")
 
-    # 3. Спроба редагування
+    # ВАЖЛИВО: Видаляємо команду користувача (/users), щоб вона не висіла в чаті
+    if isinstance(message, types.Message) and message.text:
+        try:
+            await bot.delete_message(chat_id=message.chat.id, message_id=message.message_id)
+        except:
+            pass
+
+    # Спроба 1: Редагування
     if main_msg_id:
         try:
             await bot.edit_message_text(
@@ -121,26 +125,14 @@ async def update_or_send_users_list(message: types.Message, state: FSMContext):
                 text=text,
                 parse_mode="HTML"
             )
-            # Видаляємо лише текст команди користувача
-            if message.text:
-                await bot.delete_message(chat_id=message.chat.id, message_id=message.message_id)
-            return 
+            return # Якщо вийшло — зупиняємо функцію
         except Exception:
-            # Якщо повідомлення не знайдено для редагування — йдемо далі
+            # Якщо не вдалося (повідомлення видалене), йдемо далі до Спроби 2
             pass
 
-    # 4. Якщо редагування не вдалося — надсилаємо НОВЕ і зберігаємо його ID
-    new_msg = await message.answer(text, parse_mode="HTML")
-    
-    # Оновлюємо стан: тепер це повідомлення головне
+    # Спроба 2: Надсилання нового, якщо редагування не спрацювало
+    new_msg = await bot.send_message(chat_id=message.chat.id, text=text, parse_mode="HTML")
     await state.update_data(main_users_msg_id=new_msg.message_id)
-
-    # Видаляємо команду /users від адміна
-    if message.text:
-        try:
-            await bot.delete_message(chat_id=message.chat.id, message_id=message.message_id)
-        except:
-            pass
 
 pool = None
 
