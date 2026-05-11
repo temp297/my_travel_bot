@@ -333,21 +333,46 @@ async def list_users(message: types.Message, state: FSMContext):
 @dp.message(Command("use_discount"), F.from_user.id == ADMIN_ID, StateFilter("*"))
 async def start_use_discount(message: types.Message, state: FSMContext):
     await clean_admin_messages(state, message.chat.id)
-    try: await message.delete()
-    except: pass
+    try: 
+        await message.delete()
+    except: 
+        pass
     await state.clear()
+    
     async with pool.acquire() as conn:
-        rows = await conn.fetch("SELECT u.user_id, u.full_name, d.discount_value FROM users u JOIN discounts d ON u.user_id = d.user_id WHERE d.is_used = FALSE")
+        # Додаємо username до запиту, щоб використати його в кнопці
+        rows = await conn.fetch("""
+            SELECT u.user_id, u.full_name, u.username, d.discount_value 
+            FROM users u 
+            JOIN discounts d ON u.user_id = d.user_id 
+            WHERE d.is_used = FALSE
+        """)
+        
     if not rows:
         msg = await message.answer("❌ Немає активних знижок.")
         await state.update_data(admin_msgs_to_clean=[msg.message_id])
         await show_admin_base(message, state)
         return
+
     kb = InlineKeyboardBuilder()
     for row in rows:
-        kb.row(types.InlineKeyboardButton(text=f"{row['full_name']} ({row['discount_value']}%)", callback_data=f"apply_{row['user_id']}"))
-    msg = await message.answer("🎁 <b>Оберіть клієнта:</b>", reply_markup=kb.as_markup(), parse_mode="HTML")
-    await state.update_data(admin_msgs_to_clean=[msg.message_id])
+        # Формуємо текст кнопки точно як у списку туристів
+        username = f"@{row['username']}" if row['username'] else "немає"
+        button_text = f"{row['full_name']} — {username} ({row['user_id']}) | 🎁 {row['discount_value']}%"
+        
+        kb.row(types.InlineKeyboardButton(
+            text=button_text, 
+            callback_data=f"apply_{row['user_id']}")
+        )
+        
+    msg = await message.answer("🎁 <b>Оберіть клієнта для використання знижки:</b>", reply_markup=kb.as_markup(), parse_mode="HTML")
+    
+    # Реєструємо повідомлення для чистки
+    data = await state.get_data()
+    current_msgs = data.get("admin_msgs_to_clean", [])
+    current_msgs.append(msg.message_id)
+    await state.update_data(admin_msgs_to_clean=current_msgs)
+    
     await show_admin_base(message, state)
     
 # --- ОБРОБНИКИ СТАНІВ (З ФІЛЬТРАЦІЄЮ КОМАНД) ---
