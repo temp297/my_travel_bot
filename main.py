@@ -283,8 +283,19 @@ async def cmd_discount(message: types.Message, state: FSMContext):
     user = message.from_user
     name = user.full_name or "Мандрівник"
     user_id = user.id
+    username = user.username or "none"
+
     async with pool.acquire() as conn:
-        row = await conn.fetchrow("SELECT discount_value FROM discounts WHERE user_id = $1 AND is_used = FALSE", user_id)
+        await conn.execute("""
+            INSERT INTO users (user_id, username, full_name)
+            VALUES ($1, $2, $3)
+            ON CONFLICT (user_id) DO NOTHING
+        """, user_id, username, name)
+        row = await conn.fetchrow(
+            "SELECT discount_value FROM discounts WHERE user_id = $1 AND is_used = FALSE", 
+            user_id
+        )
+
         if row:
             discount = row['discount_value']
             text = f"🎁 {name}, у вас є активна знижка: **{discount}%**\nВикористайте її під час бронювання наступного туру!"
@@ -296,14 +307,22 @@ async def cmd_discount(message: types.Message, state: FSMContext):
                 discount = 4
             else:
                 discount = 5
+
             await conn.execute("""
-            INSERT INTO discounts (user_id, discount_value, is_used) 
-            VALUES ($1, $2, FALSE)
-            ON CONFLICT (user_id) DO UPDATE SET discount_value = $2, is_used = FALSE
+                INSERT INTO discounts (user_id, discount_value, is_used) 
+                VALUES ($1, $2, FALSE)
+                ON CONFLICT (user_id) DO UPDATE SET discount_value = $2, is_used = FALSE
             """, user_id, discount)
+
             text = f"Вітаємо, {name}! 🎉 Ви виграли знижку на наступну подорож: **{discount}%.**\nВикористайте її під час бронювання наступного туру!"
+
+    # 5. Встановлюємо стан та відправляємо відповідь
     await state.set_state(TourRequest.start_confirmed)
-    await message.answer(text, parse_mode="Markdown", reply_markup=start_inline_kb())
+    await message.answer(
+        text, 
+        parse_mode="Markdown", 
+        reply_markup=start_inline_kb()
+    )
 
 @dp.message(Command("check_discounts"), F.from_user.id == ADMIN_ID, StateFilter("*"))
 async def check_active_discounts(message: types.Message, state: FSMContext):
