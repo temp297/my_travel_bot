@@ -166,13 +166,13 @@ async def check_returns():
     logging.info(f"🔎 [SCHEDULER] Перевірка бази на дату: {today}")
     
     async with pool.acquire() as conn:
-        # Вибираємо лише user_id, оскільки стовпця id немає
+        # Вибираємо id запису, щоб оновлювати саме його
         rows = await conn.fetch(
-            "SELECT user_id FROM feedbacks WHERE return_date = $1 AND sent = 0", 
+            "SELECT id, user_id FROM feedbacks WHERE return_date = $1 AND sent = 0", 
             today
         )
         
-        logging.info(f"📊 [SCHEDULER] Знайдено записів: {len(rows)}")
+        logging.info(f"📊 [SCHEDULER] Знайдено записів для відправки: {len(rows)}")
         
         for row in rows:
             try:
@@ -181,14 +181,11 @@ async def check_returns():
                     "✈️ З поверненням! Сподіваємося, Ваш відпочинок був чудовим.\n\nБудь ласка, оцініть нашу роботу:",
                     reply_markup=rating_kb()
                 )
-                # Оновлюємо статус за user_id
-                await conn.execute(
-                    "UPDATE feedbacks SET sent = 1 WHERE user_id = $1 AND return_date = $2", 
-                    row['user_id'], today
-                )
-                logging.info(f"✅ [SCHEDULER] Відгук надіслано ID: {row['user_id']}")
+                # Оновлюємо статус за унікальним ID рядка
+                await conn.execute("UPDATE feedbacks SET sent = 1 WHERE id = $1", row['id'])
+                logging.info(f"✅ [SCHEDULER] Відгук надіслано користувачу ID: {row['user_id']}")
             except Exception as e:
-                logging.error(f"❌ [SCHEDULER] Помилка для ID {row['user_id']}: {e}")
+                logging.error(f"❌ [SCHEDULER] Помилка відправки для ID {row['user_id']}: {e}")
 
 # КЛАВІАТУРИ
 def start_inline_kb():
@@ -503,8 +500,12 @@ async def check_date_from_input(message: types.Message, state: FSMContext):
 async def process_date_from(callback_query: types.CallbackQuery, callback_data: SimpleCalendarCallback, state: FSMContext):
     selected, date = await SimpleCalendar().process_selection(callback_query, callback_data)
     if selected:
+        # Видаляємо календар з попереднього повідомлення
+        await callback_query.message.edit_reply_markup(reply_markup=None)
+        
         formatted = date.strftime("%d.%m.%Y")
         await state.update_data(date_from=formatted)
+        
         msg1 = await callback_query.message.answer(f"📅 Дата вильоту (З): {formatted}")
         msg2 = await callback_query.message.answer(
             f"📅 Оберіть дату, до якої можна планувати виліт (ПО):", 
@@ -524,10 +525,14 @@ async def check_date_to_input(message: types.Message, state: FSMContext):
 async def process_date_to(callback_query: types.CallbackQuery, callback_data: SimpleCalendarCallback, state: FSMContext):
     selected, date = await SimpleCalendar().process_selection(callback_query, callback_data)
     if selected:
+        # Видаляємо календар
+        await callback_query.message.edit_reply_markup(reply_markup=None)
+        
         formatted = date.strftime("%d.%m.%Y")
         await state.update_data(date_to=formatted)
+        
         msg1 = await callback_query.message.answer(f"✅ Дата вильоту (ПО): {formatted}")
-        msg2 = await callback_query.message.answer(f"🌙 На скільки ночей плануєте відпочинок?")
+        msg2 = await callback_query.message.answer(f"🌙 На скільки ночей плануєте відпочинок? (Введіть цифру)")
         await save_msg(msg1, state)
         await save_msg(msg2, state)
         await state.set_state(TourRequest.nights_count)
@@ -535,7 +540,15 @@ async def process_date_to(callback_query: types.CallbackQuery, callback_data: Si
 @dp.message(TourRequest.nights_count, ~CommandFilter(commands=BOT_COMMANDS))
 async def process_nights(message: types.Message, state: FSMContext):
     await save_msg(message, state)
-    await state.update_data(nights=message.text)
+    nights_input = message.text.strip()
+    
+    # Перевірка, чи є введений текст числом
+    if not nights_input.isdigit():
+        msg = await message.answer("⚠️ Будь ласка, введіть кількість ночей тільки цифрами (наприклад: 7):")
+        await save_msg(msg, state)
+        return
+
+    await state.update_data(nights=nights_input)
     msg = await message.answer("⭐ Оберіть категорію готелю", reply_markup=stars_kb())
     await save_msg(msg, state)
     await state.set_state(TourRequest.hotel_stars)
@@ -596,46 +609,60 @@ async def process_contact(message: types.Message, state: FSMContext):
     await save_msg(message, state)
     data = await state.get_data()
     user = message.from_user
+    
+    # Отримання знижки з перевіркою
     async with pool.acquire() as conn:
         discount_row = await conn.fetchrow(
-        "SELECT discount_value FROM discounts WHERE user_id = $1 AND is_used = FALSE", 
-        user.id
+            "SELECT discount_value FROM discounts WHERE user_id = $1 AND is_used = FALSE", 
+            user.id
         )
-    discount_status = f"{discount_row['discount_value']}%" if discount_row else "Немає"
+    
+    discount_val = discount_row['discount_value'] if discount_row else 0
+    discount_status = f"{discount_val}%" if discount_val > 0 else "Немає"
+    
     info_table = (
-f"🌍 <b>Напрямок:</b> {data.get('destination')}\n"
-f"👥 <b>Склад:</b> {data.get('adults')} дор. + {data.get('children')} діт.\n"
-f"📅 <b>Дати:</b> {data.get('date_from')} - {data.get('date_to')}\n"
-f"🌙 <b>Ночей:</b> {data.get('nights')}\n"
-f"⭐ <b>Готель:</b> {data.get('stars')}\n"
-f"🍴 <b>Харчування:</b> {data.get('meals')}\n"
-f"💰 <b>Бюджет:</b> {data.get('budget')} ГРН\n"
-f"🎁 <b>Знижка:</b> {discount_status}\n"
-f"📱 <b>Контакт:</b> {message.text}"
+        f"🌍 <b>Напрямок:</b> {data.get('destination')}\n"
+        f"👥 <b>Склад:</b> {data.get('adults')} дор. + {data.get('children')} діт.\n"
+        f"📅 <b>Дати:</b> {data.get('date_from')} - {data.get('date_to')}\n"
+        f"🌙 <b>Ночей:</b> {data.get('nights')}\n"
+        f"⭐ <b>Готель:</b> {data.get('stars')}\n"
+        f"🍴 <b>Харчування:</b> {data.get('meals')}\n"
+        f"💰 <b>Бюджет:</b> {data.get('budget')} ГРН\n"
+        f"🎁 <b>Знижка:</b> {discount_status}\n"
+        f"📱 <b>Контакт:</b> {message.text}"
     )
+    
     report = (
-f"🔥 <b>НОВА ЗАЯВКА НА ТУР!</b>\n"
-f"━━━━━━━━━━━━━━━\n"
-f"{info_table}\n"
-f"━━━━━━━━━━━━━━━\n"
-f"👤 <b>Клієнт:</b> <a href='tg://user?id={user.id}'>{user.full_name}</a>\n"
-f"🆔 <b>Username:</b> @{user.username if user.username else 'немає'}\n"
-f"🆔 <b>ID для відгуку:</b> <code>{user.id}</code>\n"
-f"━━━━━━━━━━━━━━━"
+        f"🔥 <b>НОВА ЗАЯВКА НА ТУР!</b>\n"
+        f"━━━━━━━━━━━━━━━\n"
+        f"{info_table}\n"
+        f"━━━━━━━━━━━━━━━\n"
+        f"👤 <b>Клієнт:</b> <a href='tg://user?id={user.id}'>{user.full_name}</a>\n"
+        f"🆔 <b>Username:</b> @{user.username if user.username else 'немає'}\n"
+        f"🆔 <b>ID для відгуку:</b> <code>{user.id}</code>\n"
+        f"━━━━━━━━━━━━━━━"
     )
+    
+    # Відправка менеджеру
     await bot.send_message(ADMIN_ID, report, parse_mode="HTML")
+    
+    # Очищення чату (видалення всіх запитань бота)
     msgs_to_delete = data.get("msgs_to_delete", [])
-    tasks = [bot.delete_message(chat_id=message.chat.id, message_id=m_id) for m_id in msgs_to_delete]
-    if tasks:
-        await asyncio.gather(*tasks, return_exceptions=True)
+    for m_id in msgs_to_delete:
+        try:
+            await bot.delete_message(chat_id=message.chat.id, message_id=m_id)
+        except:
+            pass
+            
     re_builder = ReplyKeyboardBuilder()
     re_builder.add(types.KeyboardButton(text="🔄 СТВОРИТИ НОВУ ЗАЯВКУ"))
+    
     await message.answer(
-f"✅ Дякуємо! Заявку успішно відправлено!\nМи зв'яжемося з Вами найближчим часом 😊\n\n"
-f"<b>Деталі вашої заявки:</b>\n"
-f"━━━━━━━━━━━━━━━\n"
-f"{info_table}\n"
-f"━━━━━━━━━━━━━━━", 
+        f"✅ Дякуємо! Заявку успішно відправлено!\nМи зв'яжемося з Вами найближчим часом 😊\n\n"
+        f"<b>Деталі вашої заявки:</b>\n"
+        f"━━━━━━━━━━━━━━━\n"
+        f"{info_table}\n"
+        f"━━━━━━━━━━━━━━━", 
         parse_mode="HTML",
         reply_markup=re_builder.as_markup(resize_keyboard=True)
     )
