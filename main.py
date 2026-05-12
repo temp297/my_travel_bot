@@ -535,11 +535,19 @@ async def process_date_to(callback_query: types.CallbackQuery, callback_data: Si
 @dp.message(TourRequest.nights_count, ~CommandFilter(commands=BOT_COMMANDS))
 async def process_nights(message: types.Message, state: FSMContext):
     await save_msg(message, state)
-    await state.update_data(nights=message.text)
+    nights_input = message.text.strip()
+    
+    # Перевірка, чи є введений текст числом
+    if not nights_input.isdigit():
+        msg = await message.answer("⚠️ Будь ласка, введіть кількість ночей тільки цифрами (наприклад: 7):")
+        await save_msg(msg, state)
+        return
+
+    await state.update_data(nights=nights_input)
     msg = await message.answer("⭐ Оберіть категорію готелю", reply_markup=stars_kb())
     await save_msg(msg, state)
     await state.set_state(TourRequest.hotel_stars)
-
+    
 @dp.message(TourRequest.hotel_stars, ~CommandFilter(commands=BOT_COMMANDS))
 async def check_stars_input(message: types.Message, state: FSMContext):
     await save_msg(message, state)
