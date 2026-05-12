@@ -26,8 +26,8 @@ API_TOKEN = os.getenv("API_TOKEN")
 DATABASE_URL = os.getenv("DATABASE_URL")
 
 try:
-    ADMIN_ID = int(os.getenv("ADMIN_ID", "7185133060"))
-    REVIEWS_CHAT_ID = int(os.getenv("REVIEWS_CHAT_ID", "-1003818943967"))
+    ADMIN_ID = int(os.getenv("ADMIN_ID"))
+    REVIEWS_CHAT_ID = int(os.getenv("REVIEWS_CHAT_ID"))
     FEEDBACK_HOUR = int(os.getenv("FEEDBACK_HOUR", "21"))
     # Додаємо хвилини (за замовчуванням 0)
     FEEDBACK_MINUTE = int(os.getenv("FEEDBACK_MINUTE", "15"))
