@@ -86,15 +86,26 @@ async def clean_admin_messages(state: FSMContext, chat_id: int):
     await state.update_data(admin_msgs_to_clean=[])
 
 async def show_admin_base(message: types.Message, state: FSMContext):
-    """Надсилає актуальний список туристів та реєструє його для видалення"""
+    """Надсилає актуальний список туристів зі статусами відгуків"""
     global pool
     async with pool.acquire() as conn:
+        # Отримуємо користувачів, їхні знижки та статус останнього відгуку
         rows = await conn.fetch("""
-            SELECT u.user_id, u.username, u.full_name, d.discount_value 
+            SELECT 
+                u.user_id, u.username, u.full_name, 
+                d.discount_value,
+                f.return_date, f.sent
             FROM users u 
             LEFT JOIN discounts d ON u.user_id = d.user_id AND d.is_used = FALSE
+            LEFT JOIN (
+                SELECT DISTINCT ON (user_id) user_id, return_date, sent 
+                FROM feedbacks 
+                ORDER BY user_id, id DESC
+            ) f ON u.user_id = f.user_id
         """)
+
     text = "👥 <b>Список туристів:</b>\n━━━━━━━━━━━━━━━\n"
+    
     if not rows:
         text += "База порожня."
     else:
@@ -102,7 +113,19 @@ async def show_admin_base(message: types.Message, state: FSMContext):
             username = f"@{row['username']}" if row['username'] else "немає"
             name = row['full_name'] or "Ім'я не вказано"
             discount = f" | 🎁 {row['discount_value']}%" if row['discount_value'] else ""
-            text += f"👤 <b>{name}</b> — {username} (<code>{row['user_id']}</code>){discount}\n"
+            
+            # Логіка статусів відгуку
+            feedback_status = ""
+            if row['return_date']:
+                if row['sent'] == 1:
+                    feedback_status = f"\n   └ ✅ Відгук надіслано ({row['return_date']})"
+                else:
+                    feedback_status = f"\n   └ ⏳ Заплановано на: {row['return_date']}"
+
+            text += f"👤 <b>{name}</b> — {username} (<code>{row['user_id']}</code>){discount}{feedback_status}\n"
+    
+    # Додаємо розділювач в кінці для візуальної чистоти
+    text += "━━━━━━━━━━━━━━━"
     
     new_msg = await bot.send_message(chat_id=message.chat.id, text=text, parse_mode="HTML")
     
