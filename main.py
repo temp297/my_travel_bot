@@ -28,7 +28,7 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 try:
     ADMIN_ID = int(os.getenv("ADMIN_ID", "7185133060"))
     REVIEWS_CHAT_ID = int(os.getenv("REVIEWS_CHAT_ID", "-1003818943967"))
-    FEEDBACK_HOUR = int(os.getenv("FEEDBACK_HOUR", "10"))
+    FEEDBACK_HOUR = int(os.getenv("FEEDBACK_HOUR", "12"))
 except ValueError:
     raise ValueError("ADMIN_ID, REVIEWS_CHAT_ID та FEEDBACK_HOUR мають бути цілими числами!")
 
