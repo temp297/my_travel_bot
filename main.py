@@ -15,7 +15,6 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.utils.keyboard import InlineKeyboardBuilder, ReplyKeyboardBuilder
 from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
-
 from aiogram_calendar import SimpleCalendar, SimpleCalendarCallback
 
 # Список команд для фільтрації
