@@ -5,3 +5,4 @@ aiohttp
 apscheduler
 aiogram-calendar
 python-dotenv
+psycopg2-binary
