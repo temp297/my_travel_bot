@@ -754,39 +754,6 @@ async def on_shutdown(app: web.Application):
     scheduler.shutdown()
     logging.info("Планувальник зупинено.")
 
-async def main():
-    logging.info("--- БОТ ЗАПУСКАЄТЬСЯ ---")
-    await bot.delete_webhook(drop_pending_updates=True)
-    await init_db()
-    
-    WEBHOOK_URL = os.getenv("WEBHOOK_URL")
-    WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "super_secret_key")
-    await bot.set_webhook(
-        url=f"{WEBHOOK_URL}/webhook",
-        secret_token=WEBHOOK_SECRET
-    )
-    
-    app = web.Application()
-    webhook_requests_handler = SimpleRequestHandler(
-        dispatcher=dp,
-        bot=bot,
-        secret_token=WEBHOOK_SECRET,
-    )
-    webhook_requests_handler.register(app, path="/webhook")
-    setup_application(app, dp, bot=bot)
-    app.on_shutdown.append(on_shutdown)
-
-    user_commands = [
-        types.BotCommand(command="start", description="🚀 Почати підбір туру"), 
-        types.BotCommand(command="discount", description="🎁 Моя знижка")
-    ]
-
-    admin_commands = user_commands + [
-        types.BotCommand(command="admin", description="🛠 Запит на відгук"),
-      #  types.BotCommand(command="check_discounts", description="📊 Активні знижки"),
-        types.BotCommand(command="use_discount", description="✅ Використати знижку"),
-        types.BotCommand(command="users", description="👥 Список туристів")
-    ]
 
 
 
@@ -824,7 +791,42 @@ async def main():
 
 
 
+
+
+async def main():
+    logging.info("--- БОТ ЗАПУСКАЄТЬСЯ ---")
+    await bot.delete_webhook(drop_pending_updates=True)
+    await init_db()
     
+    WEBHOOK_URL = os.getenv("WEBHOOK_URL")
+    WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "super_secret_key")
+    await bot.set_webhook(
+        url=f"{WEBHOOK_URL}/webhook",
+        secret_token=WEBHOOK_SECRET
+    )
+    
+    app = web.Application()
+    webhook_requests_handler = SimpleRequestHandler(
+        dispatcher=dp,
+        bot=bot,
+        secret_token=WEBHOOK_SECRET,
+    )
+    webhook_requests_handler.register(app, path="/webhook")
+    setup_application(app, dp, bot=bot)
+    app.on_shutdown.append(on_shutdown)
+
+    user_commands = [
+        types.BotCommand(command="start", description="🚀 Почати підбір туру"), 
+        types.BotCommand(command="discount", description="🎁 Моя знижка")
+    ]
+
+    admin_commands = user_commands + [
+        types.BotCommand(command="admin", description="🛠 Запит на відгук"),
+      #  types.BotCommand(command="check_discounts", description="📊 Активні знижки"),
+        types.BotCommand(command="use_discount", description="✅ Використати знижку"),
+        types.BotCommand(command="users", description="👥 Список туристів")
+    ]
+   
     await bot.set_my_commands(user_commands, scope=types.BotCommandScopeDefault())
     await bot.set_my_commands(admin_commands, scope=types.BotCommandScopeChat(chat_id=ADMIN_ID))
  
