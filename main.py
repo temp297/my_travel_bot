@@ -159,28 +159,29 @@ async def get_user_discount(user_id: int):
         )
 
 async def check_returns():
-    today = datetime.now(pytz.timezone('Europe/Kyiv')).strftime("%d.%m.%Y")
+    now = datetime.now(ukraine_tz)
+    today = now.strftime("%d.%m.%Y")
+    logging.info(f"🔎 [SCHEDULER] Перевірка бази на дату: {today}")
+    
     async with pool.acquire() as conn:
         rows = await conn.fetch(
             "SELECT id, user_id FROM feedbacks WHERE return_date = $1 AND sent = 0", 
             today
         )
+        
+        logging.info(f"📊 [SCHEDULER] Знайдено записів: {len(rows)}")
+        
         for row in rows:
-            record_id = row['id']
-            user_id = row['user_id']
             try:
                 await bot.send_message(
-                    user_id,
+                    row['user_id'],
                     "✈️ З поверненням! Сподіваємося, Ваш відпочинок був чудовим.\n\nБудь ласка, оцініть нашу роботу:",
                     reply_markup=rating_kb()
                 )
-                await conn.execute("UPDATE feedbacks SET sent = 1 WHERE id = $1", record_id)
-                await asyncio.sleep(0.05)
-            except aiogram.exceptions.TelegramForbidden:
-                logging.warning(f"Користувач {user_id} заблокував бота.")
-                await conn.execute("DELETE FROM feedbacks WHERE id = $1", record_id)
+                await conn.execute("UPDATE feedbacks SET sent = 1 WHERE id = $1", row['id'])
+                logging.info(f"✅ [SCHEDULER] Відгук надіслано ID: {row['user_id']}")
             except Exception as e:
-                logging.error(f"Помилка при надсиланні відгуку {user_id}: {e}")
+                logging.error(f"❌ [SCHEDULER] Помилка для ID {row['user_id']}: {e}")
 
 # КЛАВІАТУРИ
 def start_inline_kb():
@@ -721,7 +722,7 @@ async def process_admin_date(callback_query: types.CallbackQuery, callback_data:
         client_id = data.get('client_id')
         username = data.get('client_username')
         async with pool.acquire() as conn:
-            await conn.execute("INSERT INTO feedbacks (user_id, return_date) VALUES ($1, $2)", client_id, formatted)
+            await conn.execute("INSERT INTO feedbacks (user_id, return_date, sent) VALUES ($1, $2, 0)", client_id, formatted)
         await clean_admin_messages(state, callback_query.message.chat.id)
         report_msg = await callback_query.message.answer(
             f"✅ <b>Запит на відгук заплановано!</b>\n"
