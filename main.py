@@ -30,7 +30,7 @@ try:
     REVIEWS_CHAT_ID = int(os.getenv("REVIEWS_CHAT_ID", "-1003818943967"))
     FEEDBACK_HOUR = int(os.getenv("FEEDBACK_HOUR", "18"))
     # Додаємо хвилини (за замовчуванням 0)
-    FEEDBACK_MINUTE = int(os.getenv("FEEDBACK_MINUTE", "15")) 
+    FEEDBACK_MINUTE = int(os.getenv("FEEDBACK_MINUTE", "20")) 
 except ValueError:
     raise ValueError("ADMIN_ID, REVIEWS_CHAT_ID, FEEDBACK_HOUR та FEEDBACK_MINUTE мають бути цілими числами!")
 
@@ -656,6 +656,7 @@ async def process_feedback_text(message: types.Message, state: FSMContext):
     user = message.from_user
     feedback_header = (
 f"🌟 <b>НОВИЙ ВІДГУК!</b>\n"
+f"━━━━━━━━━━━━━━━\n"
 f"👤 <b>Від:</b> {user.full_name}\n"
 f"📱 <b>Username:</b> @{user.username if user.username else 'немає'}\n"
 f"⭐ <b>Оцінка:</b> {rating}⭐\n"
