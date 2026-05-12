@@ -818,7 +818,7 @@ async def main():
             count = 0
             for user in users:
                 # Використовуємо вашу функцію додавання в базу (вона вже працює з новою базою)
-                db.add_user(user[0], user[1], user[2])
+                await db.add_user(user[0], user[1], user[2])
                 count += 1
                 
             await msg.edit_text(f"✅ Переїзд завершено!\nПеренесено клієнтів: {count}")
