@@ -26,14 +26,14 @@ API_TOKEN = os.getenv("API_TOKEN")
 DATABASE_URL = os.getenv("DATABASE_URL")
 
 try:
-    ADMIN_ID = int(os.getenv("ADMIN_ID"))
-    REVIEWS_CHAT_ID = int(os.getenv("REVIEWS_CHAT_ID"))
-    FEEDBACK_HOUR = int(os.getenv("FEEDBACK_HOUR", "22"))
+    ADMIN_ID = int(os.getenv("ADMIN_ID", "7185133060"))
+    REVIEWS_CHAT_ID = int(os.getenv("REVIEWS_CHAT_ID", "-1003818943967"))
+    FEEDBACK_HOUR = int(os.getenv("FEEDBACK_HOUR", "23"))
     # Додаємо хвилини (за замовчуванням 0)
     FEEDBACK_MINUTE = int(os.getenv("FEEDBACK_MINUTE", "0"))
 except ValueError:
     raise ValueError("ADMIN_ID, REVIEWS_CHAT_ID, FEEDBACK_HOUR та FEEDBACK_MINUTE мають бути цілими числами!")
-    
+
 if not API_TOKEN or not DATABASE_URL:
     raise ValueError("Помилка: API_TOKEN або DATABASE_URL не встановлені в Environment Variables!")
 
@@ -115,41 +115,34 @@ pool = None
 
 async def init_db():
     global pool
-    try:
-        pool = await asyncpg.create_pool(
-            DATABASE_URL, 
-            min_size=1, 
-            max_size=3, 
-            command_timeout=60
-        )
-        async with pool.acquire() as conn:
-            await conn.execute("""
-                CREATE TABLE IF NOT EXISTS discounts (
-                    user_id BIGINT PRIMARY KEY,
-                    discount_value INTEGER,
-                    is_used BOOLEAN DEFAULT FALSE
+    pool = await asyncpg.create_pool(DATABASE_URL)
+    async with pool.acquire() as conn:
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS discounts (
+                user_id BIGINT PRIMARY KEY,
+                discount_value INTEGER,
+                is_used BOOLEAN DEFAULT FALSE
                 )
-            """)
-            await conn.execute("""
-                CREATE TABLE IF NOT EXISTS feedbacks (
-                    id SERIAL PRIMARY KEY,
-                    user_id BIGINT,
-                    return_date TEXT,
-                    sent INTEGER DEFAULT 0
+        """)
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS feedbacks (
+                id SERIAL PRIMARY KEY,
+                user_id BIGINT,
+                return_date TEXT,
+                sent INTEGER DEFAULT 0
                 )
-            """)
-            await conn.execute("""
-                CREATE TABLE IF NOT EXISTS users (
-                    user_id BIGINT PRIMARY KEY,
-                    username TEXT,
-                    full_name TEXT
+        """)
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS users (
+                user_id BIGINT PRIMARY KEY,
+                username TEXT,
+                full_name TEXT
                 )
-            """)
+        """)
+        try:
             await conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS full_name TEXT")
-        logging.info("✅ База даних успішно ініціалізована.")
-    except Exception as e:
-        logging.error(f"❌ Помилка ініціалізації БД: {e}")
-        raise
+        except Exception as e:
+            logging.info(f"Колонка full_name вже існує або помилка: {e}")
 
 async def save_user(user: types.User):
     async with pool.acquire() as conn:
@@ -173,13 +166,13 @@ async def check_returns():
     logging.info(f"🔎 [SCHEDULER] Перевірка бази на дату: {today}")
     
     async with pool.acquire() as conn:
-        # Вибираємо id запису, щоб оновлювати саме його
+        # Вибираємо лише user_id, оскільки стовпця id немає
         rows = await conn.fetch(
-            "SELECT id, user_id FROM feedbacks WHERE return_date = $1 AND sent = 0", 
+            "SELECT user_id FROM feedbacks WHERE return_date = $1 AND sent = 0", 
             today
         )
         
-        logging.info(f"📊 [SCHEDULER] Знайдено записів для відправки: {len(rows)}")
+        logging.info(f"📊 [SCHEDULER] Знайдено записів: {len(rows)}")
         
         for row in rows:
             try:
@@ -188,11 +181,14 @@ async def check_returns():
                     "✈️ З поверненням! Сподіваємося, Ваш відпочинок був чудовим.\n\nБудь ласка, оцініть нашу роботу:",
                     reply_markup=rating_kb()
                 )
-                # Оновлюємо статус за унікальним ID рядка
-                await conn.execute("UPDATE feedbacks SET sent = 1 WHERE id = $1", row['id'])
-                logging.info(f"✅ [SCHEDULER] Відгук надіслано користувачу ID: {row['user_id']}")
+                # Оновлюємо статус за user_id
+                await conn.execute(
+                    "UPDATE feedbacks SET sent = 1 WHERE user_id = $1 AND return_date = $2", 
+                    row['user_id'], today
+                )
+                logging.info(f"✅ [SCHEDULER] Відгук надіслано ID: {row['user_id']}")
             except Exception as e:
-                logging.error(f"❌ [SCHEDULER] Помилка відправки для ID {row['user_id']}: {e}")
+                logging.error(f"❌ [SCHEDULER] Помилка для ID {row['user_id']}: {e}")
 
 # КЛАВІАТУРИ
 def start_inline_kb():
@@ -507,12 +503,8 @@ async def check_date_from_input(message: types.Message, state: FSMContext):
 async def process_date_from(callback_query: types.CallbackQuery, callback_data: SimpleCalendarCallback, state: FSMContext):
     selected, date = await SimpleCalendar().process_selection(callback_query, callback_data)
     if selected:
-        # Видаляємо календар з попереднього повідомлення
-        await callback_query.message.edit_reply_markup(reply_markup=None)
-        
         formatted = date.strftime("%d.%m.%Y")
         await state.update_data(date_from=formatted)
-        
         msg1 = await callback_query.message.answer(f"📅 Дата вильоту (З): {formatted}")
         msg2 = await callback_query.message.answer(
             f"📅 Оберіть дату, до якої можна планувати виліт (ПО):", 
@@ -532,14 +524,10 @@ async def check_date_to_input(message: types.Message, state: FSMContext):
 async def process_date_to(callback_query: types.CallbackQuery, callback_data: SimpleCalendarCallback, state: FSMContext):
     selected, date = await SimpleCalendar().process_selection(callback_query, callback_data)
     if selected:
-        # Видаляємо календар
-        await callback_query.message.edit_reply_markup(reply_markup=None)
-        
         formatted = date.strftime("%d.%m.%Y")
         await state.update_data(date_to=formatted)
-        
         msg1 = await callback_query.message.answer(f"✅ Дата вильоту (ПО): {formatted}")
-        msg2 = await callback_query.message.answer(f"🌙 На скільки ночей плануєте відпочинок? (Введіть цифру)")
+        msg2 = await callback_query.message.answer(f"🌙 На скільки ночей плануєте відпочинок?")
         await save_msg(msg1, state)
         await save_msg(msg2, state)
         await state.set_state(TourRequest.nights_count)
@@ -547,15 +535,7 @@ async def process_date_to(callback_query: types.CallbackQuery, callback_data: Si
 @dp.message(TourRequest.nights_count, ~CommandFilter(commands=BOT_COMMANDS))
 async def process_nights(message: types.Message, state: FSMContext):
     await save_msg(message, state)
-    nights_input = message.text.strip()
-    
-    # Перевірка, чи є введений текст числом
-    if not nights_input.isdigit():
-        msg = await message.answer("⚠️ Будь ласка, введіть кількість ночей тільки цифрами (наприклад: 7):")
-        await save_msg(msg, state)
-        return
-
-    await state.update_data(nights=nights_input)
+    await state.update_data(nights=message.text)
     msg = await message.answer("⭐ Оберіть категорію готелю", reply_markup=stars_kb())
     await save_msg(msg, state)
     await state.set_state(TourRequest.hotel_stars)
@@ -616,61 +596,49 @@ async def process_contact(message: types.Message, state: FSMContext):
     await save_msg(message, state)
     data = await state.get_data()
     user = message.from_user
-    
     async with pool.acquire() as conn:
         discount_row = await conn.fetchrow(
-            "SELECT discount_value FROM discounts WHERE user_id = $1 AND is_used = FALSE", 
-            user.id
+        "SELECT discount_value FROM discounts WHERE user_id = $1 AND is_used = FALSE", 
+        user.id
         )
-    
-    discount_val = discount_row['discount_value'] if discount_row else 0
-    discount_status = f"{discount_val}%" if discount_val > 0 else "Немає"
-    
+    discount_status = f"{discount_row['discount_value']}%" if discount_row else "Немає"
     info_table = (
-        f"🌍 <b>Напрямок:</b> {data.get('destination')}\n"
-        f"👥 <b>Склад:</b> {data.get('adults')} дор. + {data.get('children')} діт.\n"
-        f"📅 <b>Дати:</b> {data.get('date_from')} - {data.get('date_to')}\n"
-        f"🌙 <b>Ночей:</b> {data.get('nights')}\n"
-        f"⭐ <b>Готель:</b> {data.get('stars')}\n"
-        f"🍴 <b>Харчування:</b> {data.get('meals')}\n"
-        f"💰 <b>Бюджет:</b> {data.get('budget')} ГРН\n"
-        f"🎁 <b>Знижка:</b> {discount_status}\n"
-        f"📱 <b>Контакт:</b> {message.text}"
+f"🌍 <b>Напрямок:</b> {data.get('destination')}\n"
+f"👥 <b>Склад:</b> {data.get('adults')} дор. + {data.get('children')} діт.\n"
+f"📅 <b>Дати:</b> {data.get('date_from')} - {data.get('date_to')}\n"
+f"🌙 <b>Ночей:</b> {data.get('nights')}\n"
+f"⭐ <b>Готель:</b> {data.get('stars')}\n"
+f"🍴 <b>Харчування:</b> {data.get('meals')}\n"
+f"💰 <b>Бюджет:</b> {data.get('budget')} ГРН\n"
+f"🎁 <b>Знижка:</b> {discount_status}\n"
+f"📱 <b>Контакт:</b> {message.text}"
     )
-    
     report = (
-        f"🔥 <b>НОВА ЗАЯВКА НА ТУР!</b>\n"
-        f"━━━━━━━━━━━━━━━\n"
-        f"{info_table}\n"
-        f"━━━━━━━━━━━━━━━\n"
-        f"👤 <b>Клієнт:</b> <a href='tg://user?id={user.id}'>{user.full_name}</a>\n"
-        f"🆔 <b>Username:</b> @{user.username if user.username else 'немає'}\n"
-        f"🆔 <b>ID для відгуку:</b> <code>{user.id}</code>\n"
-        f"━━━━━━━━━━━━━━━"
+f"🔥 <b>НОВА ЗАЯВКА НА ТУР!</b>\n"
+f"━━━━━━━━━━━━━━━\n"
+f"{info_table}\n"
+f"━━━━━━━━━━━━━━━\n"
+f"👤 <b>Клієнт:</b> <a href='tg://user?id={user.id}'>{user.full_name}</a>\n"
+f"🆔 <b>Username:</b> @{user.username if user.username else 'немає'}\n"
+f"🆔 <b>ID для відгуку:</b> <code>{user.id}</code>\n"
+f"━━━━━━━━━━━━━━━"
     )
-    
     await bot.send_message(ADMIN_ID, report, parse_mode="HTML")
-    
+    msgs_to_delete = data.get("msgs_to_delete", [])
+    tasks = [bot.delete_message(chat_id=message.chat.id, message_id=m_id) for m_id in msgs_to_delete]
+    if tasks:
+        await asyncio.gather(*tasks, return_exceptions=True)
     re_builder = ReplyKeyboardBuilder()
     re_builder.add(types.KeyboardButton(text="🔄 СТВОРИТИ НОВУ ЗАЯВКУ"))
-    
     await message.answer(
-        f"✅ Дякуємо! Заявку успішно відправлено!\nМи зв'яжемося з Вами найближчим часом 😊\n\n"
-        f"<b>Деталі вашої заявки:</b>\n"
-        f"━━━━━━━━━━━━━━━\n"
-        f"{info_table}\n"
-        f"━━━━━━━━━━━━━━━", 
+f"✅ Дякуємо! Заявку успішно відправлено!\nМи зв'яжемося з Вами найближчим часом 😊\n\n"
+f"<b>Деталі вашої заявки:</b>\n"
+f"━━━━━━━━━━━━━━━\n"
+f"{info_table}\n"
+f"━━━━━━━━━━━━━━━", 
         parse_mode="HTML",
         reply_markup=re_builder.as_markup(resize_keyboard=True)
     )
-
-    msgs_to_delete = data.get("msgs_to_delete", [])
-    for m_id in msgs_to_delete:
-        try:
-            await bot.delete_message(chat_id=message.chat.id, message_id=m_id)
-        except:
-            continue
-            
     await state.clear()
 
 # --- ОБРОБНИКИ ВІДГУКІВ ---
@@ -799,13 +767,11 @@ async def process_admin_date(callback_query: types.CallbackQuery, callback_data:
 
 async def on_shutdown(app: web.Application):
     global pool
-    logging.info("--- ЗАВЕРШЕННЯ РОБОТИ ---")
     if pool:
         await pool.close()
-        logging.info("✅ Пул з'єднань з БД закрито.")
-    if scheduler.running:
-        scheduler.shutdown()
-        logging.info("✅ Планувальник зупинено.")
+        logging.info("Пул БД закрито.")
+    scheduler.shutdown()
+    logging.info("Планувальник зупинено.")
 
 async def main():
     logging.info("--- БОТ ЗАПУСКАЄТЬСЯ ---")
