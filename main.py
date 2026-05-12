@@ -29,8 +29,10 @@ try:
     ADMIN_ID = int(os.getenv("ADMIN_ID", "7185133060"))
     REVIEWS_CHAT_ID = int(os.getenv("REVIEWS_CHAT_ID", "-1003818943967"))
     FEEDBACK_HOUR = int(os.getenv("FEEDBACK_HOUR", "18"))
+    # Додаємо хвилини (за замовчуванням 0)
+    FEEDBACK_MINUTE = int(os.getenv("FEEDBACK_MINUTE", "15")) 
 except ValueError:
-    raise ValueError("ADMIN_ID, REVIEWS_CHAT_ID та FEEDBACK_HOUR мають бути цілими числами!")
+    raise ValueError("ADMIN_ID, REVIEWS_CHAT_ID, FEEDBACK_HOUR та FEEDBACK_MINUTE мають бути цілими числами!")
 
 if not API_TOKEN or not DATABASE_URL:
     raise ValueError("Помилка: API_TOKEN або DATABASE_URL не встановлені в Environment Variables!")
@@ -788,7 +790,7 @@ async def main():
     await bot.set_my_commands(user_commands, scope=types.BotCommandScopeDefault())
     await bot.set_my_commands(admin_commands, scope=types.BotCommandScopeChat(chat_id=ADMIN_ID))
 
-    scheduler.add_job(check_returns, 'cron', hour=FEEDBACK_HOUR, minute=10)
+    scheduler.add_job(check_returns, 'cron', hour=FEEDBACK_HOUR, minute=FEEDBACK_MINUTE)
     scheduler.start()
     
     app.router.add_get("/", lambda request: web.Response(text="Bot is running!"))
