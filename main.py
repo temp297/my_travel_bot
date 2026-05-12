@@ -115,34 +115,41 @@ pool = None
 
 async def init_db():
     global pool
-    pool = await asyncpg.create_pool(DATABASE_URL)
-    async with pool.acquire() as conn:
-        await conn.execute("""
-            CREATE TABLE IF NOT EXISTS discounts (
-                user_id BIGINT PRIMARY KEY,
-                discount_value INTEGER,
-                is_used BOOLEAN DEFAULT FALSE
+    try:
+        pool = await asyncpg.create_pool(
+            DATABASE_URL, 
+            min_size=1, 
+            max_size=3, 
+            command_timeout=60
+        )
+        async with pool.acquire() as conn:
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS discounts (
+                    user_id BIGINT PRIMARY KEY,
+                    discount_value INTEGER,
+                    is_used BOOLEAN DEFAULT FALSE
                 )
-        """)
-        await conn.execute("""
-            CREATE TABLE IF NOT EXISTS feedbacks (
-                id SERIAL PRIMARY KEY,
-                user_id BIGINT,
-                return_date TEXT,
-                sent INTEGER DEFAULT 0
+            """)
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS feedbacks (
+                    id SERIAL PRIMARY KEY,
+                    user_id BIGINT,
+                    return_date TEXT,
+                    sent INTEGER DEFAULT 0
                 )
-        """)
-        await conn.execute("""
-            CREATE TABLE IF NOT EXISTS users (
-                user_id BIGINT PRIMARY KEY,
-                username TEXT,
-                full_name TEXT
+            """)
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS users (
+                    user_id BIGINT PRIMARY KEY,
+                    username TEXT,
+                    full_name TEXT
                 )
-        """)
-        try:
+            """)
             await conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS full_name TEXT")
-        except Exception as e:
-            logging.info(f"Колонка full_name вже існує або помилка: {e}")
+        logging.info("✅ База даних успішно ініціалізована.")
+    except Exception as e:
+        logging.error(f"❌ Помилка ініціалізації БД: {e}")
+        raise
 
 async def save_user(user: types.User):
     async with pool.acquire() as conn:
@@ -610,7 +617,6 @@ async def process_contact(message: types.Message, state: FSMContext):
     data = await state.get_data()
     user = message.from_user
     
-    # Отримання знижки з перевіркою
     async with pool.acquire() as conn:
         discount_row = await conn.fetchrow(
             "SELECT discount_value FROM discounts WHERE user_id = $1 AND is_used = FALSE", 
@@ -643,17 +649,8 @@ async def process_contact(message: types.Message, state: FSMContext):
         f"━━━━━━━━━━━━━━━"
     )
     
-    # Відправка менеджеру
     await bot.send_message(ADMIN_ID, report, parse_mode="HTML")
     
-    # Очищення чату (видалення всіх запитань бота)
-    msgs_to_delete = data.get("msgs_to_delete", [])
-    for m_id in msgs_to_delete:
-        try:
-            await bot.delete_message(chat_id=message.chat.id, message_id=m_id)
-        except:
-            pass
-            
     re_builder = ReplyKeyboardBuilder()
     re_builder.add(types.KeyboardButton(text="🔄 СТВОРИТИ НОВУ ЗАЯВКУ"))
     
@@ -666,6 +663,14 @@ async def process_contact(message: types.Message, state: FSMContext):
         parse_mode="HTML",
         reply_markup=re_builder.as_markup(resize_keyboard=True)
     )
+
+    msgs_to_delete = data.get("msgs_to_delete", [])
+    for m_id in msgs_to_delete:
+        try:
+            await bot.delete_message(chat_id=message.chat.id, message_id=m_id)
+        except:
+            continue
+            
     await state.clear()
 
 # --- ОБРОБНИКИ ВІДГУКІВ ---
@@ -794,11 +799,13 @@ async def process_admin_date(callback_query: types.CallbackQuery, callback_data:
 
 async def on_shutdown(app: web.Application):
     global pool
+    logging.info("--- ЗАВЕРШЕННЯ РОБОТИ ---")
     if pool:
         await pool.close()
-        logging.info("Пул БД закрито.")
-    scheduler.shutdown()
-    logging.info("Планувальник зупинено.")
+        logging.info("✅ Пул з'єднань з БД закрито.")
+    if scheduler.running:
+        scheduler.shutdown()
+        logging.info("✅ Планувальник зупинено.")
 
 async def main():
     logging.info("--- БОТ ЗАПУСКАЄТЬСЯ ---")
