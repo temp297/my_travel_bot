@@ -59,7 +59,7 @@ class TourRequest(StatesGroup):
     meal_type = State()
     budget = State()
     contact = State()
-
+    
 class AdminPanel(StatesGroup):
     waiting_for_client_info = State()
     waiting_for_date = State()
