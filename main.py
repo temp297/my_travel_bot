@@ -794,39 +794,42 @@ async def main():
 
 
 # --- ПОЧАТОК ВСТАВКИ ДЛЯ ПЕРЕЇЗДУ ---
+# Переконайтеся, що цей блок знаходиться всередині async def main() 
+    # ПІСЛЯ створення dp, але ПЕРЕД asyncio.Event().wait()
+
     @dp.message_handler(commands=['migrate'])
     async def migrate_users(message: types.Message):
-        # Тільки адмін може запустити (використовуємо вашу змінну ADMIN_ID)
+        # Перевірка на адміна
         if message.from_user.id != ADMIN_ID:
             return
 
-        # СЮДИ ВСТАВТЕ ВАШ External Database URL з Render (image_9e3499.png)
         old_db_url = "postgresql://travel_db_mfal_user:Huoul9HzfcOK6pdyIt1tTNRUtFT2S1Ss@dpg-d7k8pse8bjmc73fcflb0-a.oregon-postgres.render.com/travel_db_mfal"
         
-        import psycopg2
+        # Ми імпортуємо psycopg2 всередині, щоб не "валити" весь бот, якщо бібліотеки немає
+        try:
+            import psycopg2
+        except ImportError:
+            await message.answer("❌ Помилка: Додайте 'psycopg2-binary' у requirements.txt")
+            return
+
         try:
             msg = await message.answer("⏳ Починаю копіювання клієнтів...")
             
-            # Підключаємося до старої бази
-            old_conn = psycopg2.connect(old_db_url)
-            old_cur = old_conn.cursor()
-            
-            # Витягуємо дані (перевірте, чи назви стовпців у вас такі самі: user_id, username, full_name)
-            old_cur.execute("SELECT user_id, username, full_name FROM users")
-            users = old_cur.fetchall()
-            
-            count = 0
-            for user in users:
-                # Використовуємо вашу функцію додавання в базу (вона вже працює з новою базою)
-                await db.add_user(user[0], user[1], user[2])
-                count += 1
-                
+            # Підключення (використовуємо WITH, щоб з'єднання закрилося автоматично)
+            with psycopg2.connect(old_db_url) as old_conn:
+                with old_conn.cursor() as old_cur:
+                    old_cur.execute("SELECT user_id, username, full_name FROM users")
+                    users = old_cur.fetchall()
+                    
+                    count = 0
+                    for user in users:
+                        # ВАЖЛИВО: await обов'язковий, якщо db.add_user асинхронна
+                        await db.add_user(user[0], user[1], user[2])
+                        count += 1
+                        
             await msg.edit_text(f"✅ Переїзд завершено!\nПеренесено клієнтів: {count}")
-            
-            old_cur.close()
-            old_conn.close()
         except Exception as e:
-            await message.answer(f"❌ Помилка міграції: {e}")
+            await message.answer(f"❌ Помилка міграції: {str(e)}")
     # --- КІНЕЦЬ ВСТАВКИ ---
 
 
