@@ -120,7 +120,7 @@ async def show_admin_base(message: types.Message, state: FSMContext):
                 if row['sent'] == 1:
                     feedback_status = f"\n   └ ✅ Запит на відгук надіслано ({row['return_date']})"
                 else:
-                    feedback_status = f"\n   └ ⏳ Запит на відгук заплановано на: {row['return_date']}"
+                    feedback_status = f"\n   └ ⏳ Запит на відгук заплановано ({row['return_date']})"
 
             text += f"👤 <b>{name}</b> — {username} (<code>{row['user_id']}</code>){discount}{feedback_status}\n"
     
