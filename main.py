@@ -788,21 +788,7 @@ async def main():
         types.BotCommand(command="users", description="👥 Список туристів")
     ]
 
-    await bot.set_my_commands(user_commands, scope=types.BotCommandScopeDefault())
-    await bot.set_my_commands(admin_commands, scope=types.BotCommandScopeChat(chat_id=ADMIN_ID))
- 
-    scheduler.add_job(check_returns, 'cron', hour=FEEDBACK_HOUR, minute=FEEDBACK_MINUTE)
-    scheduler.start()
-    
-    app.router.add_get("/", lambda request: web.Response(text="Bot is running!"))
-    runner = web.AppRunner(app)
-    await runner.setup()
-    
-    port = int(os.environ.get("PORT", 8000))
-    site = web.TCPSite(runner, '0.0.0.0', port)
-    await site.start()
-    
-    await asyncio.Event().wait()
+
 
 # --- ПОЧАТОК ВСТАВКИ ДЛЯ ПЕРЕЇЗДУ ---
 # Скопіюйте цей блок і вставте його замість старого перед scheduler.start()
@@ -835,6 +821,25 @@ async def main():
         except Exception as e:
             await message.answer(f"❌ Помилка міграції: {str(e)}")
     # --- КІНЕЦЬ ВСТАВКИ ---
+
+
+
+    
+    await bot.set_my_commands(user_commands, scope=types.BotCommandScopeDefault())
+    await bot.set_my_commands(admin_commands, scope=types.BotCommandScopeChat(chat_id=ADMIN_ID))
+ 
+    scheduler.add_job(check_returns, 'cron', hour=FEEDBACK_HOUR, minute=FEEDBACK_MINUTE)
+    scheduler.start()
+    
+    app.router.add_get("/", lambda request: web.Response(text="Bot is running!"))
+    runner = web.AppRunner(app)
+    await runner.setup()
+    
+    port = int(os.environ.get("PORT", 8000))
+    site = web.TCPSite(runner, '0.0.0.0', port)
+    await site.start()
+    
+    await asyncio.Event().wait()
 
 if __name__ == "__main__":
     asyncio.run(main())
