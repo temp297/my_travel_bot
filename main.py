@@ -754,45 +754,6 @@ async def on_shutdown(app: web.Application):
     scheduler.shutdown()
     logging.info("Планувальник зупинено.")
 
-
-
-
-# --- ПОЧАТОК ВСТАВКИ ДЛЯ ПЕРЕЇЗДУ ---
-# Скопіюйте цей блок і вставте його замість старого перед scheduler.start()
-    @dp.message_handler(commands=['migrate'])
-    async def migrate_users(message: types.Message):
-        if message.from_user.id != ADMIN_ID:
-            return
-
-        old_url = "postgresql://travel_db_mfal_user:Huoul9HzfcOK6pdyIt1tTNRUtFT2S1Ss@dpg-d7k8pse8bjmc73fcflb0-a.oregon-postgres.render.com/travel_db_mfal"
-        
-        try:
-            import psycopg2
-            msg = await message.answer("⏳ Починаю копіювання клієнтів...")
-            
-            # Використовуємо звичайний psycopg2 для старої бази
-            conn = psycopg2.connect(old_url)
-            cur = conn.cursor()
-            cur.execute("SELECT user_id, username, full_name FROM users")
-            users = cur.fetchall()
-            
-            count = 0
-            for user in users:
-                # ВАЖЛИВО: додаємо await, бо ваша нова база (Supabase) працює асинхронно
-                await db.add_user(user[0], user[1], user[2])
-                count += 1
-                
-            await msg.edit_text(f"✅ Переїзд завершено!\nПеренесено клієнтів: {count}")
-            cur.close()
-            conn.close()
-        except Exception as e:
-            await message.answer(f"❌ Помилка міграції: {str(e)}")
-    # --- КІНЕЦЬ ВСТАВКИ ---
-
-
-
-
-
 async def main():
     logging.info("--- БОТ ЗАПУСКАЄТЬСЯ ---")
     await bot.delete_webhook(drop_pending_updates=True)
