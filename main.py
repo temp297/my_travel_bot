@@ -791,6 +791,47 @@ async def main():
     await bot.set_my_commands(user_commands, scope=types.BotCommandScopeDefault())
     await bot.set_my_commands(admin_commands, scope=types.BotCommandScopeChat(chat_id=ADMIN_ID))
 
+
+
+# --- ПОЧАТОК ВСТАВКИ ДЛЯ ПЕРЕЇЗДУ ---
+    @dp.message_handler(commands=['migrate'])
+    async def migrate_users(message: types.Message):
+        # Тільки адмін може запустити (використовуємо вашу змінну ADMIN_ID)
+        if message.from_user.id != ADMIN_ID:
+            return
+
+        # СЮДИ ВСТАВТЕ ВАШ External Database URL з Render (image_9e3499.png)
+        old_db_url = "postgresql://travel_db_mfal_user:Huoul9HzfcOK6pdyIt1tTNRUtFT2S1Ss@dpg-d7k8pse8bjmc73fcflb0-a.oregon-postgres.render.com/travel_db_mfal"
+        
+        import psycopg2
+        try:
+            msg = await message.answer("⏳ Починаю копіювання клієнтів...")
+            
+            # Підключаємося до старої бази
+            old_conn = psycopg2.connect(old_db_url)
+            old_cur = old_conn.cursor()
+            
+            # Витягуємо дані (перевірте, чи назви стовпців у вас такі самі: user_id, username, full_name)
+            old_cur.execute("SELECT user_id, username, full_name FROM users")
+            users = old_cur.fetchall()
+            
+            count = 0
+            for user in users:
+                # Використовуємо вашу функцію додавання в базу (вона вже працює з новою базою)
+                db.add_user(user[0], user[1], user[2])
+                count += 1
+                
+            await msg.edit_text(f"✅ Переїзд завершено!\nПеренесено клієнтів: {count}")
+            
+            old_cur.close()
+            old_conn.close()
+        except Exception as e:
+            await message.answer(f"❌ Помилка міграції: {e}")
+    # --- КІНЕЦЬ ВСТАВКИ ---
+
+
+
+    
     scheduler.add_job(check_returns, 'cron', hour=FEEDBACK_HOUR, minute=FEEDBACK_MINUTE)
     scheduler.start()
     
