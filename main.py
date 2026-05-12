@@ -28,7 +28,7 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 try:
     ADMIN_ID = int(os.getenv("ADMIN_ID", "7185133060"))
     REVIEWS_CHAT_ID = int(os.getenv("REVIEWS_CHAT_ID", "-1003818943967"))
-    FEEDBACK_HOUR = int(os.getenv("FEEDBACK_HOUR", "12"))
+    FEEDBACK_HOUR = int(os.getenv("FEEDBACK_HOUR", "18"))
 except ValueError:
     raise ValueError("ADMIN_ID, REVIEWS_CHAT_ID та FEEDBACK_HOUR мають бути цілими числами!")
 
@@ -159,29 +159,32 @@ async def get_user_discount(user_id: int):
         )
 
 async def check_returns():
+    # Явно беремо час у потрібній зоні
     now = datetime.now(ukraine_tz)
     today = now.strftime("%d.%m.%Y")
-    logging.info(f"🔎 [SCHEDULER] Перевірка бази на дату: {today}")
+    
+    logging.info(f"🔎 [SCHEDULER] Початок перевірки. Поточний час: {now}, Шукаємо дату: {today}")
     
     async with pool.acquire() as conn:
+        # Додаємо TRIM для захисту від випадкових пробілів у тексті
         rows = await conn.fetch(
-            "SELECT id, user_id FROM feedbacks WHERE return_date = $1 AND sent = 0", 
+            "SELECT id, user_id FROM feedbacks WHERE TRIM(return_date) = $1 AND sent = 0", 
             today
         )
         
-        logging.info(f"📊 [SCHEDULER] Знайдено записів: {len(rows)}")
+        logging.info(f"📊 [SCHEDULER] Знайдено записів для відправки: {len(rows)}")
         
         for row in rows:
             try:
                 await bot.send_message(
-                    row['user_id'],
-                    "✈️ З поверненням! Сподіваємося, Ваш відпочинок був чудовим.\n\nБудь ласка, оцініть нашу роботу:",
+                    chat_id=int(row['user_id']),
+                    text="✈️ З поверненням! Сподіваємося, Ваш відпочинок був чудовим.\n\nБудь ласка, оцініть нашу роботу:",
                     reply_markup=rating_kb()
                 )
                 await conn.execute("UPDATE feedbacks SET sent = 1 WHERE id = $1", row['id'])
-                logging.info(f"✅ [SCHEDULER] Відгук надіслано ID: {row['user_id']}")
+                logging.info(f"✅ [SCHEDULER] Відгук надіслано успішно користувачу: {row['user_id']}")
             except Exception as e:
-                logging.error(f"❌ [SCHEDULER] Помилка для ID {row['user_id']}: {e}")
+                logging.error(f"❌ [SCHEDULER] Не вдалося надіслати повідомлення ID {row['user_id']}: {e}")
 
 # КЛАВІАТУРИ
 def start_inline_kb():
