@@ -30,7 +30,7 @@ try:
     REVIEWS_CHAT_ID = int(os.getenv("REVIEWS_CHAT_ID", "-1003818943967"))
     FEEDBACK_HOUR = int(os.getenv("FEEDBACK_HOUR", "21"))
     # Додаємо хвилини (за замовчуванням 0)
-    FEEDBACK_MINUTE = int(os.getenv("FEEDBACK_MINUTE", "15")) 
+    FEEDBACK_MINUTE = int(os.getenv("FEEDBACK_MINUTE", "15"))
 except ValueError:
     raise ValueError("ADMIN_ID, REVIEWS_CHAT_ID, FEEDBACK_HOUR та FEEDBACK_MINUTE мають бути цілими числами!")
 
