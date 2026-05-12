@@ -159,32 +159,34 @@ async def get_user_discount(user_id: int):
         )
 
 async def check_returns():
-    # Явно беремо час у потрібній зоні
     now = datetime.now(ukraine_tz)
     today = now.strftime("%d.%m.%Y")
-    
-    logging.info(f"🔎 [SCHEDULER] Початок перевірки. Поточний час: {now}, Шукаємо дату: {today}")
+    logging.info(f"🔎 [SCHEDULER] Перевірка бази на дату: {today}")
     
     async with pool.acquire() as conn:
-        # Додаємо TRIM для захисту від випадкових пробілів у тексті
+        # Вибираємо лише user_id, оскільки стовпця id немає
         rows = await conn.fetch(
-            "SELECT id, user_id FROM feedbacks WHERE TRIM(return_date) = $1 AND sent = 0", 
+            "SELECT user_id FROM feedbacks WHERE return_date = $1 AND sent = 0", 
             today
         )
         
-        logging.info(f"📊 [SCHEDULER] Знайдено записів для відправки: {len(rows)}")
+        logging.info(f"📊 [SCHEDULER] Знайдено записів: {len(rows)}")
         
         for row in rows:
             try:
                 await bot.send_message(
-                    chat_id=int(row['user_id']),
-                    text="✈️ З поверненням! Сподіваємося, Ваш відпочинок був чудовим.\n\nБудь ласка, оцініть нашу роботу:",
+                    row['user_id'],
+                    "✈️ З поверненням! Сподіваємося, Ваш відпочинок був чудовим.\n\nБудь ласка, оцініть нашу роботу:",
                     reply_markup=rating_kb()
                 )
-                await conn.execute("UPDATE feedbacks SET sent = 1 WHERE id = $1", row['id'])
-                logging.info(f"✅ [SCHEDULER] Відгук надіслано успішно користувачу: {row['user_id']}")
+                # Оновлюємо статус за user_id
+                await conn.execute(
+                    "UPDATE feedbacks SET sent = 1 WHERE user_id = $1 AND return_date = $2", 
+                    row['user_id'], today
+                )
+                logging.info(f"✅ [SCHEDULER] Відгук надіслано ID: {row['user_id']}")
             except Exception as e:
-                logging.error(f"❌ [SCHEDULER] Не вдалося надіслати повідомлення ID {row['user_id']}: {e}")
+                logging.error(f"❌ [SCHEDULER] Помилка для ID {row['user_id']}: {e}")
 
 # КЛАВІАТУРИ
 def start_inline_kb():
@@ -786,7 +788,7 @@ async def main():
     await bot.set_my_commands(user_commands, scope=types.BotCommandScopeDefault())
     await bot.set_my_commands(admin_commands, scope=types.BotCommandScopeChat(chat_id=ADMIN_ID))
 
-    scheduler.add_job(check_returns, 'cron', hour=FEEDBACK_HOUR, minute=0)
+    scheduler.add_job(check_returns, 'cron', hour=FEEDBACK_HOUR, minute=10)
     scheduler.start()
     
     app.router.add_get("/", lambda request: web.Response(text="Bot is running!"))
