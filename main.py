@@ -721,43 +721,6 @@ async def process_admin_search(message: types.Message, state: FSMContext):
         msgs.extend([message.message_id, msg.message_id])
         await state.update_data(admin_msgs_to_clean=msgs)
 
-
-
-# --- ПОЧАТОК ВСТАВКИ ДЛЯ ПЕРЕЇЗДУ ---
-# Скопіюйте цей блок і вставте його замість старого перед scheduler.start()
-    @dp.message_handler(commands=['migrate'])
-    async def migrate_users(message: types.Message):
-        if message.from_user.id != ADMIN_ID:
-            return
-
-        old_url = "postgresql://travel_db_mfal_user:Huoul9HzfcOK6pdyIt1tTNRUtFT2S1Ss@dpg-d7k8pse8bjmc73fcflb0-a.oregon-postgres.render.com/travel_db_mfal"
-        
-        try:
-            import psycopg2
-            msg = await message.answer("⏳ Починаю копіювання клієнтів...")
-            
-            # Використовуємо звичайний psycopg2 для старої бази
-            conn = psycopg2.connect(old_url)
-            cur = conn.cursor()
-            cur.execute("SELECT user_id, username, full_name FROM users")
-            users = cur.fetchall()
-            
-            count = 0
-            for user in users:
-                # ВАЖЛИВО: додаємо await, бо ваша нова база (Supabase) працює асинхронно
-                await db.add_user(user[0], user[1], user[2])
-                count += 1
-                
-            await msg.edit_text(f"✅ Переїзд завершено!\nПеренесено клієнтів: {count}")
-            cur.close()
-            conn.close()
-        except Exception as e:
-            await message.answer(f"❌ Помилка міграції: {str(e)}")
-    # --- КІНЕЦЬ ВСТАВКИ ---
-
-
-
-
 @dp.callback_query(SimpleCalendarCallback.filter(), AdminPanel.waiting_for_date)
 async def process_admin_date(callback_query: types.CallbackQuery, callback_data: SimpleCalendarCallback, state: FSMContext):
     selected, date = await SimpleCalendar().process_selection(callback_query, callback_data)
@@ -840,6 +803,38 @@ async def main():
     await site.start()
     
     await asyncio.Event().wait()
+
+# --- ПОЧАТОК ВСТАВКИ ДЛЯ ПЕРЕЇЗДУ ---
+# Скопіюйте цей блок і вставте його замість старого перед scheduler.start()
+    @dp.message_handler(commands=['migrate'])
+    async def migrate_users(message: types.Message):
+        if message.from_user.id != ADMIN_ID:
+            return
+
+        old_url = "postgresql://travel_db_mfal_user:Huoul9HzfcOK6pdyIt1tTNRUtFT2S1Ss@dpg-d7k8pse8bjmc73fcflb0-a.oregon-postgres.render.com/travel_db_mfal"
+        
+        try:
+            import psycopg2
+            msg = await message.answer("⏳ Починаю копіювання клієнтів...")
+            
+            # Використовуємо звичайний psycopg2 для старої бази
+            conn = psycopg2.connect(old_url)
+            cur = conn.cursor()
+            cur.execute("SELECT user_id, username, full_name FROM users")
+            users = cur.fetchall()
+            
+            count = 0
+            for user in users:
+                # ВАЖЛИВО: додаємо await, бо ваша нова база (Supabase) працює асинхронно
+                await db.add_user(user[0], user[1], user[2])
+                count += 1
+                
+            await msg.edit_text(f"✅ Переїзд завершено!\nПеренесено клієнтів: {count}")
+            cur.close()
+            conn.close()
+        except Exception as e:
+            await message.answer(f"❌ Помилка міграції: {str(e)}")
+    # --- КІНЕЦЬ ВСТАВКИ ---
 
 if __name__ == "__main__":
     asyncio.run(main())
