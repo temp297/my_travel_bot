@@ -794,40 +794,33 @@ async def main():
 
 
 # --- ПОЧАТОК ВСТАВКИ ДЛЯ ПЕРЕЇЗДУ ---
-# Переконайтеся, що цей блок знаходиться всередині async def main() 
-    # ПІСЛЯ створення dp, але ПЕРЕД asyncio.Event().wait()
-
+# Скопіюйте цей блок і вставте його замість старого перед scheduler.start()
     @dp.message_handler(commands=['migrate'])
     async def migrate_users(message: types.Message):
-        # Перевірка на адміна
         if message.from_user.id != ADMIN_ID:
             return
 
-        old_db_url = "postgresql://travel_db_mfal_user:Huoul9HzfcOK6pdyIt1tTNRUtFT2S1Ss@dpg-d7k8pse8bjmc73fcflb0-a.oregon-postgres.render.com/travel_db_mfal"
+        old_url = "postgresql://travel_db_mfal_user:Huoul9HzfcOK6pdyIt1tTNRUtFT2S1Ss@dpg-d7k8pse8bjmc73fcflb0-a.oregon-postgres.render.com/travel_db_mfal"
         
-        # Ми імпортуємо psycopg2 всередині, щоб не "валити" весь бот, якщо бібліотеки немає
         try:
             import psycopg2
-        except ImportError:
-            await message.answer("❌ Помилка: Додайте 'psycopg2-binary' у requirements.txt")
-            return
-
-        try:
             msg = await message.answer("⏳ Починаю копіювання клієнтів...")
             
-            # Підключення (використовуємо WITH, щоб з'єднання закрилося автоматично)
-            with psycopg2.connect(old_db_url) as old_conn:
-                with old_conn.cursor() as old_cur:
-                    old_cur.execute("SELECT user_id, username, full_name FROM users")
-                    users = old_cur.fetchall()
-                    
-                    count = 0
-                    for user in users:
-                        # ВАЖЛИВО: await обов'язковий, якщо db.add_user асинхронна
-                        await db.add_user(user[0], user[1], user[2])
-                        count += 1
-                        
+            # Використовуємо звичайний psycopg2 для старої бази
+            conn = psycopg2.connect(old_url)
+            cur = conn.cursor()
+            cur.execute("SELECT user_id, username, full_name FROM users")
+            users = cur.fetchall()
+            
+            count = 0
+            for user in users:
+                # ВАЖЛИВО: додаємо await, бо ваша нова база (Supabase) працює асинхронно
+                await db.add_user(user[0], user[1], user[2])
+                count += 1
+                
             await msg.edit_text(f"✅ Переїзд завершено!\nПеренесено клієнтів: {count}")
+            cur.close()
+            conn.close()
         except Exception as e:
             await message.answer(f"❌ Помилка міграції: {str(e)}")
     # --- КІНЕЦЬ ВСТАВКИ ---
