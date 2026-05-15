@@ -396,24 +396,60 @@ async def check_returns():
     # Логіка планувальника (спрощена для стабільності)
     pass
 
+# --- КОРЕКТНИЙ ЗАПУСК ДЛЯ RENDER ---
+
 async def on_startup(app):
+    # Ініціалізуємо базу даних ТІЛЬКИ ТУТ
     await init_db()
-    await bot.set_webhook(url=f"{WEBHOOK_URL}/webhook", secret_token=WEBHOOK_SECRET)
-    scheduler.start()
+    
+    # Налаштування Webhook
+    webhook_url_full = f"{WEBHOOK_URL}/webhook"
+    await bot.set_webhook(
+        url=webhook_url_full, 
+        secret_token=WEBHOOK_SECRET
+    )
+    
+    # Запуск планувальника
+    if not scheduler.running:
+        scheduler.start()
+    
+    logging.info(f"Webhook set to: {webhook_url_full}")
 
 async def on_shutdown(app):
-    if pool: await pool.close()
-    scheduler.shutdown()
+    logging.info("Shutting down...")
+    if pool:
+        await pool.close()
+    if scheduler.running:
+        scheduler.shutdown()
+    await bot.delete_webhook()
 
-async def main():
+def main():
+    # Створюємо додаток aiohttp
     app = web.Application()
+    
+    # Налаштовуємо обробник запитів від Telegram
+    webhook_requests_handler = SimpleRequestHandler(
+        dispatcher=dp,
+        bot=bot,
+        secret_token=WEBHOOK_SECRET
+    )
+    webhook_requests_handler.register(app, path="/webhook")
+    
+    # Підключаємо aiogram до aiohttp
+    setup_application(app, dp, bot=bot)
+    
+    # Додаємо обробники подій запуску та зупинки
     app.on_startup.append(on_startup)
     app.on_shutdown.append(on_shutdown)
-    handler = SimpleRequestHandler(dispatcher=dp, bot=bot, secret_token=WEBHOOK_SECRET)
-    handler.register(app, path="/webhook")
-    setup_application(app, dp, bot=bot)
+    
+    # Проста сторінка для перевірки працездатності (Health Check)
     app.router.add_get("/", lambda r: web.Response(text="Bot is running!"))
-    web.run_app(app, host='0.0.0.0', port=int(os.environ.get("PORT", 8000)))
+    
+    # Отримуємо порт від Render
+    port = int(os.environ.get("PORT", 8000))
+    
+    # ЗАПУСКАЄМО СЕРВЕР (без asyncio.run)
+    web.run_app(app, host='0.0.0.0', port=port)
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()
