@@ -285,11 +285,11 @@ async def cmd_start(message: types.Message, state: FSMContext, command: CommandO
         else:
             greeting = f"Вітаємо, {name}! Я допоможу вам підібрати тур."
     
-   # await message.answer(greeting)
-   # await state.set_state(TourRequest.start_confirmed)
+    await message.answer(greeting)
+    await state.set_state(TourRequest.start_confirmed)
    # msg = await message.answer("Використайте її під час бронювання наступного туру!", reply_markup=start_inline_kb())
-   # await save_msg(message, state)
-   # await save_msg(msg, state)
+    await save_msg(message, state)
+    await save_msg(msg, state)
 
 @dp.message(Command("cancel"), StateFilter("*"))
 async def cmd_cancel(message: types.Message, state: FSMContext):
