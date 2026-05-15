@@ -268,7 +268,7 @@ async def cmd_start(message: types.Message, state: FSMContext, command: CommandO
         existing_discount = await get_user_discount(user.id)
         if existing_discount:
             discount = existing_discount['discount_value']
-            greeting = f"Вітаємо, {name}! 🎁 У вас вже є активна знижка: {discount}%.\nВикористайте її під час бронювання наступного туру!"
+            greeting = f"Вітаємо, {name}! 🎁 У вас вже є активна знижка: {discount}%."
         else:
             discount = generate_discount()
             await pool.execute("""
@@ -281,7 +281,7 @@ async def cmd_start(message: types.Message, state: FSMContext, command: CommandO
     else:
         discount_row = await get_user_discount(user.id)
         if discount_row:
-            greeting = f"Вітаємо, {name}! 🎁 Ваша знижка: {discount_row['discount_value']}%."
+            greeting = f"Вітаємо, {name}! 🎁 У вас вже є активна знижка: {discount_row['discount_value']}%."
         else:
             greeting = f"Вітаємо, {name}! Я допоможу вам підібрати тур."
     
