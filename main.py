@@ -287,7 +287,7 @@ async def cmd_start(message: types.Message, state: FSMContext, command: CommandO
     
     await message.answer(greeting)
     await state.set_state(TourRequest.start_confirmed)
-    msg = await message.answer("Натисніть кнопку нижче, щоб розпочати:", reply_markup=start_inline_kb())
+    msg = await message.answer("Використайте її під час бронювання наступного туру!", reply_markup=start_inline_kb())
     await save_msg(message, state)
     await save_msg(msg, state)
 
