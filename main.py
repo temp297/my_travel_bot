@@ -268,7 +268,7 @@ async def cmd_start(message: types.Message, state: FSMContext, command: CommandO
         existing_discount = await get_user_discount(user.id)
         if existing_discount:
             discount = existing_discount['discount_value']
-            greeting = f"Вітаємо, {name}! 🎁 У вас є активна знижка: {discount}%."
+            greeting = f"Вітаємо, {name}! 🎁 У вас є активна знижка: {discount}%.\nВикористайте її під час бронювання наступного туру!"
         else:
             discount = generate_discount()
             await pool.execute("""
@@ -281,15 +281,15 @@ async def cmd_start(message: types.Message, state: FSMContext, command: CommandO
     else:
         discount_row = await get_user_discount(user.id)
         if discount_row:
-            greeting = f"Вітаємо, {name}! 🎁 У вас є активна знижка: {discount_row['discount_value']}%."
+            greeting = f"Вітаємо, {name}! 🎁 У вас є активна знижка: {discount_row['discount_value']}%.\nВикористайте її під час бронювання наступного туру!"
         else:
             greeting = f"Вітаємо, {name}! Я допоможу вам підібрати тур."
     
-    await message.answer(greeting)
-    await state.set_state(TourRequest.start_confirmed)
-    msg = await message.answer("Використайте її під час бронювання наступного туру!", reply_markup=start_inline_kb())
-    await save_msg(message, state)
-    await save_msg(msg, state)
+   # await message.answer(greeting)
+   # await state.set_state(TourRequest.start_confirmed)
+   # msg = await message.answer("Використайте її під час бронювання наступного туру!", reply_markup=start_inline_kb())
+   # await save_msg(message, state)
+   # await save_msg(msg, state)
 
 @dp.message(Command("cancel"), StateFilter("*"))
 async def cmd_cancel(message: types.Message, state: FSMContext):
