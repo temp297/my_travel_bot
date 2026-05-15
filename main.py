@@ -258,7 +258,7 @@ def generate_discount():
 @dp.message(CommandStart(), StateFilter("*"))
 async def cmd_start(message: types.Message, state: FSMContext, command: CommandObject):
     await state.clear()
-    global pool # Додай для впевненості
+    global pool 
     args = command.args
     user = message.from_user
     name = user.full_name or "Мандрівник"
@@ -285,11 +285,14 @@ async def cmd_start(message: types.Message, state: FSMContext, command: CommandO
         else:
             greeting = f"Вітаємо, {name}! Я допоможу вам підібрати тур."
     
-    await message.answer(greeting)
+    # ВІДПРАВКА: Текст вітання + Кнопка в одному повідомленні
+    msg = await message.answer(greeting, reply_markup=start_inline_kb())
+    
     await state.set_state(TourRequest.start_confirmed)
-   # msg = await message.answer("Використайте її під час бронювання наступного туру!", reply_markup=start_inline_kb())
+    
+    # ЗБЕРЕЖЕННЯ: Зберігаємо вхідне повідомлення від юзера та відповідь бота
     await save_msg(message, state)
-   # await save_msg(msg, state)
+    await save_msg(msg, state)
 
 @dp.message(Command("cancel"), StateFilter("*"))
 async def cmd_cancel(message: types.Message, state: FSMContext):
@@ -320,7 +323,7 @@ async def cmd_discount(message: types.Message, state: FSMContext):
 
         if row:
             discount = row['discount_value']
-            text = f"🎁 {name}, у вас є активна знижка: **{discount}%**\nВикористайте її під час бронювання наступного туру!"
+            text = f"🎁 Вітаємо, {name}, у вас є активна знижка: **{discount}%**\nВикористайте її під час бронювання наступного туру!"
         else:
             chance = random.random()
             if chance < 0.70:
