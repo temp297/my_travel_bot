@@ -37,8 +37,9 @@ try:
     ADMIN_ID = int(os.getenv("ADMIN_ID"))
     REVIEWS_CHAT_ID = int(os.getenv("REVIEWS_CHAT_ID"))
     FEEDBACK_HOUR = int(os.getenv("FEEDBACK_HOUR", "11"))
-    # Додаємо хвилини (за замовчуванням 0)
     FEEDBACK_MINUTE = int(os.getenv("FEEDBACK_MINUTE", "10"))
+    ASSISTANT_HOUR = int(os.getenv("ASSISTANT_HOUR", "18"))
+    ASSISTANT_MINUTE = int(os.getenv("ASSISTANT_MINUTE", "20"))
 except ValueError:
     raise ValueError("ADMIN_ID, REVIEWS_CHAT_ID, FEEDBACK_HOUR та FEEDBACK_MINUTE мають бути цілими числами!")
 
@@ -515,7 +516,9 @@ async def process_dest(message: types.Message, state: FSMContext):
         "мальдіви": "Мальдіви", "мальдивы": "Мальдіви", "мальдиви": "Мальдіви", "домінікана": "Домінікана", "доминикана": "Домінікана",
         "занзібар": "Занзібар", "занзибар": "Занзібар", "шрі ланка": "Шрі-Ланка", "шри ланка": "Шрі-Ланка", "балі": "Балі (Індонезія)", "бали": "Балі (Індонезія)"
     }
-    final_destination = replacements.get(text, message.text.strip().capitalize())
+
+    user_text = message.text.strip().lower()
+    final_destination = replacements.get(user_text, message.text.strip().capitalize())
     await state.update_data(destination=final_destination)
     builder = InlineKeyboardBuilder()
     builder.add(types.InlineKeyboardButton(text="1", callback_data="adults_1"),
@@ -910,8 +913,7 @@ async def main():
  
     scheduler.add_job(check_returns, 'cron', hour=FEEDBACK_HOUR, minute=FEEDBACK_MINUTE)
     
-    # --- КРОН-ЗАДАЧА АВТОМАТИЧНОЇ ПУБЛІКАЦІЇ ВІД ЕЛЕКТРОННОГО ПОМІЧНИКА ---
-    scheduler.add_job(generate_and_send_ai_tour_post, 'cron', hour=18, minute=15)
+    scheduler.add_job(generate_and_send_ai_tour_post, 'cron', hour=ASSISTANT_HOUR, minute=ASSISTANT_MINUTE)
     
     scheduler.start()
     
