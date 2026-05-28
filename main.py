@@ -36,10 +36,10 @@ AUTO_POST_CHAT_ID = os.getenv("AUTO_POST_CHAT_ID")
 try:
     ADMIN_ID = int(os.getenv("ADMIN_ID"))
     REVIEWS_CHAT_ID = int(os.getenv("REVIEWS_CHAT_ID"))
-    FEEDBACK_HOUR = int(os.getenv("FEEDBACK_HOUR", "19"))
+    FEEDBACK_HOUR = int(os.getenv("FEEDBACK_HOUR", "11"))
     FEEDBACK_MINUTE = int(os.getenv("FEEDBACK_MINUTE", "0"))
-    ASSISTANT_HOUR = int(os.getenv("ASSISTANT_HOUR", "22"))
-    ASSISTANT_MINUTE = int(os.getenv("ASSISTANT_MINUTE", "35"))
+    ASSISTANT_HOUR = int(os.getenv("ASSISTANT_HOUR", "10"))
+    ASSISTANT_MINUTE = int(os.getenv("ASSISTANT_MINUTE", "30"))
 except ValueError:
     raise ValueError("ADMIN_ID, REVIEWS_CHAT_ID, FEEDBACK_HOUR та FEEDBACK_MINUTE мають бути цілими числами!")
 
