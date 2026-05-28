@@ -17,12 +17,21 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder, ReplyKeyboardBuilder
 from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
 from aiogram_calendar import SimpleCalendar, SimpleCalendarCallback
 
+# --- ДОДАТКОВІ ІМПОРТИ ДЛЯ ЕЛЕКТРОННОГО ПОМІЧНИКА ---
+import requests
+from bs4 import BeautifulSoup
+import google.generativeai as genai
+
 # Список команд для фільтрації
 BOT_COMMANDS = ["start", "cancel", "admin", "discount", "check_discounts", "use_discount", "users"]
 
 # НАЛАШТУВАННЯ
 API_TOKEN = os.getenv("API_TOKEN")
 DATABASE_URL = os.getenv("DATABASE_URL")
+
+# --- НАЛАШТУВАННЯ ДЛЯ ШІ ТА КАНАЛУ ПОМІЧНИКА ---
+GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
+AUTO_POST_CHAT_ID = os.getenv("AUTO_POST_CHAT_ID")
 
 try:
     ADMIN_ID = int(os.getenv("ADMIN_ID"))
@@ -44,6 +53,14 @@ dp = Dispatcher(storage=storage)
 
 ukraine_tz = pytz.timezone('Europe/Kyiv')
 scheduler = AsyncIOScheduler(timezone=ukraine_tz)
+
+# Ініціалізація Google Gemini для Електронного помічника
+if GOOGLE_API_KEY:
+    genai.configure(api_key=GOOGLE_API_KEY)
+    ai_model = genai.GenerativeModel('gemini-pro')
+else:
+    ai_model = None
+    logging.warning("⚠️ GOOGLE_API_KEY не знайдено. Електронний помічник (ШІ) вимкнено.")
 
 # СТАНИ
 class TourRequest(StatesGroup):
@@ -117,9 +134,9 @@ async def show_admin_base(message: types.Message, state: FSMContext):
             feedback_status = ""
             if row['return_date']:
                 if row['sent'] == 1:
-                    feedback_status = f"\n   └ ✅ Запит на відгук надіслано ({row['return_date']})"
+                    feedback_status = f"\n    └ ✅ Запит на відгук надіслано ({row['return_date']})"
                 else:
-                    feedback_status = f"\n   └ ⏳ Запит на відгук заплановано ({row['return_date']})"
+                    feedback_status = f"\n    └ ⏳ Запит на відгук заплановано ({row['return_date']})"
 
             text += f"👤 <b>{name}</b> — {username} (<code>{row['user_id']}</code>){discount}{feedback_status}\n"
     
@@ -253,6 +270,41 @@ def generate_discount():
     else:
         return 5
 
+# --- ФУНКЦІЇ ЕЛЕКТРОННОГО ПОМІЧНИКА (ПАРСИНГ ТА ШІ) ---
+def fetch_tat_ua_data():
+    url = "https://tat.ua/"
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"}
+    try:
+        response = requests.get(url, headers=headers, timeout=15)
+        if response.status_code == 200:
+            soup = BeautifulSoup(response.text, 'html.parser')
+            return soup.get_text()[:6000]
+        return None
+    except Exception as e:
+        logging.error(f"Помилка збору даних з сайту tat.ua: {e}")
+        return None
+
+async def generate_and_send_ai_tour_post():
+    if not ai_model or not AUTO_POST_CHAT_ID:
+        logging.info("🤖 Помічник пропущений: немає моделі ШІ або AUTO_POST_CHAT_ID.")
+        return
+    raw_site_data = fetch_tat_ua_data()
+    if not raw_site_data:
+        logging.error("❌ Не вдалося отримати текст з сайту для ШІ.")
+        return
+    prompt = (
+        f"Ти — професійний тревел-блогер. На основі наступного сирого тексту з туристичного сайту склади один цікавий, "
+        f"структурований і залучаючий пост для Telegram-каналу українською мовою з актуальними пропозиціями турів "
+        f"та аналізом відгуків клієнтів (плюси і мінуси). Використовуй емодзі та виключно дозволені в Telegram HTML-теги "
+        f"для оформлення (жирний текст <b> тощо). Текст сайту: {raw_site_data}"
+    )
+    try:
+        response = ai_model.generate_content(prompt)
+        await bot.send_message(chat_id=AUTO_POST_CHAT_ID, text=response.text, parse_mode="HTML")
+        logging.info("✅ Пост від електронного помічника успішно згенеровано та опубліковано!")
+    except Exception as e:
+        logging.error(f"Помилка роботи ШІ Gemini: {e}")
+
 # --- ОБРОБНИКИ КОМАНД (ВЕРХНІЙ ПРІОРИТЕТ) ---
 
 @dp.message(CommandStart(), StateFilter("*"))
@@ -281,7 +333,7 @@ async def cmd_start(message: types.Message, state: FSMContext, command: CommandO
     else:
         discount_row = await get_user_discount(user.id)
         if discount_row:
-            greeting = f"Вітаємо, {name}! 🎁 У вас є активна знижка: {discount_row['discount_value']}%.\nВикористайте її під час бронювання наступного туру!"
+            greeting = f"Вітаємо, {name}! 🎁 У вас є activeна знижка: {discount_row['discount_value']}%.\nВикористайте її під час бронювання наступного туру!"
         else:
             greeting = f"Вітаємо, {name}! Я допоможу вам підібрати тур."
     
@@ -857,6 +909,10 @@ async def main():
     await bot.set_my_commands(admin_commands, scope=types.BotCommandScopeChat(chat_id=ADMIN_ID))
  
     scheduler.add_job(check_returns, 'cron', hour=FEEDBACK_HOUR, minute=FEEDBACK_MINUTE)
+    
+    # --- КРОН-ЗАДАЧА АВТОМАТИЧНОЇ ПУБЛІКАЦІЇ ВІД ЕЛЕКТРОННОГО ПОМІЧНИКА ---
+    scheduler.add_job(generate_and_send_ai_tour_post, 'cron', hour=10, minute=0)
+    
     scheduler.start()
     
     app.router.add_get("/", lambda request: web.Response(text="Bot is running!"))
