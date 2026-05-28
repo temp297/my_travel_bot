@@ -334,7 +334,7 @@ async def cmd_start(message: types.Message, state: FSMContext, command: CommandO
     else:
         discount_row = await get_user_discount(user.id)
         if discount_row:
-            greeting = f"Вітаємо, {name}! 🎁 У вас є activeна знижка: {discount_row['discount_value']}%.\nВикористайте її під час бронювання наступного туру!"
+            greeting = f"Вітаємо, {name}! 🎁 У вас є активна знижка: {discount_row['discount_value']}%.\nВикористайте її під час бронювання наступного туру!"
         else:
             greeting = f"Вітаємо, {name}! Я допоможу вам підібрати тур."
     
