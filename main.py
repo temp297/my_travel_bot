@@ -39,7 +39,7 @@ try:
     FEEDBACK_HOUR = int(os.getenv("FEEDBACK_HOUR", "19"))
     FEEDBACK_MINUTE = int(os.getenv("FEEDBACK_MINUTE", "0"))
     ASSISTANT_HOUR = int(os.getenv("ASSISTANT_HOUR", "19"))
-    ASSISTANT_MINUTE = int(os.getenv("ASSISTANT_MINUTE", "0"))
+    ASSISTANT_MINUTE = int(os.getenv("ASSISTANT_MINUTE", "15"))
 except ValueError:
     raise ValueError("ADMIN_ID, REVIEWS_CHAT_ID, FEEDBACK_HOUR та FEEDBACK_MINUTE мають бути цілими числами!")
 
@@ -58,7 +58,7 @@ scheduler = AsyncIOScheduler(timezone=ukraine_tz)
 # Ініціалізація Google Gemini для Електронного помічника
 if GOOGLE_API_KEY:
     genai.configure(api_key=GOOGLE_API_KEY)
-    ai_model = genai.GenerativeModel('gemini-pro')
+    ai_model = genai.GenerativeModel('gemini-1.5-flash')
 else:
     ai_model = None
     logging.warning("⚠️ GOOGLE_API_KEY не знайдено. Електронний помічник (ШІ) вимкнено.")
