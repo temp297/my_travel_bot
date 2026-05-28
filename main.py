@@ -2,12 +2,14 @@ import os
 import logging
 import asyncio
 import random
-from datetime import datetime
 import pytz
-from aiohttp import web
 import asyncpg
-from apscheduler.schedulers.asyncio import AsyncIOScheduler
 import aiogram
+import requests
+from bs4 import BeautifulSoup
+from datetime import datetime
+from aiohttp import web
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command, CommandStart, CommandObject, StateFilter, Command as CommandFilter
 from aiogram.fsm.context import FSMContext
@@ -311,7 +313,7 @@ async def generate_and_send_ai_tour_post():
     # Отримуємо поточну дату у форматі ДД.ММ.РРРР
     current_date_str = datetime.now().strftime("%d.%m.%Y")
 
-    # Текст заклику до дії (Рекламний блок)
+    # Текст заклику до дії (Рекламний блок) — буде під кожним постом
     cta_text = (
         f"⚠️ <b>Зверніть увагу: всі ціни вказані за тур та є актуальними на сьогодні!</b>\n\n"
         f"✈️ Бажаєте забронювати або підібрати інший варіант?\n"
@@ -319,6 +321,13 @@ async def generate_and_send_ai_tour_post():
         f"👉 <a href='{bot_link1}'>Залишити запит менеджеру</a>\n\n"
         f"🎁 <b>Приємний бонус:</b> кожен наш клієнт може отримати персональну знижку за програмою лояльності!\n"
         f"👉 <a href='{bot_link2}'>Отримати знижку</a>"
+    )
+
+    # Блок «Поширити канал» — додасться тільки в самий кінець останнього поста
+    share_text = (
+        f"\n\n➖➖➖➖➖➖➖➖\n"
+        f"🗣 <b>Сподобалася добірка?</b>\n"
+        f"Поширюйте канал серед знайомих мандрівників — разом шукати вигідні тури цікавіше!"
     )
 
     # ==========================================
@@ -343,7 +352,7 @@ async def generate_and_send_ai_tour_post():
     # Список для зберігання нових ID повідомлень
     new_message_ids = []
 
-    # Налаштування категорій (з описом зірковості для заголовка)
+    # Налаштування категорій
     categories = [
         {"name": "ТУРЕЧЧИНА", "flag": "🇹🇷", "stars": "4★ та 5★", "prompt_part": "Уважно проскануй весь текст джерела від початку до кінця і знайди ВСІ готелі для цієї країни. Твоє завдання — вибрати до 5 НАЙКРАЩИХ РІЗНИХ готелів 4★ та 5★ СУТО в ТУРЕЧЧИНІ. Не зупиняйся на першому знайденому готелі, виводь списком декілька варіантів (максимум 5)!"},
         {"name": "ЄГИПЕТ", "flag": "🇪🇬", "stars": "4★ та 5★", "prompt_part": "Уважно проскануй весь текст джерела від початку до кінця і знайди ВСІ готелі для цієї країни. Твоє завдання — вибрати до 5 НАЙКРАЩИХ РІЗНИХ готелів 4★ та 5★ СУТО в ЄГИПТІ. Не зупиняйся на першому знайденому готелі, виводь списком декілька варіантів (максимум 5)!"},
@@ -376,7 +385,7 @@ async def generate_and_send_ai_tour_post():
             f"🍽 <b>Харчування:</b> [Вкажи тип харчування з тексту]\n"
             f"📅 <b>Виліт/Дата:</b> [Вкажи дату та кількість ночей]\n"
             f"💰 <b>Ціна:</b> [Вкажи вартість з тексту]\n"
-            f"<i>[Тут напиши короткий художній опис саме цього готелю, його території та умов]</i>\n"
+            f"<i>[Тут напиши короткий художній опис саме цього готелю, його території та умов, обов'язково застосувавши до цього опису теги &lt;i&gt; та &lt;/i&gt;]</i>\n"
             f"➕ <b>Плюси:</b> [Коротко вкажи переваги готелю]\n"
             f"➖ <b>Мінуси:</b> [Коротко вкажи нюанси або мінуси готелю]\n\n"
             f"6. КРИТИЧНІ ПРАВИЛА ДЛЯ ОФОРМЛЕННЯ ГОТЕЛІВ:\n"
@@ -394,8 +403,12 @@ async def generate_and_send_ai_tour_post():
                 logging.info(f"⏩ Пропущено публікацію категорії '{cat['name']}', бо немає відповідних турів.")
                 continue
 
-            # Додаємо рекламу та актуальність ціни в кінець усього тексту
+            # Додаємо базову рекламу (вона йде під кожну країну)
             full_message = f"{post_text}\n\n{cta_text}"
+            
+            # ПЕРЕВІРКА: Якщо це ОСТАННЯ категорія у списку («ІНШІ КРАЇНИ»), додатково склеюємо блок поширення каналу
+            if index == len(categories) - 1:
+                full_message += share_text
             
             # Надсилаємо пост у конкретну тему
             msg = await bot.send_message(
