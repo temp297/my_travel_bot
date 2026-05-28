@@ -911,7 +911,7 @@ async def main():
     scheduler.add_job(check_returns, 'cron', hour=FEEDBACK_HOUR, minute=FEEDBACK_MINUTE)
     
     # --- КРОН-ЗАДАЧА АВТОМАТИЧНОЇ ПУБЛІКАЦІЇ ВІД ЕЛЕКТРОННОГО ПОМІЧНИКА ---
-    scheduler.add_job(generate_and_send_ai_tour_post, 'cron', hour=10, minute=0)
+    scheduler.add_job(generate_and_send_ai_tour_post, 'cron', hour=18, minute=15)
     
     scheduler.start()
     
