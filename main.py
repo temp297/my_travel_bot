@@ -39,7 +39,7 @@ try:
     FEEDBACK_HOUR = int(os.getenv("FEEDBACK_HOUR", "19"))
     FEEDBACK_MINUTE = int(os.getenv("FEEDBACK_MINUTE", "0"))
     ASSISTANT_HOUR = int(os.getenv("ASSISTANT_HOUR", "19"))
-    ASSISTANT_MINUTE = int(os.getenv("ASSISTANT_MINUTE", "45"))
+    ASSISTANT_MINUTE = int(os.getenv("ASSISTANT_MINUTE", "55"))
 except ValueError:
     raise ValueError("ADMIN_ID, REVIEWS_CHAT_ID, FEEDBACK_HOUR та FEEDBACK_MINUTE мають бути цілими числами!")
 
@@ -301,7 +301,9 @@ async def generate_and_send_ai_tour_post():
         f"Ти — професійний тревел-блогер. На основі наступного сирого тексту з туристичного сайту склади один цікавий, "
         f"структурований і залучаючий пост для Telegram-каналу українською мовою з актуальними пропозиціями турів "
         f"та аналізом відгуків клієнтів (плюси і мінуси). Використовуй емодзі та виключно дозволені в Telegram HTML-теги "
-        f"для оформлення (жирний текст <b> тощо). Текст сайту: {raw_site_data}"
+        f"для оформлення (жирний текст <b> тощо). "
+        f"ВАЖЛИВО: Обери лише 5 найкращих турів, пиши ємно та лаконічно. Твій пост ОБОВ'ЯЗКОВО має бути "
+        f"коротшим за 2500 символів, інакше Telegram його заблокує! Текст сайту: {raw_site_data}"
     )
     try:
         response = ai_model.generate_content(prompt)
