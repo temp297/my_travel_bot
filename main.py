@@ -279,16 +279,65 @@ def generate_discount():
 
 # --- ФУНКЦІЇ ЕЛЕКТРОННОГО ПОМІЧНИКА (ПАРСИНГ ТА ШІ) ---
 def fetch_tat_ua_data():
-    url = "https://tat.ua/"
+    base_url = "https://tat.ua"
     headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"}
+    
     try:
-        response = requests.get(url, headers=headers, timeout=15)
-        if response.status_code == 200:
-            soup = BeautifulSoup(response.text, 'html.parser')
-            return soup.get_text()[:6000]
-        return None
+        # КРОК 1: Заходимо на головну сторінку
+        logging.info("🌐 Збираємо посилання на тури з головної сторінки tat.ua...")
+        response = requests.get(base_url, headers=headers, timeout=15)
+        if response.status_code != 200:
+            return None
+        
+        soup = BeautifulSoup(response.text, 'html.parser')
+        
+        # Збираємо стартовий текст із головної сторінки
+        all_text = soup.get_text()
+        
+        # КРОК 2: Знаходимо всі посилання на сторінці
+        links_to_visit = set()
+        for link in soup.find_all('a', href=True):
+            href = link['href']
+            
+            # Нам потрібні посилання, які ведуть на тури або країни
+            # Фільтруємо, щоб не заходити на контакти, відгуки, фейсбук тощо
+            if "/tur/" in href or "/country/" in href or "hot" in href.lower():
+                # Якщо посилання відносне (наприклад, "/tur/turechchina"), робимо його повним
+                if href.startswith("/"):
+                    full_url = base_url + href
+                elif href.startswith("http"):
+                    full_url = href
+                else:
+                    continue
+                
+                # Перевіряємо, щоб посилання вело саме на сайт tat.ua
+                if base_url in full_url:
+                    links_to_visit.add(full_url)
+        
+        logging.info(f"🔗 Знайдено {len(links_to_visit)} унікальних сторінок із турами для обходу.")
+        
+        # КРОК 3: Обходимо знайдені сторінки (обмежуємо до 12 сторінок, щоб не перевантажувати сайт)
+        visited_count = 0
+        for url in list(links_to_visit)[:12]:
+            try:
+                logging.info(f"🕵️‍♂️ Парсимо сторінку туру: {url}")
+                page_res = requests.get(url, headers=headers, timeout=10)
+                if page_res.status_code == 200:
+                    page_soup = BeautifulSoup(page_res.text, 'html.parser')
+                    # Додаємо текст цієї сторінки до загального масиву
+                    all_text += f"\n\n--- ДАНІ ЗІ СТОРІНКИ {url} ---\n" + page_soup.get_text()
+                    visited_count += 1
+            except Exception as page_err:
+                logging.warning(f"Не вдалося завантажити сторінку {url}: {page_err}")
+                continue
+        
+        logging.info(f"✅ Обхід завершено. Успішно зібрано дані з {visited_count} сторінок.")
+        
+        # Повертаємо великий обсяг тексту (збільшено ліміт до 35 000 символів, щоб ШІ вистачило даних)
+        return all_text[:35000]
+
     except Exception as e:
-        logging.error(f"Помилка збору даних з сайту tat.ua: {e}")
+        logging.error(f"Помилка глибокого збору даних з сайту tat.ua: {e}")
         return None
 
 async def generate_and_send_ai_tour_post():
