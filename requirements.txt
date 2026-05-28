@@ -5,3 +5,6 @@ aiohttp
 apscheduler
 aiogram-calendar
 python-dotenv
+beautifulsoup4
+google-generativeai
+pydantic-settings
