@@ -39,7 +39,7 @@ try:
     FEEDBACK_HOUR = int(os.getenv("FEEDBACK_HOUR", "19"))
     FEEDBACK_MINUTE = int(os.getenv("FEEDBACK_MINUTE", "0"))
     ASSISTANT_HOUR = int(os.getenv("ASSISTANT_HOUR", "20"))
-    ASSISTANT_MINUTE = int(os.getenv("ASSISTANT_MINUTE", "30"))
+    ASSISTANT_MINUTE = int(os.getenv("ASSISTANT_MINUTE", "50"))
 except ValueError:
     raise ValueError("ADMIN_ID, REVIEWS_CHAT_ID, FEEDBACK_HOUR та FEEDBACK_MINUTE мають бути цілими числами!")
 
@@ -298,32 +298,90 @@ async def generate_and_send_ai_tour_post():
         logging.error("❌ Не вдалося отримати текст з сайту для ШІ.")
         return
     
-    bot_link1 = "https://t.me/NavigatorToursBot?start=welcome"
-    bot_link2 = "https://t.me/NavigatorToursBot?start=discount" 
+bot_link1 = "https://t.me/NavigatorToursBot?start=welcome"
+bot_link2 = "https://t.me/NavigatorToursBot?start=discount"
 
+# Файл на сервері, де бот зберігатиме ID вчорашніх повідомлень для видалення
+IDS_FILE = "vchora_posts.txt"
+
+# Текст заклику до дії (однаковий для всіх постів)
+cta_text = (
+    f"✈️ Бажаєте забронювати або підібрати інший варіант?\n"
+    f"Наш електронний помічник допоможе вам швидко сформувати запит, а професійний менеджер особисто опрацює ваші побажання.\n"
+    f"👉 <a href='{bot_link1}'>Залишити запит менеджеру</a>\n\n"
+    f"🎁 Приємний бонус: кожен наш клієнт може отримати персональну знижку за програмою лояльності!\n"
+    f"👉 <a href='{bot_link2}'>Отримати знижку</a>"
+)
+
+if not raw_site_data:
+    logging.error("❌ Не вдалося отримати текст з сайту для ШІ.")
+    return
+
+if os.path.exists(IDS_FILE):
+    try:
+        with open(IDS_FILE, "r") as f:
+            old_ids = f.read().splitlines()
+        
+        logging.info(f"🗑 Виявлено старі пости для видалення: {old_ids}")
+        for msg_id in old_ids:
+            try:
+                await bot.delete_message(chat_id=AUTO_POST_CHAT_ID, message_id=int(msg_id))
+            except Exception as del_err:
+                logging.warning(f"Не вдалося видалити повідомлення {msg_id}: {del_err}")
+        
+        # Очищаємо файл після видалення
+        os.remove(IDS_FILE)
+    except Exception as file_err:
+        logging.error(f"Помилка при роботі з файлом очищення: {file_err}")
+
+# Список для зберігання нових ID повідомлень
+new_message_ids = []
+
+# Описуємо категорії, які ШІ має згенерувати окремо
+categories = [
+    {"name": "Туреччина", "prompt_part": "Вибери до 5 найкращих готелів 4★ та 5★ СУТО в ТУРЕЧЧИНІ. Опиши їх коротко."},
+    {"name": "Єгипет", "prompt_part": "Вибери до 5 найкращих готелів 4★ та 5★ СУТО в ЄГИПТІ. Опиши їх коротко."},
+    {"name": "Україна", "prompt_part": "Вибери до 5 найкращих пропозицій або готелів СУТО в УКРАЇНІ. Опиши їх коротко."},
+    {"name": "Інші Країни", "prompt_part": "Вибери до 5 найкращих готелів 4★ та 5★ з БУДЬ-ЯКИХ ІНШИХ КРАЇН, окрім Туреччини, Єгипту та України (наприклад, європейські курорти, екзотика тощо)."}
+]
+
+for cat in categories:
     prompt = (
         f"Ти — професійний тревел-копірайтер. На основі наступного тексту з туристичними даними склади один цікавий, "
-        f"структурований і залучаючий пост для Telegram-каналу українською мовою. "
-        f"Суворо дотримуйся наступних правил:\n\n"
-        f"1. НІКОЛИ не згадуй назву сайту, звідки взято інформацію, не пиши 'за даними сайту' тощо. Подавай інформацію від нашої компанії.\n"
-        f"2. КІЛЬКІСТЬ ТА ЗІРКОВІСТЬ: Зроби вибірку рівно на 10 найкращих готелів. Обирай виключно готелі категорій 4★ та 5★ (4 або 5 зірок).\n"
-        f"3. ПРІОРИТЕТ КРАЇН: У першу чергу шукай пропозиції в такі країни як Єгипет, Туреччина та Україна. Якщо є дуже цікаві або вигідні варіанти з інших країн, їх ТАКОЖ можна додати до цієї десятки.\n"
-        f"4. ЛАКОНІЧНІСТЬ (КРИТИЧНО): Оскільки готелів аж 10, описуй кожен готель максимально коротко (1-2 рядки: прапор країни, назва готелю, зірковість, коротко головна фішка та ціна), щоб пост не став занадто довгим.\n"
-        f"5. Обов'язково в кінці поста додай блоки заклику до дії точно за такою структурою:\n\n"
-        f"✈️ Бажаєте забронювати або підібрати інший варіант?\n"
-        f"Наш електронний помічник допоможе вам швидко сформувати запит, а професійний менеджер особисто опрацює ваші побажання.\n"
-        f"👉 <a href='{bot_link1}'>Залишити запит менеджеру</a>\n\n"
-        f"🎁 Приємний бонус: кожен наш клієнт може отримати персональну знижку за програмою лояльності!\n"
-        f"👉 <a href='{bot_link2}'>Отримати знижку</a>\n\n"
-        f"6. ЛІМІТ СИМВОЛІВ: Твій підсумковий пост разом із закликами до дії ОБОВ'ЯЗКОВО має бути коротшим за 3800 символів, інакше Telegram його заблокує. Використовуй дозволені в Telegram HTML-теги (<b>, <i>, <a>).\n\n"
+        f"структурований і залучаючий пост для Telegram-каналу українською мовою.\n\n"
+        f"ТВОЄ ЗАВДАННЯ: {cat['prompt_part']}\n\n"
+        f"Суворо дотримуйся наступних правил:\n"
+        f"1. НІКОЛИ не згадуй назву сайту, звідки взято інформацію. Подавай інформацію від імені нашої компанії.\n"
+        f"2. Описуй кожен готель дуже лаконічно (1-2 рядки: прапор країни, назва готелю, зірковість, фішка та ціна).\n"
+        f"3. Зроби красивий заголовок для цього поста (наприклад: ☀️ ТОП пропозицій: {cat['name']}).\n"
+        f"4. ЛІМІТ СИМВОЛІВ: Твій текст має бути коротшим за 2000 символів. Використовуй тільки дозволені в Telegram HTML-теги (<b>, <i>).\n\n"
         f"Текст із даними: {raw_site_data}"
     )
+
     try:
+        # Запит до Gemini для поточної країни/категорії
         response = ai_model.generate_content(prompt)
-        await bot.send_message(chat_id=AUTO_POST_CHAT_ID, text=response.text, parse_mode="HTML")
-        logging.info("✅ Пост від електронного помічника успішно згенеровано та опубліковано!")
-    except Exception as e:
-        logging.error(f"Помилка роботи ШІ Gemini: {e}")
+        post_text = response.text
+        
+        # Об'єднуємо згенерований текст із закликом до дії
+        full_message = f"{post_text}\n\n{cta_text}"
+        
+        # Надсилаємо в канал
+        msg = await bot.send_message(chat_id=AUTO_POST_CHAT_ID, text=full_message, parse_mode="HTML")
+        new_message_ids.append(str(msg.message_id))
+        
+        logging.info(f"✅ Пост для категорії '{cat['name']}' успішно опубліковано! ID: {msg.message_id}")
+        
+    except Exception as ai_err:
+        logging.error(f"❌ Помилка роботи ШІ Gemini для категорії {cat['name']}: {ai_err}")
+
+if new_message_ids:
+    try:
+        with open(IDS_FILE, "w") as f:
+            f.write("\n".join(new_message_ids))
+        logging.info(f"💾 Нові ID збережено у файл для видалення завтра: {new_message_ids}")
+    except Exception as save_err:
+        logging.error(f"Не вдалося зберегти ID у файл: {save_err}")
 
 # --- ОБРОБНИКИ КОМАНД (ВЕРХНІЙ ПРІОРИТЕТ) ---
 
