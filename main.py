@@ -41,7 +41,7 @@ try:
     FEEDBACK_HOUR = int(os.getenv("FEEDBACK_HOUR", "11"))
     FEEDBACK_MINUTE = int(os.getenv("FEEDBACK_MINUTE", "0"))
     ASSISTANT_HOUR = int(os.getenv("ASSISTANT_HOUR", "23"))
-    ASSISTANT_MINUTE = int(os.getenv("ASSISTANT_MINUTE", "23"))
+    ASSISTANT_MINUTE = int(os.getenv("ASSISTANT_MINUTE", "57"))
 except ValueError:
     raise ValueError("ADMIN_ID, REVIEWS_CHAT_ID, FEEDBACK_HOUR та FEEDBACK_MINUTE мають бути цілими числами!")
 
@@ -291,7 +291,6 @@ async def fetch_tat_ua_data(country_slug: str):
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
     }
     
-    # Формуємо URL конкретної країни на основі її слага
     url = f"https://tat.ua/search/{country_slug}/"
     logging.info(f"🌐 КРОК 1: Скануємо посилання на готелі для країни: {url}")
     
@@ -302,13 +301,13 @@ async def fetch_tat_ua_data(country_slug: str):
         response = requests.get(url, headers=headers, timeout=15)
         if response.status_code == 200:
             soup = BeautifulSoup(response.text, 'html.parser')
-            all_text += f"\n\n--- Базові дані пошуку країни ({url}) ---\n" + soup.get_text()
+            # Зберігаємо базовий текст сторінки пошуку (там часто вказано загальне місто виїзду для турів)
+            all_text += f"\n\n--- Базові дані пошуку країни ({url}) ---\n" + soup.get_text(separator=" ", strip=True)
             
             for link in soup.find_all('a', href=True):
                 href = link['href']
                 href_lower = href.lower()
                 
-                # Пошук маркерів готелів
                 if any(keyword in href_lower for keyword in ["/tur/", "/hotel/", "/hotel-"]) and "sitemap" not in href_lower:
                     if href.startswith("/"):
                         full_url = base_url + href
@@ -331,21 +330,19 @@ async def fetch_tat_ua_data(country_slug: str):
         return None
         
     visited_count = 0
-    
-    # ОБМЕЖЕННЯ ЗНЯТО: аналізуємо абсолютно ВСІ знайдені посилання готелів цієї країни
     logging.info(f"🕵️‍♂️ КРОК 2: Починаємо повний глибокий аналіз УСІХ сторінок готелів ({total_links} шт.)...")
     
     for idx, deep_url in enumerate(deep_links):
         try:
             logging.info(f"🔎 [{idx+1}/{total_links}] Аналізуємо конкретний готель: {deep_url}")
-            
-            # Невеликий таймаут (0.3 сек), щоб не перевантажувати сервер сайту
             await asyncio.sleep(0.3)
             
             page_res = requests.get(deep_url, headers=headers, timeout=10)
             if page_res.status_code == 200:
                 page_soup = BeautifulSoup(page_res.text, 'html.parser')
-                all_text += f"\n\n--- ДЕТАЛЬНИЙ ОПИС ТУРУ/ГОТЕЛЮ №{idx+1} {deep_url} ---\n" + page_soup.get_text()
+                # separator=" " допомагає не склеювати слова докупи, щоб ШІ чітко бачив міста і транспорт
+                hotel_text = page_soup.get_text(separator=" ", strip=True)
+                all_text += f"\n\n--- ДЕТАЛЬНИЙ ОПИС ТУРУ/ГОТЕЛЮ №{idx+1} {deep_url} ---\n" + hotel_text
                 visited_count += 1
                 
         except Exception as deep_err:
@@ -365,54 +362,42 @@ async def generate_and_send_ai_tour_post():
         logging.info("🤖 Помічник пропущений: немає модели ШІ або AUTO_POST_CHAT_ID.")
         return
 
-    # ID вашої теми "Навігатор дня"
     NAVIGATOR_DAY_TOPIC_ID = 198 
-
     bot_link1 = "https://t.me/NavigatorToursBot?start=welcome"
     bot_link2 = "https://t.me/NavigatorToursBot?start=discount"
-
     IDS_FILE = "vchora_posts.txt"
     current_date_str = datetime.now().strftime("%d.%m.%Y")
 
-    # Текст заклику до дії (Рекламний блок) — буде під кожним постом
     cta_text = (
         f"⚠️ <b>Зверніть увагу: всі ціни вказані за тур та є актуальними на сьогодні!</b>\n\n"
         f"✈️ Бажаєте забронювати або підібрати інший варіант?\n"
         f"Наш електронний помічник допоможе вам швидко сформувати запит, а професійний менеджер особисто опрацює ваші побажання.\n"
         f"👉 <a href='{bot_link1}'>Залишити запит менеджеру</a>\n\n"
-        f"🎁 <b>Приємний бонус:</b> кожен наш клієнт може отримати персональну знижку за програмую лояльності!\n"
+        f"🎁 <b>Приємний бонус:</b> кожен наш клієнт може отримати персональну знижку за програмою лояльності!\n"
         f"👉 <a href='{bot_link2}'>Отримати знижку</a>"
     )
 
-    # Блок «Поширити канал» — додасться тільки в самий кінець ОСТАННЬОГО поста
     share_text = (
-        f"\n\n➖➖➖➖➖➖➖➖\n"
-        f"🗣 <b>Сподобалася добірка?</b>\n"
-        f"Поширюйте канал серед знайомих мандрівників — разом шукать вигідні тури цікавіше!"
+        f"\n\n🗣 <b>Сподобалася добірка?</b>\n"
+        f"Поширюйте канал серед знайомих мандрівників — разом шукати вигідні тури цікавіше!"
     )
 
-    # ==========================================
-    # КРОК 1: ОЧИЩЕННЯ СТАРИХ ПОСТІВ
-    # ==========================================
     if os.path.exists(IDS_FILE):
         try:
             with open(IDS_FILE, "r") as f:
                 old_ids = f.read().splitlines()
             
-            logging.info(f"🗑 Виявлено старі пости для видалення: {old_ids}")
             for msg_id in old_ids:
                 try:
                     await bot.delete_message(chat_id=AUTO_POST_CHAT_ID, message_id=int(msg_id))
-                except Exception as del_err:
-                    logging.warning(f"Не вдалося видалити повідомлення {msg_id}: {del_err}")
-            
+                except Exception:
+                    pass
             os.remove(IDS_FILE)
         except Exception as file_err:
             logging.error(f"Помилка при роботі з файлом очищення: {file_err}")
 
     new_message_ids = []
 
-    # Додано параметр "slug", що чітко відповідає структурі посилань країн на tat.ua
     categories = [
         {
             "name": "ТУРЕЧЧИНА", 
@@ -445,6 +430,7 @@ async def generate_and_send_ai_tour_post():
         {
             "name": "ЧОРНОГОРІЯ", 
             "slug": "montenegro",
+            "flag": "montenegro",
             "flag": "🇲🇪", 
             "stars": "4★ та 5★", 
             "prompt_part": "Уважно проскануй весь наданий текст. Твоє завдання — вибрати до 5 НАЙКРАЩИХ РІЗНИХ готелів СУТО в ЧОРНОГОРІЇ. Сформуй мікс із готелів зірковості 4★ та 5★."
@@ -465,22 +451,18 @@ async def generate_and_send_ai_tour_post():
         }
     ]
 
-    # ==========================================
-    # КРОК 2: ЗБІР ДАНИХ ТА ГЕНЕРАЦІЯ ОКРЕМИХ ПОСТІВ
-    # ==========================================
     for index, cat in enumerate(categories):
         if index > 0:
             logging.info(f"⏳ Очікуємо 60 секунд перед аналізом наступної країни '{cat['name']}'...")
             await asyncio.sleep(60)
 
-        # Викликаємо парсер індивідуально під поточну країну
         raw_country_data = await fetch_tat_ua_data(cat["slug"])
         
-        # Перевірка: якщо на сайті немає жодного готелю по цій країні — повністю пропускаємо блок
         if not raw_country_data or len(raw_country_data.strip()) < 100:
-            logging.info(f"⏩ Пропущено блок '{cat['name']}', бо на сайті немає актуальних даних або готелів по цій країні.")
+            logging.info(f"⏩ Пропущено блок '{cat['name']}', бо на сайті немає актуальних даних по цій країні.")
             continue
 
+        # ОНОВЛЕНИЙ ПРОМПТ: додано суворі правила щодо міста відправлення та типу транспорту (пункт 5)
         prompt = (
             f"Ти — професійний тревел-копірайтер компанії. На основі НАДАНИХ ТЕКСТОВИХ ДАНИХ склади один цікавий, "
             f"структурований і залучаючий пост для Telegram-каналу українською мовою.\n\n"
@@ -492,10 +474,11 @@ async def generate_and_send_ai_tour_post():
             f"3. ХУДОЖНІЙ ВСТУП (ОБОВ'ЯЗКОВО): Одразу після заголовка напиши один короткий, емоційний та вступний художній абзац, який яскраво описує переваги відпочинку в цьому напрямку.\n"
             f"4. СУВОРЕ ПРАВИЛО ДЛЯ ВСТУПУ:\n"
             f"   - Заборони будь-які технічні чи робочі фрази типу 'Згідно з наявними даними...', 'Ми знайшли...'. Текст повинен виглядати як рекомендація живого експерта.\n"
-            f"   - Якщо ти пишеш фразу-перехід до списку готелів, вона має суворо відповідати зірковості в заголовку, наприклад: 'Ось наша добірка найкращих готелів 4★ та 5★, які зроблять ваш відпочинок незабутнім:'. НІКОЛИ не пиши тільки про 5★, якщо в заголовку вказано '4★ та 5★'!\n"
+            f"   - Якщо ти пишеш фразу-перехід до списку готелів, вона має суворо відповідати зірковості в заголовку, наприклад: 'Ось наша добірка найкращих готелів 4★ та 5★, які зроблять ваш відпочинок незабутнім:'.\n"
             f"5. Після художнього вступу виведи список готелів. Для КОЖНОГО готелю суворо використовуй наступний візуальний шаблон (заповнюй дані, зберігаючи емодзі та жирний шрифт):\n\n"
             f"📍 <b>КРАЇНА (Регіон/Курорт)</b>\n"
             f"🏨 <b>Назва готелю і зірковість (наприклад: Grand Konakli Resort 4* або Hawaii Riviera Aqua Park 5*)</b>\n"
+            f"🚌 <b>Трансфер та виїзд:</b> [Знайди в тексті місто виїзду/вильоту та вид транспорту, наприклад: Автобус із Києва, Авіа з Кишинева, або Власний транспорт / Без трасферу для України]\n"
             f"🍽 <b>Харчування:</b> [Вкажи тип харчування з тексту]\n"
             f"📅 <b>Виліт/Дата:</b> [Вкажи дату та кількість ночей]\n"
             f"💰 <b>Ціна:</b> [Вкажи вартість з тексту]\n"
@@ -513,19 +496,15 @@ async def generate_and_send_ai_tour_post():
             response = ai_model.generate_content(prompt)
             post_text = response.text
             
-            # --- ПРАВИЛО ПЕРЕВІРКИ НАЯВНОСТІ ГОТЕЛІВ ---
-            # Якщо ШІ видав порожній текст або згенерував лише вступ БЕЗ карток готелів, блок не публікується
             if len(post_text.strip()) < 100 or "📍" not in post_text or "🏨" not in post_text:
-                logging.info(f"⏩ Пропущено публікацію категорії '{cat['name']}', бо в згенерованому ШІ тексті відсутні реальні картки готелів.")
+                logging.info(f"⏩ Пропущено публікацію категорії '{cat['name']}', бо в згенерованому ШІ тексті відсутні картки готелів.")
                 continue
 
             full_message = f"{post_text}\n\n{cta_text}"
             
-            # Додаємо блок «Поширити канал» тільки в самий кінець останнього опублікованого поста
             if index == len(categories) - 1:
                 full_message += share_text
             
-            # Відправка (message_thread_id закоментовано спеціально для тестування у Saved Messages)
             msg = await bot.send_message(
                 chat_id=AUTO_POST_CHAT_ID, 
                 text=full_message, 
@@ -533,20 +512,16 @@ async def generate_and_send_ai_tour_post():
                 # message_thread_id=NAVIGATOR_DAY_TOPIC_ID
             )
             new_message_ids.append(str(msg.message_id))
-            
             logging.info(f"✅ Пост для категорії '{cat['name']}' успішно опубліковано! ID: {msg.message_id}")
             
         except Exception as ai_err:
             logging.error(f"❌ Помилка роботи ШІ Gemini для категорії {cat['name']}: {ai_err}")
 
-    # ==========================================
-    # КРОК 3: ЗАПИСУЄМО НОВІ ID ДЛЯ НАСТУПНОГО ДНЯ
-    # ==========================================
     if new_message_ids:
         try:
             with open(IDS_FILE, "w") as f:
                 f.write("\n".join(new_message_ids))
-            logging.info(f"💾 Нові ID збережено у faint для видалення завтра: {new_message_ids}")
+            logging.info(f"💾 Нові ID збережено у файл для видалення завтра: {new_message_ids}")
         except Exception as save_err:
             logging.error(f"Не вдалося зберегти ID у файл: {save_err}")
             
