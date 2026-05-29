@@ -40,8 +40,8 @@ try:
     REVIEWS_CHAT_ID = int(os.getenv("REVIEWS_CHAT_ID"))
     FEEDBACK_HOUR = int(os.getenv("FEEDBACK_HOUR", "11"))
     FEEDBACK_MINUTE = int(os.getenv("FEEDBACK_MINUTE", "0"))
-    ASSISTANT_HOUR = int(os.getenv("ASSISTANT_HOUR", "22"))
-    ASSISTANT_MINUTE = int(os.getenv("ASSISTANT_MINUTE", "52"))
+    ASSISTANT_HOUR = int(os.getenv("ASSISTANT_HOUR", "23"))
+    ASSISTANT_MINUTE = int(os.getenv("ASSISTANT_MINUTE", "23"))
 except ValueError:
     raise ValueError("ADMIN_ID, REVIEWS_CHAT_ID, FEEDBACK_HOUR та FEEDBACK_MINUTE мають бути цілими числами!")
 
@@ -277,73 +277,79 @@ def generate_discount():
     else:
         return 5
 
+
+
 # --- ФУНКЦІЇ ЕЛЕКТРОННОГО ПОМІЧНИКА (ПАРСИНГ ТА ШІ) ---
-def fetch_tat_ua_data():
+
+async def fetch_tat_ua_data(country_slug: str):
+    """
+    Збирає дані з сайту tat.ua суто для конкретної країни без жодних обмежень.
+    country_slug — це унікальний ідентифікатор країни в URL (наприклад: 'turkey', 'ukraine' тощо)
+    """
     base_url = "https://tat.ua"
-    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"}
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    }
     
-    start_urls = [
-        "https://tat.ua/",
-        "https://tat.ua/search/turkey/",
-        "https://tat.ua/search/egypt/",
-        "https://tat.ua/search/bulgaria/",
-        "https://tat.ua/search/greece/",
-        "https://tat.ua/search/montenegro/",
-        "https://tat.ua/search/spain/",
-        "https://tat.ua/search/ukraine/"
-    ]
+    # Формуємо URL конкретної країни на основі її слага
+    url = f"https://tat.ua/search/{country_slug}/"
+    logging.info(f"🌐 КРОК 1: Скануємо посилання на готелі для країни: {url}")
     
     deep_links = set()
     all_text = ""
     
-    logging.info("🌐 КРОК 1: Скануємо сторінки країн з урахуванням регістру посилань...")
-    
-    for url in start_urls:
-        try:
-            response = requests.get(url, headers=headers, timeout=12)
-            if response.status_code == 200:
-                soup = BeautifulSoup(response.text, 'html.parser')
-                all_text += f"\n\n--- Базові дані пошуку ({url}) ---\n" + soup.get_text()
-                
-                for link in soup.find_all('a', href=True):
-                    href = link['href']
-                    
-                    # ВИПРАВЛЕННЯ: перетворюємо лінк у нижній регістр (.lower()) перед перевіркою знаходження слів!
-                    href_lower = href.lower()
-                    if any(keyword in href_lower for keyword in ["/tur/", "/hotel/", "/hotel-"]) and "sitemap" not in href_lower:
-                        if href.startswith("/"):
-                            full_url = base_url + href
-                        elif href.startswith("http"):
-                            full_url = href
-                        else:
-                            continue
-                        
-                        if base_url in full_url and full_url not in start_urls:
-                            deep_links.add(full_url)
-                            
-        except Exception as e:
-            logging.error(f"❌ Помилка сканування стартової сторінки {url}: {e}")
-            continue
-
-    logging.info(f"🔗 Знайдено {len(deep_links)} глибоких посилань на конкретні готелі (включаючи Єгипет).")
-    
-    visited_count = 0
-    max_deep_pages = 25 
-    
-    logging.info(f"🕵️‍♂️ КРОК 2: Починаємо глибокий аналіз сторінок (максимум {max_deep_pages})...")
-    
-    for deep_url in list(deep_links)[:max_deep_pages]:
-        try:
-            logging.info(f"🔎 Аналізуємо конкретний готель: {deep_url}")
-            page_res = requests.get(deep_url, headers=headers, timeout=10)
+    try:
+        response = requests.get(url, headers=headers, timeout=15)
+        if response.status_code == 200:
+            soup = BeautifulSoup(response.text, 'html.parser')
+            all_text += f"\n\n--- Базові дані пошуку країни ({url}) ---\n" + soup.get_text()
             
+            for link in soup.find_all('a', href=True):
+                href = link['href']
+                href_lower = href.lower()
+                
+                # Пошук маркерів готелів
+                if any(keyword in href_lower for keyword in ["/tur/", "/hotel/", "/hotel-"]) and "sitemap" not in href_lower:
+                    if href.startswith("/"):
+                        full_url = base_url + href
+                    elif href.startswith("http"):
+                        full_url = href
+                    else:
+                        continue
+                    
+                    if base_url in full_url:
+                        deep_links.add(full_url)
+                        
+    except Exception as e:
+        logging.error(f"❌ Помилка сканування сторінки країни {url}: {e}")
+        return None
+
+    total_links = len(deep_links)
+    logging.info(f"🔗 Знайдено {total_links} глибоких посилань на конкретні готелі для напрямку '{country_slug}'.")
+    
+    if total_links == 0:
+        return None
+        
+    visited_count = 0
+    
+    # ОБМЕЖЕННЯ ЗНЯТО: аналізуємо абсолютно ВСІ знайдені посилання готелів цієї країни
+    logging.info(f"🕵️‍♂️ КРОК 2: Починаємо повний глибокий аналіз УСІХ сторінок готелів ({total_links} шт.)...")
+    
+    for idx, deep_url in enumerate(deep_links):
+        try:
+            logging.info(f"🔎 [{idx+1}/{total_links}] Аналізуємо конкретний готель: {deep_url}")
+            
+            # Невеликий таймаут (0.3 сек), щоб не перевантажувати сервер сайту
+            await asyncio.sleep(0.3)
+            
+            page_res = requests.get(deep_url, headers=headers, timeout=10)
             if page_res.status_code == 200:
                 page_soup = BeautifulSoup(page_res.text, 'html.parser')
-                all_text += f"\n\n--- ДЕТАЛЬНИЙ ОПИС ТУРУ/ГОТЕЛЮ {deep_url} ---\n" + page_soup.get_text()
+                all_text += f"\n\n--- ДЕТАЛЬНИЙ ОПИС ТУРУ/ГОТЕЛЮ №{idx+1} {deep_url} ---\n" + page_soup.get_text()
                 visited_count += 1
                 
         except Exception as deep_err:
-            logging.warning(f"Не вдалося відкрити сторінку готелю {deep_url}: {deep_err}")
+            logging.warning(f"Пропущено сторінку готелю {deep_url}: {deep_err}")
             continue
             
     logging.info(f"✅ Глибокий аналіз завершено. Успішно опрацьовано {visited_count} сторінок готелів.")
@@ -351,16 +357,12 @@ def fetch_tat_ua_data():
     if not all_text.strip():
         return None
         
-    return all_text[:60000]
+    return all_text
+
 
 async def generate_and_send_ai_tour_post():
     if not ai_model or not AUTO_POST_CHAT_ID:
         logging.info("🤖 Помічник пропущений: немає модели ШІ або AUTO_POST_CHAT_ID.")
-        return
-
-    raw_site_data = fetch_tat_ua_data()
-    if not raw_site_data:
-        logging.error("❌ Не вдалося отримати текст з сайту для ШІ.")
         return
 
     # ID вашої теми "Навігатор дня"
@@ -378,7 +380,7 @@ async def generate_and_send_ai_tour_post():
         f"✈️ Бажаєте забронювати або підібрати інший варіант?\n"
         f"Наш електронний помічник допоможе вам швидко сформувати запит, а професійний менеджер особисто опрацює ваші побажання.\n"
         f"👉 <a href='{bot_link1}'>Залишити запит менеджеру</a>\n\n"
-        f"🎁 <b>Приємний бонус:</b> кожен наш клієнт може отримати персональну знижку за програмою лояльності!\n"
+        f"🎁 <b>Приємний бонус:</b> кожен наш клієнт може отримати персональну знижку за програмую лояльності!\n"
         f"👉 <a href='{bot_link2}'>Отримати знижку</a>"
     )
 
@@ -410,45 +412,79 @@ async def generate_and_send_ai_tour_post():
 
     new_message_ids = []
 
+    # Додано параметр "slug", що чітко відповідає структурі посилань країн на tat.ua
     categories = [
         {
             "name": "ТУРЕЧЧИНА", 
+            "slug": "turkey",
             "flag": "🇹🇷", 
             "stars": "4★ та 5★", 
-            "prompt_part": "Уважно проскануй весь текст джерела. Твоє завдання — вибрати до 5 НАЙКРАЩИХ РІЗНИХ готелів СУТО в ТУРЕЧЧИНІ. КРИТИЧНО ВАЖЛИВО: у фінальному списку ОБОВ'ЯЗКОВО мають бути ЯК готелі 4★, ТАК І готелі 5★ (зроби збалансований мікс із четвірок і п'ятірок, не виводь тільки 5★!)."
+            "prompt_part": "Уважно проскануй весь наданий текст. Твоє завдання — вибрати до 5 НАЙКРАЩИХ РІЗНИХ готелів СУТО в ТУРЕЧЧИНІ. КРИТИЧНО ВАЖЛИВО: у фінальному списку ОБОВ'ЯЗКОВО мають бути ЯК готелі 4★, ТАК І готелі 5★ (зроби збалансований мікс із четвірок і п'ятірок, не виводь тільки 5★!)."
         },
         {
             "name": "ЄГИПЕТ", 
+            "slug": "egypt",
             "flag": "🇪🇬", 
             "stars": "4★ та 5★", 
-            "prompt_part": "Уважно проскануй весь текст джерела. Твоє завдання — вибрати до 5 НАЙКРАЩИХ РІЗНИХ готелів СУТО в ЄГИПТІ. КРИТИЧНО ВАЖЛИВО: у фінальному списку ОБОВ'ЯЗКОВО мають бути ЯК готелі 4★, ТАК І готелі 5★ (зроби збалансований мікс із четвірок і п'ятірок, не виводь тільки 5★!)."
+            "prompt_part": "Уважно проскануй весь наданий текст. Твоє завдання — вибрати до 5 НАЙКРАЩИХ РІЗНИХ готелів СУТО в ЄГИПТІ. КРИТИЧНО ВАЖЛИВО: у фінальному списку ОБОВ'ЯЗКОВО мають бути ЯК готелі 4★, ТАК І готелі 5★ (зроби збалансований мікс із четвірок і п'ятірок, не виводь тільки 5★!)."
+        },
+        {
+            "name": "БОЛГАРІЯ", 
+            "slug": "bulgaria",
+            "flag": "🇧🇬", 
+            "stars": "4★ та 5★", 
+            "prompt_part": "Уважно проскануй весь наданий текст. Твоє завдання — вибрати до 5 НАЙКРАЩИХ РІЗНИХ готелів СУТО в БОЛГАРІЇ. Сформуй мікс із готелів зірковості 4★ та 5★."
+        },
+        {
+            "name": "ГРЕЦІЯ", 
+            "slug": "greece",
+            "flag": "🇬🇷", 
+            "stars": "4★ та 5★", 
+            "prompt_part": "Уважно проскануй весь наданий текст. Твоє завдання — вибрати до 5 НАЙКРАЩИХ РІЗНИХ готелів СУТО в ГРЕЦІЇ. Сформуй мікс із готелів зірковості 4★ та 5★."
+        },
+        {
+            "name": "ЧОРНОГОРІЯ", 
+            "slug": "montenegro",
+            "flag": "🇲🇪", 
+            "stars": "4★ та 5★", 
+            "prompt_part": "Уважно проскануй весь наданий текст. Твоє завдання — вибрати до 5 НАЙКРАЩИХ РІЗНИХ готелів СУТО в ЧОРНОГОРІЇ. Сформуй мікс із готелів зірковості 4★ та 5★."
+        },
+        {
+            "name": "ІСПАНІЯ", 
+            "slug": "spain",
+            "flag": "🇪🇸", 
+            "stars": "4★ та 5★", 
+            "prompt_part": "Уважно проскануй весь наданий текст. Твоє завдання — вибрати до 5 НАЙКРАЩИХ РІЗНИХ готелів СУТО в ІСПАНІЇ. Сформуй мікс із готелів зірковості 4★ та 5★."
         },
         {
             "name": "УКРАЇНА", 
+            "slug": "ukraine",
             "flag": "🇺🇦", 
             "stars": "4★ та 5★", 
-            "prompt_part": "Уважно проскануй весь текст джерела. Витягни до 5 РІЗНИХ найкращих пропозицій або готелів СУТО в УКРАЇНІ. Якщо в джерелі є готелі різної зірковості (і 4★, і 5★), обов'язково додай обидва типи у фінальний список."
-        },
-        {
-            "name": "ІНШІ КРАЇНИ", 
-            "flag": "🌍", 
-            "stars": "4★ та 5★", 
-            "prompt_part": "Уважно проскануй весь текст джерела. Витягни до 5 РІЗНИХ найкращих готелів з БУДЬ-ЯКИХ ІНШИХ КРАЇН (окрім Туреччини, Єгипту та України). Обов'язково сформуй мікс із готелів зірковості 4★ та 5★."
+            "prompt_part": "Уважно проскануй весь наданий текст. Витягни до 5 РІЗНИХ найкращих пропозицій або готелів СУТО в УКРАЇНІ. Якщо в тексті є готелі різної зірковості (і 4★, і 5★), обов'язково додай обидва типи у фінальний список."
         }
     ]
 
     # ==========================================
-    # КРОК 2: ГЕНЕРАЦІЯ ТА ПОСТИНГ ОКРЕМИХ ПОСТІВ
+    # КРОК 2: ЗБІР ДАНИХ ТА ГЕНЕРАЦІЯ ОКРЕМИХ ПОСТІВ
     # ==========================================
     for index, cat in enumerate(categories):
         if index > 0:
-            logging.info(f"⏳ Очікуємо 60 секунд перед запитом ШІ для категорії '{cat['name']}'...")
+            logging.info(f"⏳ Очікуємо 60 секунд перед аналізом наступної країни '{cat['name']}'...")
             await asyncio.sleep(60)
 
+        # Викликаємо парсер індивідуально під поточну країну
+        raw_country_data = await fetch_tat_ua_data(cat["slug"])
+        
+        # Перевірка: якщо на сайті немає жодного готелю по цій країні — повністю пропускаємо блок
+        if not raw_country_data or len(raw_country_data.strip()) < 100:
+            logging.info(f"⏩ Пропущено блок '{cat['name']}', бо на сайті немає актуальних даних або готелів по цій країні.")
+            continue
+
         prompt = (
-            f"Ти — професійний тревел-копірайтер компанії. На основі наступного текста з туристичними даними склади один цікавий, "
+            f"Ти — професійний тревел-копірайтер компанії. На основі НАДАНИХ ТЕКСТОВИХ ДАНИХ склади один цікавий, "
             f"структурований і залучаючий пост для Telegram-каналу українською мовою.\n\n"
-            f"ТВОЄ ГОЛОВНЕ ЗАВДАННЯ: {cat['prompt_part']} Ти зобов'язаний сформувати список із кількох готелів (до 5 штук), чітко комбінуючи 4★ та 5★ варіанти.\n\n"
+            f"ТВОЄ ГОЛОВНЕ ЗАВДАННЯ: {cat['prompt_part']} Ти зобов'язаний сформувати список із кількох найкращих готелів (до 5 штук), чітко комбінуючи 4★ та 5★ варіанти.\n\n"
             f"Суворо дотримуйся наступних правил конструювання тексту:\n"
             f"1. НІКОЛИ не згадуй назву сторонніх сайтів чи парсерів.\n"
             f"2. Першим рядком поста ОБОВ'ЯЗКОВО має бути виключно заголовок суворо у такому форматі (замість дати підстав {current_date_str}):\n"
@@ -470,31 +506,31 @@ async def generate_and_send_ai_tour_post():
             f"   - СУВОРЕ ПРАВИЛО ДЛЯ ДАТИ: Записуй дату виключно у цифровому форматі ДД.ММ.РРРР. Ніколи не пиши місяць словами.\n"
             f"   - СУВОРЕ ПРАВИЛО ДЛЯ НАЗВИ ГОТЕЛЮ: Виводь назву готелю в оригіналі так, як вона вказана в тексті джерела (латиницею).\n"
             f"7. ОБМЕЖЕННЯ: Описуй кожен готель ємно. Твій підсумковий текст має бути не більше за 3500 символів. Використовуй тільки HTML-теги <b> та <i>.\n\n"
-            f"Текст із даними сайту: {raw_site_data}"
+            f"Ось текстові дані з усіма готелями суто для напрямку {cat['name']}: {raw_country_data}"
         )
 
         try:
             response = ai_model.generate_content(prompt)
             post_text = response.text
             
-            # --- НОВЕ ПРАВИЛО ПЕРЕВІРКИ НАЯВНОСТІ ГОТЕЛІВ ---
-            # Якщо в тексті немає обов'язкових маркерів картки готелю (📍 або 🏨), 
-            # або текст занадто короткий — ми повністю скасовуємо публікацію цієї категорії!
+            # --- ПРАВИЛО ПЕРЕВІРКИ НАЯВНОСТІ ГОТЕЛІВ ---
+            # Якщо ШІ видав порожній текст або згенерував лише вступ БЕЗ карток готелів, блок не публікується
             if len(post_text.strip()) < 100 or "📍" not in post_text or "🏨" not in post_text:
-                logging.info(f"⏩ Пропущено публікацію категорії '{cat['name']}', бо в згенерованому ШІ тексті відсутні реальні готелі.")
+                logging.info(f"⏩ Пропущено публікацію категорії '{cat['name']}', бо в згенерованому ШІ тексті відсутні реальні картки готелів.")
                 continue
 
             full_message = f"{post_text}\n\n{cta_text}"
             
-            # Додаємо блок «Поширити канал» тільки в самий кінець останнього поста
+            # Додаємо блок «Поширити канал» тільки в самий кінець останнього опублікованого поста
             if index == len(categories) - 1:
                 full_message += share_text
             
+            # Відправка (message_thread_id закоментовано спеціально для тестування у Saved Messages)
             msg = await bot.send_message(
                 chat_id=AUTO_POST_CHAT_ID, 
                 text=full_message, 
-                parse_mode="HTML",
-               # message_thread_id=NAVIGATOR_DAY_TOPIC_ID
+                parse_mode="HTML"
+                # message_thread_id=NAVIGATOR_DAY_TOPIC_ID
             )
             new_message_ids.append(str(msg.message_id))
             
@@ -510,7 +546,7 @@ async def generate_and_send_ai_tour_post():
         try:
             with open(IDS_FILE, "w") as f:
                 f.write("\n".join(new_message_ids))
-            logging.info(f"💾 Нові ID збережено у файл для видалення завтра: {new_message_ids}")
+            logging.info(f"💾 Нові ID збережено у faint для видалення завтра: {new_message_ids}")
         except Exception as save_err:
             logging.error(f"Не вдалося зберегти ID у файл: {save_err}")
             
