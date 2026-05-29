@@ -277,8 +277,6 @@ def generate_discount():
     else:
         return 5
 
-
-
 # --- ФУНКЦІЇ ЕЛЕКТРОННОГО ПОМІЧНИКА (ПАРСИНГ ТА ШІ) ---
 
 async def fetch_tat_ua_data(country_slug: str):
@@ -359,7 +357,7 @@ async def fetch_tat_ua_data(country_slug: str):
 
 async def generate_and_send_ai_tour_post():
     if not ai_model or not AUTO_POST_CHAT_ID:
-        logging.info("🤖 Помічник пропущений: немає модели ШІ або AUTO_POST_CHAT_ID.")
+        logging.info("🤖 Помічник пропущений: немає моделі ШІ або AUTO_POST_CHAT_ID.")
         return
 
     NAVIGATOR_DAY_TOPIC_ID = 198 
@@ -374,7 +372,7 @@ async def generate_and_send_ai_tour_post():
         f"Наш електронний помічник допоможе вам швидко сформувати запит, а професійний менеджер особисто опрацює ваші побажання.\n"
         f"👉 <a href='{bot_link1}'>Залишити запит менеджеру</a>\n\n"
         f"🎁 <b>Приємний бонус:</b> кожен наш клієнт може отримати персональну знижку за програмою лояльності!\n"
-        f"👉 <a href='{bot_link2}'>Отримати знижку</a>"
+        f"👉 <a href='{bot_link2}'>Отримувати знижку</a>"
     )
 
     share_text = (
@@ -430,7 +428,6 @@ async def generate_and_send_ai_tour_post():
         {
             "name": "ЧОРНОГОРІЯ", 
             "slug": "montenegro",
-            "flag": "montenegro",
             "flag": "🇲🇪", 
             "stars": "4★ та 5★", 
             "prompt_part": "Уважно проскануй весь наданий текст. Твоє завдання — вибрати до 5 НАЙКРАЩИХ РІЗНИХ готелів СУТО в ЧОРНОГОРІЇ. Сформуй мікс із готелів зірковості 4★ та 5★."
@@ -447,7 +444,7 @@ async def generate_and_send_ai_tour_post():
             "slug": "ukraine",
             "flag": "🇺🇦", 
             "stars": "4★ та 5★", 
-            "prompt_part": "Уважно проскануй весь наданий текст. Витягни до 5 РІЗНИХ найкращих пропозицій або готелів СУТО в УКРАЇНІ. Якщо в тексті є готелі різної зірковості (і 4★, і 5★), обов'язково додай обидва типи у фінальний список."
+            "prompt_part": "Уважно проскануй весь наданий текст. Витягни до 5 РІЗНИХ найкращих пропозицій або готелів СУТО в УКРАЇНІ. Якщо в тексті є готелі різної зірковості (і 4★, і 5★), обов'язково додай обидва типу у фінальний список."
         }
     ]
 
@@ -462,10 +459,9 @@ async def generate_and_send_ai_tour_post():
             logging.info(f"⏩ Пропущено блок '{cat['name']}', бо на сайті немає актуальних даних по цій країні.")
             continue
 
-        # ОНОВЛЕНИЙ ПРОМПТ: додано суворі правила щодо міста відправлення та типу транспорту (пункт 5)
-# ОНОВЛЕНИЙ ПРОМПТ З ЖОРСТКОЮ ПРІОРИТЕТНІСТЮ ТРАНСПОРТУ (АВІА -> АВТОБУС -> БЕЗ ТРАНСФЕРУ)
+        # ПРІОРИТЕТНІСТЬ ТРАНСПОРТУ (АВІА -> АВТОБУС -> БЕЗ ТРАНСФЕРУ)
         prompt = (
-            f"Ти — професійний тревел-копірайтер компанії. На основі НАДАНИХ ТЕКСТОВИХ ДАНИХ склади один цікавий, "
+            f"Ти — професійний travel-копірайтер компанії. На основі НАДАНИХ ТЕКСТОВИХ ДАНИХ склади один цікавий, "
             f"структурований і залучаючий пост для Telegram-каналу українською мовою.\n\n"
             f"ТВОЄ ГОЛОВНЕ ЗАВДАННЯ: {cat['prompt_part']} Ти зобов'язаний сформувати список із кількох найкращих готелів (до 5 штук), чітко комбінуючи 4★ та 5★ варіанти.\n\n"
             f"⚠️ КРИТИЧНО ВАЖЛИВЕ ПРАВИЛО СОРТУВАННЯ ТА ПРІОРИТЕТУ ТУРІВ:\n"
@@ -511,14 +507,15 @@ async def generate_and_send_ai_tour_post():
             if index == len(categories) - 1:
                 full_message += share_text
             
+            # ТУТ КОМУ ВИПРАВЛЕНО (ПІСЛЯ "HTML"):
             msg = await bot.send_message(
                 chat_id=AUTO_POST_CHAT_ID, 
                 text=full_message, 
-                parse_mode="HTML"
+                parse_mode="HTML",
                 message_thread_id=NAVIGATOR_DAY_TOPIC_ID
             )
             new_message_ids.append(str(msg.message_id))
-            logging.info(f"✅ Пост для категорії '{cat['name']}' успішно опубліковано! ID: {msg.message_id}")
+            logging.info(f"✅ Пост для категорії '{cat['name']}' успешно опубліковано! ID: {msg.message_id}")
             
         except Exception as ai_err:
             logging.error(f"❌ Помилка роботи ШІ Gemini для категорії {cat['name']}: {ai_err}")
