@@ -40,8 +40,8 @@ try:
     REVIEWS_CHAT_ID = int(os.getenv("REVIEWS_CHAT_ID"))
     FEEDBACK_HOUR = int(os.getenv("FEEDBACK_HOUR", "11"))
     FEEDBACK_MINUTE = int(os.getenv("FEEDBACK_MINUTE", "0"))
-    ASSISTANT_HOUR = int(os.getenv("ASSISTANT_HOUR", "8"))
-    ASSISTANT_MINUTE = int(os.getenv("ASSISTANT_MINUTE", "45"))
+    ASSISTANT_HOUR = int(os.getenv("ASSISTANT_HOUR", "9"))
+    ASSISTANT_MINUTE = int(os.getenv("ASSISTANT_MINUTE", "10"))
 except ValueError:
     raise ValueError("ADMIN_ID, REVIEWS_CHAT_ID, FEEDBACK_HOUR та FEEDBACK_MINUTE мають бути цілими числами!")
 
@@ -294,11 +294,10 @@ def fetch_tat_ua_data():
         "https://tat.ua/search/ukraine/"
     ]
     
-    # Сет для збору посилань на конкретні тури/готелі, знайдені всередині
     deep_links = set()
     all_text = ""
     
-    logging.info(f"🌐 КРОК 1: Скануємо стартові сторінки пошуку для збору детальних лінків...")
+    logging.info("🌐 КРОК 1: Скануємо цільові сторінки пошуку країн...")
     
     for url in start_urls:
         try:
@@ -306,15 +305,14 @@ def fetch_tat_ua_data():
             if response.status_code == 200:
                 soup = BeautifulSoup(response.text, 'html.parser')
                 
-                # Додаємо базовий текст зі сторінки пошуку
+                # Зберігаємо базову інформацію зі сторінок списку
                 all_text += f"\n\n--- Базові дані пошуку ({url}) ---\n" + soup.get_text()
                 
-                # Шукаємо посилання на сторінці, які ведуть на конкретні тури чи готелі
+                # Збираємо посилання на детальні описи турів та готелів
                 for link in soup.find_all('a', href=True):
                     href = link['href']
                     
-                    # Фільтруємо: шукаємо лінки на конкретні тури/готелі (наприклад, ті, що містять '/tur/', '/hotel/', або '/hotel-')
-                    # Ігноруємо загальні лінки (контакти, правила, карти сайту)
+                    # Відфільтровуємо лише посилання на конкретні тури чи готелі
                     if any(keyword in href for keyword in ["/tur/", "/hotel/", "/hotel-"]) and "sitemap" not in href.lower():
                         if href.startswith("/"):
                             full_url = base_url + href
@@ -330,23 +328,22 @@ def fetch_tat_ua_data():
             logging.error(f"❌ Помилка сканування стартової сторінки {url}: {e}")
             continue
 
-    logging.info(f"🔗 Знайдено {len(deep_links)} глибоких посилань на конкретні тури/готелі.")
+    logging.info(f"🔗 Знайдено {len(deep_links)} глибоких посилань на конкретні готелі.")
     
-    # КРОК 2: Заходимо всередину знайдених посилань (детальний аналіз)
+    # КРОК 2: Глибокий обхід сторінок готелів
     visited_count = 0
-    # Обмежуємо перехід до 10 найсвіжіших готелів, щоб не викликати помилку 429 у Gemini
-    max_deep_pages = 10 
+    # На платному тарифі збільшуємо ліміт обходу до 25 сторінок готелів для максимальної вибірки турів!
+    max_deep_pages = 25 
     
-    logging.info(f"🕵️‍♂️ КРОК 2: Починаємо глибокий аналіз (максимум {max_deep_pages} сторінок)...")
+    logging.info(f"🕵️‍♂️ КРОК 2: Починаємо глибокий аналіз сторінок (максимум {max_deep_pages})...")
     
     for deep_url in list(deep_links)[:max_deep_pages]:
         try:
-            logging.info(f"🔎 Аналізуємо конкретний тур/готель: {deep_url}")
+            logging.info(f"🔎 Аналізуємо конкретний готель: {deep_url}")
             page_res = requests.get(deep_url, headers=headers, timeout=10)
             
             if page_res.status_code == 200:
                 page_soup = BeautifulSoup(page_res.text, 'html.parser')
-                # Склеюємо текст у єдину базу для ШІ
                 all_text += f"\n\n--- ДЕТАЛЬНИЙ ОПИС ТУРУ/ГОТЕЛЮ {deep_url} ---\n" + page_soup.get_text()
                 visited_count += 1
                 
@@ -359,8 +356,8 @@ def fetch_tat_ua_data():
     if not all_text.strip():
         return None
         
-    # Повертаємо безпечний обсяг тексту для безкоштовної квоти ШІ
-    return all_text[:25000]
+    # Збільшуємо фінальний ліміт символів до 60 000 — тепер ШІ отримає абсолютно всі гарячі тури!
+    return all_text[:60000]
 
 async def generate_and_send_ai_tour_post():
     if not ai_model or not AUTO_POST_CHAT_ID:
