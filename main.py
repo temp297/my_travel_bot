@@ -494,7 +494,7 @@ async def generate_and_send_ai_tour_post():
                 chat_id=AUTO_POST_CHAT_ID, 
                 text=full_message, 
                 parse_mode="HTML",
-                message_thread_id=NAVIGATOR_DAY_TOPIC_ID
+               # message_thread_id=NAVIGATOR_DAY_TOPIC_ID
             )
             new_message_ids.append(str(msg.message_id))
             
