@@ -40,8 +40,8 @@ try:
     REVIEWS_CHAT_ID = int(os.getenv("REVIEWS_CHAT_ID"))
     FEEDBACK_HOUR = int(os.getenv("FEEDBACK_HOUR", "11"))
     FEEDBACK_MINUTE = int(os.getenv("FEEDBACK_MINUTE", "0"))
-    ASSISTANT_HOUR = int(os.getenv("ASSISTANT_HOUR", "0"))
-    ASSISTANT_MINUTE = int(os.getenv("ASSISTANT_MINUTE", "20"))
+    ASSISTANT_HOUR = int(os.getenv("ASSISTANT_HOUR", "10"))
+    ASSISTANT_MINUTE = int(os.getenv("ASSISTANT_MINUTE", "0"))
 except ValueError:
     raise ValueError("ADMIN_ID, REVIEWS_CHAT_ID, FEEDBACK_HOUR та FEEDBACK_MINUTE мають бути цілими числами!")
 
@@ -515,7 +515,7 @@ async def generate_and_send_ai_tour_post():
                 chat_id=AUTO_POST_CHAT_ID, 
                 text=full_message, 
                 parse_mode="HTML"
-                # message_thread_id=NAVIGATOR_DAY_TOPIC_ID
+                message_thread_id=NAVIGATOR_DAY_TOPIC_ID
             )
             new_message_ids.append(str(msg.message_id))
             logging.info(f"✅ Пост для категорії '{cat['name']}' успішно опубліковано! ID: {msg.message_id}")
