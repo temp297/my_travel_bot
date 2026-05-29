@@ -282,7 +282,6 @@ def fetch_tat_ua_data():
     base_url = "https://tat.ua"
     headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"}
     
-    # Стартові сторінки пошуку, які ви надали
     start_urls = [
         "https://tat.ua/",
         "https://tat.ua/search/turkey/",
@@ -297,23 +296,21 @@ def fetch_tat_ua_data():
     deep_links = set()
     all_text = ""
     
-    logging.info("🌐 КРОК 1: Скануємо цільові сторінки пошуку країн...")
+    logging.info("🌐 КРОК 1: Скануємо сторінки країн з урахуванням регістру посилань...")
     
     for url in start_urls:
         try:
             response = requests.get(url, headers=headers, timeout=12)
             if response.status_code == 200:
                 soup = BeautifulSoup(response.text, 'html.parser')
-                
-                # Зберігаємо базову інформацію зі сторінок списку
                 all_text += f"\n\n--- Базові дані пошуку ({url}) ---\n" + soup.get_text()
                 
-                # Збираємо посилання на детальні описи турів та готелів
                 for link in soup.find_all('a', href=True):
                     href = link['href']
                     
-                    # Відфільтровуємо лише посилання на конкретні тури чи готелі
-                    if any(keyword in href for keyword in ["/tur/", "/hotel/", "/hotel-"]) and "sitemap" not in href.lower():
+                    # ВИПРАВЛЕННЯ: перетворюємо лінк у нижній регістр (.lower()) перед перевіркою знаходження слів!
+                    href_lower = href.lower()
+                    if any(keyword in href_lower for keyword in ["/tur/", "/hotel/", "/hotel-"]) and "sitemap" not in href_lower:
                         if href.startswith("/"):
                             full_url = base_url + href
                         elif href.startswith("http"):
@@ -328,11 +325,9 @@ def fetch_tat_ua_data():
             logging.error(f"❌ Помилка сканування стартової сторінки {url}: {e}")
             continue
 
-    logging.info(f"🔗 Знайдено {len(deep_links)} глибоких посилань на конкретні готелі.")
+    logging.info(f"🔗 Знайдено {len(deep_links)} глибоких посилань на конкретні готелі (включаючи Єгипет).")
     
-    # КРОК 2: Глибокий обхід сторінок готелів
     visited_count = 0
-    # На платному тарифі збільшуємо ліміт обходу до 25 сторінок готелів для максимальної вибірки турів!
     max_deep_pages = 25 
     
     logging.info(f"🕵️‍♂️ КРОК 2: Починаємо глибокий аналіз сторінок (максимум {max_deep_pages})...")
@@ -356,7 +351,6 @@ def fetch_tat_ua_data():
     if not all_text.strip():
         return None
         
-    # Збільшуємо фінальний ліміт символів до 60 000 — тепер ШІ отримає абсолютно всі гарячі тури!
     return all_text[:60000]
 
 async def generate_and_send_ai_tour_post():
