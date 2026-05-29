@@ -278,31 +278,27 @@ def generate_discount():
         return 5
 
 # --- ФУНКЦІЇ ЕЛЕКТРОННОГО ПОМІЧНИКА (ПАРСИНГ ТА ШІ) ---
+# --- ФУНКЦІЇ ЕЛЕКТРОННОГО ПОМІЧНИКА (ПАРСИНГ ТА ШІ) ---
 def fetch_tat_ua_data():
     base_url = "https://tat.ua"
     headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"}
     
     try:
-        # КРОК 1: Заходимо на головну сторінку
-        logging.info("🌐 Збираємо посилання на тури з головної сторінки tat.ua...")
+        logging.info("🌐 Збираємо посилання на країни та гарячі тури з tat.ua...")
         response = requests.get(base_url, headers=headers, timeout=15)
         if response.status_code != 200:
             return None
         
         soup = BeautifulSoup(response.text, 'html.parser')
-        
-        # Збираємо стартовий текст із головної сторінки
         all_text = soup.get_text()
         
-        # КРОК 2: Знаходимо всі посилання на сторінці
         links_to_visit = set()
         for link in soup.find_all('a', href=True):
             href = link['href']
             
-            # Нам потрібні посилання, які ведуть на тури або країни
-            # Фільтруємо, щоб не заходити на контакти, відгуки, фейсбук тощо
-            if "/tur/" in href or "/country/" in href or "hot" in href.lower():
-                # Якщо посилання відносне (наприклад, "/tur/turechchina"), робимо його повним
+            # ОПТИМІЗАЦІЯ: Збираємо лише великі сторінки категорій та країн.
+            # Ігноруємо лінки на поодинокі готелі (/hotel/) та карти сайту (/sitemaps/), щоб не засмічувати ліміти ШІ!
+            if ("/tur/" in href or "/country/" in href) and "/hotel/" not in href and "sitemap" not in href.lower():
                 if href.startswith("/"):
                     full_url = base_url + href
                 elif href.startswith("http"):
@@ -310,31 +306,29 @@ def fetch_tat_ua_data():
                 else:
                     continue
                 
-                # Перевіряємо, щоб посилання вело саме на сайт tat.ua
                 if base_url in full_url:
                     links_to_visit.add(full_url)
         
-        logging.info(f"🔗 Знайдено {len(links_to_visit)} унікальних сторінок із турами для обходу.")
+        logging.info(f"🔗 Знайдено {len(links_to_visit)} очищених сторінок категорій для обходу.")
         
-        # КРОК 3: Обходимо знайдені сторінки (обмежуємо до 12 сторінок, щоб не перевантажувати сайт)
         visited_count = 0
-        for url in list(links_to_visit)[:12]:
+        # Обмежуємо обхід до 6 найважливіших сторінок країн, щоб обсяг тексту не перевищував ліміти API Gemini
+        for url in list(links_to_visit)[:6]:
             try:
-                logging.info(f"🕵️‍♂️ Парсимо сторінку туру: {url}")
+                logging.info(f"🕵️‍♂️ Парсимо сторінку категорії: {url}")
                 page_res = requests.get(url, headers=headers, timeout=10)
                 if page_res.status_code == 200:
                     page_soup = BeautifulSoup(page_res.text, 'html.parser')
-                    # Додаємо текст цієї сторінки до загального масиву
                     all_text += f"\n\n--- ДАНІ ЗІ СТОРІНКИ {url} ---\n" + page_soup.get_text()
                     visited_count += 1
             except Exception as page_err:
                 logging.warning(f"Не вдалося завантажити сторінку {url}: {page_err}")
                 continue
         
-        logging.info(f"✅ Обхід завершено. Успішно зібрано дані з {visited_count} сторінок.")
+        logging.info(f"✅ Обхід завершено. Успішно зібрано дані з {visited_count} основних сторінок.")
         
-        # Повертаємо великий обсяг тексту (збільшено ліміт до 35 000 символів, щоб ШІ вистачило даних)
-        return all_text[:35000]
+        # Обрізаємо на рівні 18 000 символів — це ідеальний баланс (і турів багато, і безкоштовний Gemini не падає)
+        return all_text[:18000]
 
     except Exception as e:
         logging.error(f"Помилка глибокого збору даних з сайту tat.ua: {e}")
@@ -342,7 +336,7 @@ def fetch_tat_ua_data():
 
 async def generate_and_send_ai_tour_post():
     if not ai_model or not AUTO_POST_CHAT_ID:
-        logging.info("🤖 Помічник пропущений: немає моделі ШІ або AUTO_POST_CHAT_ID.")
+        logging.info("🤖 Помічник пропущений: немає модели ШІ або AUTO_POST_CHAT_ID.")
         return
 
     raw_site_data = fetch_tat_ua_data()
@@ -356,10 +350,7 @@ async def generate_and_send_ai_tour_post():
     bot_link1 = "https://t.me/NavigatorToursBot?start=welcome"
     bot_link2 = "https://t.me/NavigatorToursBot?start=discount"
 
-    # Файл на сервері для зберігання ID вчорашніх повідомлень
     IDS_FILE = "vchora_posts.txt"
-
-    # Отримуємо поточну дату у форматі ДД.ММ.РРРР
     current_date_str = datetime.now().strftime("%d.%m.%Y")
 
     # Текст заклику до дії (Рекламний блок) — буде під кожним постом
@@ -372,7 +363,7 @@ async def generate_and_send_ai_tour_post():
         f"👉 <a href='{bot_link2}'>Отримати знижку</a>"
     )
 
-    # Блок «Поширити канал» — додасться тільки в самий кінець останнього поста
+    # Блок «Поширити канал» — додасться тільки в самий кінець ОСТАННЬОГО поста
     share_text = (
         f"\n\n➖➖➖➖➖➖➖➖\n"
         f"🗣 <b>Сподобалася добірка?</b>\n"
@@ -398,10 +389,8 @@ async def generate_and_send_ai_tour_post():
         except Exception as file_err:
             logging.error(f"Помилка при роботі з файлом очищення: {file_err}")
 
-    # Список для зберігання нових ID повідомлень
     new_message_ids = []
 
-    # Налаштування категорій
     categories = [
         {"name": "ТУРЕЧЧИНА", "flag": "🇹🇷", "stars": "4★ та 5★", "prompt_part": "Уважно проскануй весь текст джерела від початку до кінця і знайди ВСІ готелі для цієї країни. Твоє завдання — вибрати до 5 НАЙКРАЩИХ РІЗНИХ готелів 4★ та 5★ СУТО в ТУРЕЧЧИНІ. Не зупиняйся на першому знайденому готелі, виводь списком декілька варіантів (максимум 5)!"},
         {"name": "ЄГИПЕТ", "flag": "🇪🇬", "stars": "4★ та 5★", "prompt_part": "Уважно проскануй весь текст джерела від початку до кінця і знайди ВСІ готелі для цієї країни. Твоє завдання — вибрати до 5 НАЙКРАЩИХ РІЗНИХ готелів 4★ та 5★ СУТО в ЄГИПТІ. Не зупиняйся на першому знайденому готелі, виводь списком декілька варіантів (максимум 5)!"},
@@ -413,10 +402,10 @@ async def generate_and_send_ai_tour_post():
     # КРОК 2: ГЕНЕРАЦІЯ ТА ПОСТИНГ ОКРЕМИХ ПОСТІВ
     # ==========================================
     for index, cat in enumerate(categories):
-        # Пауза 35 секунд для 100% захисту від помилки лімітів API 429 Quota Exceeded
+        # Пауза збільшена до 60 секунд для 100% захисту від помилки лімітів RPM/TPM безкоштовного API Gemini
         if index > 0:
-            logging.info(f"⏳ Очікуємо 35 секунд перед запитом ШІ для категорії '{cat['name']}' для стабільності API...")
-            await asyncio.sleep(35)
+            logging.info(f"⏳ Очікуємо 60 секунд перед запитом ШІ для категорії '{cat['name']}' для повного скидання квот API...")
+            await asyncio.sleep(60)
 
         prompt = (
             f"Ти — професійний тревел-копірайтер компанії. На основі наступного текста з туристичними даними склади один цікавий, "
@@ -438,8 +427,8 @@ async def generate_and_send_ai_tour_post():
             f"➕ <b>Плюси:</b> [Коротко вкажи переваги готелю]\n"
             f"➖ <b>Мінуси:</b> [Коротко вкажи нюанси або мінуси готелю]\n\n"
             f"6. КРИТИЧНІ ПРАВИЛА ДЛЯ ОФОРМЛЕННЯ ГОТЕЛІВ:\n"
-            f"   - СУВОРЕ ПРАВИЛО ДЛЯ ДАТИ: Записуй дату виключно у цифровому форматі ДД.ММ.РРРР (наприклад: 01.06.2024 або 06.06.2024). Ніколи не пиши місяць словами (НЕ ПИШИ '6 червня').\n"
-            f"   - СУВОРЕ ПРАВИЛО ДЛЯ НАЗВИ ГОТЕЛЮ: Виводь назву готелю в оригіналі так, як вона вказана в тексті джерела (найчастіше латиницею, наприклад: Hilton Marsa Alam Nubian Resort). Не перекладай назву на українську мову і не роби транслітерацію кирилицею.\n"
+            f"   - СУВОРЕ ПРАВИЛО ДЛЯ ДАТИ: Записуй дату виключно у цифровому форматі ДД.ММ.РРРР (наприклад: 01.06.2024 або 06.06.2024). Ніколи не пиши місяць словами.\n"
+            f"   - СУВОРЕ ПРАВИЛО ДЛЯ НАЗВИ ГОТЕЛЮ: Виводь назву готелю в оригіналі так, як вона вказана в тексті джерела (латиницею). Не перекладай назву на українську мову.\n"
             f"7. ОБМЕЖЕННЯ: Описуй кожен готель ємно. Твій підсумковий текст має бути не більше за 3800 символів. Використовуй тільки HTML-теги <b> та <i>.\n\n"
             f"Текст із даними сайту: {raw_site_data}"
         )
@@ -452,14 +441,12 @@ async def generate_and_send_ai_tour_post():
                 logging.info(f"⏩ Пропущено публікацію категорії '{cat['name']}', бо немає відповідних турів.")
                 continue
 
-            # Додаємо базову рекламу (вона йде під кожну країну)
             full_message = f"{post_text}\n\n{cta_text}"
             
-            # ПЕРЕВІРКА: Якщо це ОСТАННЯ категорія у списку («ІНШІ КРАЇНИ»), додатково склеюємо блок поширення каналу
+            # Додаємо блок «Поширити канал» тільки в самий кінець останнього поста
             if index == len(categories) - 1:
                 full_message += share_text
             
-            # Надсилаємо пост у конкретну тему
             msg = await bot.send_message(
                 chat_id=AUTO_POST_CHAT_ID, 
                 text=full_message, 
@@ -468,7 +455,7 @@ async def generate_and_send_ai_tour_post():
             )
             new_message_ids.append(str(msg.message_id))
             
-            logging.info(f"✅ Пост для категорії '{cat['name']}' успішно опубліковано в топік {NAVIGATOR_DAY_TOPIC_ID}! ID: {msg.message_id}")
+            logging.info(f"✅ Пост для категорії '{cat['name']}' успішно опубліковано! ID: {msg.message_id}")
             
         except Exception as ai_err:
             logging.error(f"❌ Помилка роботи ШІ Gemini для категорії {cat['name']}: {ai_err}")
