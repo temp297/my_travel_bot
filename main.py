@@ -56,7 +56,7 @@ ASSISTANT_MINUTE = int(os.getenv("ASSISTANT_MINUTE", 0))
 
 # Налаштування часу для Юзербота-Граббера
 GRABBER_HOUR = int(os.getenv("GRABBER_HOUR", "22"))
-GRABBER_MINUTE = int(os.getenv("GRABBER_MINUTE", "11"))
+GRABBER_MINUTE = int(os.getenv("GRABBER_MINUTE", "26"))
 
 # Список команд для фільтрації
 BOT_COMMANDS = ["start", "cancel", "discount", "check_discounts", "admin", "users", "use_discount"]
@@ -734,10 +734,14 @@ async def fetch_tat_ua_data(country_slug: str):
     deep_links = set()
     all_text = ""
     
+import aiohttp  # переконайтеся, що імпорт є на початку файлу
+
     try:
-        response = requests.get(url, headers=headers, timeout=15)
-        if response.status_code == 200:
-            soup = BeautifulSoup(response.text, 'html.parser')
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, headers=headers, timeout=15) as response:
+                if response.status == 200:
+                    response_text = await response.text()
+                    soup = BeautifulSoup(response_text, 'html.parser')
             # Зберігаємо базовий текст сторінки пошуку
             all_text += f"\n\n--- Базові дані пошуку країни ({url}) ---\n" + soup.get_text(separator=" ", strip=True)
             
@@ -774,10 +778,23 @@ async def fetch_tat_ua_data(country_slug: str):
             logging.info(f"🔎 [{idx+1}/{total_links}] Аналізуємо конкретний готель: {deep_url}")
             await asyncio.sleep(0.3)
             
-            page_res = requests.get(deep_url, headers=headers, timeout=10)
-            if page_res.status_code == 200:
-                page_soup = BeautifulSoup(page_res.text, 'html.parser')
-                hotel_text = page_soup.get_text(separator=" ", strip=True)
+try:
+        async with aiohttp.ClientSession() as session:
+            for idx, deep_url in enumerate(deep_links):
+                try:
+                    logging.info(f"🔎 [{idx+1}/{total_links}] Аналізуємо конкретний готель: {deep_url}")
+                    await asyncio.sleep(0.3)
+                    
+                    async with session.get(deep_url, headers=headers, timeout=10) as page_res:
+                        if page_res.status == 200:
+                            page_text = await page_res.text()
+                            page_soup = BeautifulSoup(page_text, 'html.parser')
+                            hotel_text = page_soup.get_text(separator=" ", strip=True)
+                            all_text += f"\n\n--- ДЕТАЛЬНИЙ ОПИС ТУРУ/ГОТЕЛЮ №{idx+1} {deep_url} ---\n" + hotel_text
+                            visited_count += 1
+                except Exception as deep_err:
+                    logging.warning(f"Пропущено сторінку готелю {deep_url}: {deep_err}")
+                    continue
                 all_text += f"\n\n--- ДЕТАЛЬНИЙ ОПИС ТУРУ/ГОТЕЛЮ №{idx+1} {deep_url} ---\n" + hotel_text
                 visited_count += 1
                 
@@ -1135,17 +1152,14 @@ async def run_userbot_grabber_module():
     """Ініціалізація та планувальник першої частини (юзербота)"""
     logging.info("🚀 [ОКРЕМІЙ МОДУЛЬ 1] Модуль юзербота успішно інтегровано.")
     
-    # Використовуємо змінні оточення Render, якщо вони є, інакше за замовчуванням 09:00 ранку
-    h = int(os.getenv("GRABBER_HOUR", 9))
-    m = int(os.getenv("GRABBER_MINUTE", 0))
-    
+    # Змінні GRABBER_HOUR та GRABBER_MINUTE беруться з глобальних налаштувань бота
     scheduler.add_job(
         process_and_send_all_new_donor_posts, 
         'cron', 
-        hour=h, 
-        minute=m
+        hour=GRABBER_HOUR, 
+        minute=GRABBER_MINUTE
     )
-    logging.info(f"📅 Задачу граббера зареєстровано на {h:02d}:{m:02d} за Києвом.")
+    logging.info(f"📅 Задачу граббера зареєстровано на {GRABBER_HOUR:02d}:{GRABBER_MINUTE:02d} за Києвом.")
 
 async def on_shutdown(app: web.Application):
     global pool
