@@ -734,8 +734,6 @@ async def fetch_tat_ua_data(country_slug: str):
     deep_links = set()
     all_text = ""
     
-import aiohttp  # переконайтеся, що імпорт є на початку файлу
-
     try:
         async with aiohttp.ClientSession() as session:
             async with session.get(url, headers=headers, timeout=15) as response:
@@ -773,11 +771,6 @@ import aiohttp  # переконайтеся, що імпорт є на поча
     visited_count = 0
     logging.info(f"🕵️‍♂️ КРОК 2: Починаємо повний глибокий аналіз УСІХ сторінок готелів ({total_links} шт.)...")
     
-    for idx, deep_url in enumerate(deep_links):
-        try:
-            logging.info(f"🔎 [{idx+1}/{total_links}] Аналізуємо конкретний готель: {deep_url}")
-            await asyncio.sleep(0.3)
-            
 try:
         async with aiohttp.ClientSession() as session:
             for idx, deep_url in enumerate(deep_links):
@@ -795,12 +788,8 @@ try:
                 except Exception as deep_err:
                     logging.warning(f"Пропущено сторінку готелю {deep_url}: {deep_err}")
                     continue
-                all_text += f"\n\n--- ДЕТАЛЬНИЙ ОПИС ТУРУ/ГОТЕЛЮ №{idx+1} {deep_url} ---\n" + hotel_text
-                visited_count += 1
-                
-        except Exception as deep_err:
-            logging.warning(f"Пропущено сторінку готелю {deep_url}: {deep_err}")
-            continue
+    except Exception as session_err:
+        logging.error(f"Помилка асинхронної сесії парсера: {session_err}")
             
     logging.info(f"✅ Глибокий аналіз завершено. Успішно опрацьовано {visited_count} сторінок готелів.")
     
@@ -1221,6 +1210,7 @@ async def main():
     app.router.add_get("/", lambda request: web.Response(text="Bot is running!"))
     runner = web.AppRunner(app)
     await runner.setup()
+    app.on_shutdown.append(runner.cleanup)  # Додано автоматичне очищення ранера
     
     port = int(os.environ.get("PORT", 8000))
     site = web.TCPSite(runner, '0.0.0.0', port)
