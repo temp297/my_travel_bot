@@ -55,7 +55,7 @@ ASSISTANT_HOUR = int(os.getenv("ASSISTANT_HOUR", 9))
 ASSISTANT_MINUTE = int(os.getenv("ASSISTANT_MINUTE", 0))
 
 # Налаштування часу для Юзербота-Граббера
-GRABBER_HOUR = int(os.getenv("GRABBER_HOUR", "9"))
+GRABBER_HOUR = int(os.getenv("GRABBER_HOUR", "22"))
 GRABBER_MINUTE = int(os.getenv("GRABBER_MINUTE", "0"))
 
 # Список команд для фільтрації
