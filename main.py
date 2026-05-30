@@ -1,6 +1,16 @@
+import asyncio
+
+# =====================================================================
+# КРИТИЧНИЙ ФІКС ДЛЯ PYTHON 3.14 (МАЄ БУТИ НАЙПЕРШИМ У ФАЙЛІ)
+# =====================================================================
+try:
+    _loop = asyncio.get_running_loop()
+except RuntimeError:
+    _loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(_loop)
+
 import os
 import logging
-import asyncio
 import random
 from datetime import datetime, timedelta, timezone
 
@@ -30,13 +40,7 @@ except ImportError:
     class SimpleCalendarCallback:
         filter = lambda: None
 
-# Імпорти Pyrogram та APScheduler
-try:
-    _loop = asyncio.get_running_loop()
-except RuntimeError:
-    _loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(_loop)
-
+# Спокійно імпортуємо Pyrogram та APScheduler після того, як event loop вже створено
 from pyrogram import Client
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
