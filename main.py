@@ -56,7 +56,7 @@ ASSISTANT_MINUTE = int(os.getenv("ASSISTANT_MINUTE", 0))
 
 # Налаштування часу для Юзербота-Граббера
 GRABBER_HOUR = int(os.getenv("GRABBER_HOUR", "22"))
-GRABBER_MINUTE = int(os.getenv("GRABBER_MINUTE", "6"))
+GRABBER_MINUTE = int(os.getenv("GRABBER_MINUTE", "11"))
 
 # Список команд для фільтрації
 BOT_COMMANDS = ["start", "cancel", "discount", "check_discounts", "admin", "users", "use_discount"]
@@ -1131,6 +1131,22 @@ async def process_and_send_all_new_donor_posts():
 # =====================================================================
 # ШАТДАУН ТА ГОЛОВНИЙ ЗАПУСК СИСТЕМИ (MAIN)
 # =====================================================================
+async def run_userbot_grabber_module():
+    """Ініціалізація та планувальник першої частини (юзербота)"""
+    logging.info("🚀 [ОКРЕМІЙ МОДУЛЬ 1] Модуль юзербота успішно інтегровано.")
+    
+    # Використовуємо змінні оточення Render, якщо вони є, інакше за замовчуванням 09:00 ранку
+    h = int(os.getenv("GRABBER_HOUR", 9))
+    m = int(os.getenv("GRABBER_MINUTE", 0))
+    
+    scheduler.add_job(
+        process_and_send_all_new_donor_posts, 
+        'cron', 
+        hour=h, 
+        minute=m
+    )
+    logging.info(f"📅 Задачу граббера зареєстровано на {h:02d}:{m:02d} за Києвом.")
+
 async def on_shutdown(app: web.Application):
     global pool
     if pool:
@@ -1175,22 +1191,18 @@ async def main():
     await bot.set_my_commands(user_commands, scope=types.BotCommandScopeDefault())
     await bot.set_my_commands(admin_commands, scope=types.BotCommandScopeChat(chat_id=ADMIN_ID))
  
-    # 1. Задача відгуків
+    # 1. Задача автоматичних запитів відгуків від клієнтів
     scheduler.add_job(check_returns, 'cron', hour=FEEDBACK_HOUR, minute=FEEDBACK_MINUTE)
     
-    # 2. Помічник (Парсинг tat.ua + ШІ) — запускається на основі ASSISTANT_HOUR
+    # 2. Модуль Електронного помічника (Парсинг сайту tat.ua + ШІ Gemini)
     scheduler.add_job(generate_and_send_ai_tour_post, 'cron', hour=ASSISTANT_HOUR, minute=ASSISTANT_MINUTE)
+    logging.info("🤖 [ОКРЕМІЙ МОДУЛЬ 2] Модуль парсингу сайту та ШІ успішно інтегровано.")
     
-    # 3. Юзербот-Граббер (Збір постів з ТГ-донора) — запускається на основі GRABBER_HOUR
-    scheduler.add_job(
-        process_and_send_all_new_donor_posts, 
-        trigger="cron", 
-        hour=GRABBER_HOUR, 
-        minute=GRABBER_MINUTE
-    )
+    # 3. Виклик вашої функції-обгортки для інтеграції Юзербота-Граббера
+    await run_userbot_grabber_module()
     
     scheduler.start()
-    logging.info("⏰ Планувальник успішно налаштований. Усі задачі розписані.")
+    logging.info("⏰ Планувальник успішно налаштований. Усі задачі розписані в системі.")
     
     app.router.add_get("/", lambda request: web.Response(text="Bot is running!"))
     runner = web.AppRunner(app)
@@ -1199,7 +1211,7 @@ async def main():
     port = int(os.environ.get("PORT", 8000))
     site = web.TCPSite(runner, '0.0.0.0', port)
     await site.start()
-    logging.info(f"🚀 Веб-сервер запущено на порту {port}")
+    logging.info(f"🚀 Веб-сервер залучено на порту {port}")
 
     await asyncio.Event().wait()
 
