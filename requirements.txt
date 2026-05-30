@@ -8,3 +8,6 @@ python-dotenv
 beautifulsoup4
 google-generativeai>=0.8.0
 pydantic-settings
+pyrogram
+tgcrypto
+requests
