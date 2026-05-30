@@ -31,6 +31,12 @@ except ImportError:
         filter = lambda: None
 
 # Імпорти Pyrogram та APScheduler
+try:
+    _loop = asyncio.get_running_loop()
+except RuntimeError:
+    _loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(_loop)
+
 from pyrogram import Client
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
