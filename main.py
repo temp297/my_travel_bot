@@ -56,7 +56,7 @@ ASSISTANT_MINUTE = int(os.getenv("ASSISTANT_MINUTE", 0))
 
 # Налаштування часу для Юзербота-Граббера
 GRABBER_HOUR = int(os.getenv("GRABBER_HOUR", "22"))
-GRABBER_MINUTE = int(os.getenv("GRABBER_MINUTE", "2"))
+GRABBER_MINUTE = int(os.getenv("GRABBER_MINUTE", "6"))
 
 # Список команд для фільтрації
 BOT_COMMANDS = ["start", "cancel", "discount", "check_discounts", "admin", "users", "use_discount"]
