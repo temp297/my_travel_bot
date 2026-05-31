@@ -36,8 +36,8 @@ try:
     REVIEWS_CHAT_ID = int(os.getenv("REVIEWS_CHAT_ID"))
     FEEDBACK_HOUR = int(os.getenv("FEEDBACK_HOUR", "11"))
     FEEDBACK_MINUTE = int(os.getenv("FEEDBACK_MINUTE", "0"))
-    ASSISTANT_HOUR = int(os.getenv("ASSISTANT_HOUR", "12"))
-    ASSISTANT_MINUTE = int(os.getenv("ASSISTANT_MINUTE", "20"))
+    ASSISTANT_HOUR = int(os.getenv("ASSISTANT_HOUR", "21"))
+    ASSISTANT_MINUTE = int(os.getenv("ASSISTANT_MINUTE", "0"))
 except ValueError:
     raise ValueError("ADMIN_ID, REVIEWS_CHAT_ID, FEEDBACK_HOUR та FEEDBACK_MINUTE мають бути цілими числами!")
 
@@ -292,11 +292,17 @@ async def fetch_tat_ua_data(country_slug: str):
             page = await context.new_page()
             
             logging.info(f"🔎 Переходимо на сторінку пошуку...")
-            # Змінено wait_until на domcontentloaded (швидке завантаження без очікування аналітики)
-            await page.goto(url, wait_until="domcontentloaded", timeout=30000)
+            # wait_until="commit" спрацьовує миттєво при першій відповіді сервера
+            await page.goto(url, wait_until="commit", timeout=45000)
             
-            logging.info(f"⏳ Очікуємо 4 секунди для промальовування актуальних цін...")
-            await page.wait_for_timeout(4000)
+            logging.info(f"⏳ Очікуємо первинне завантаження сторінки...")
+            await page.wait_for_timeout(5000)
+            
+            # Емулюємо плавне гортання сторінки вниз, щоб підвантажити ВСІ готелі та ціни
+            logging.info(f"📜 Прокручуємо сторінку вниз для активації lazy-load цін...")
+            for _ in range(3):
+                await page.evaluate("window.scrollBy(0, 800);")
+                await page.wait_for_timeout(1500)
             
             html_content = await page.content()
             soup = BeautifulSoup(html_content, 'html.parser')
