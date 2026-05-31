@@ -431,8 +431,8 @@ async def generate_and_send_ai_tour_post():
 
     for index, cat in enumerate(categories):
         if index > 0:
-            logging.info(f"⏳ Очікуємо 60 секунд перед аналізом наступної країни '{cat['name']}'...")
-            await asyncio.sleep(60)
+            logging.info(f"⏳ Очікуємо 10 секунд перед аналізом наступної країни '{cat['name']}'...")
+            await asyncio.sleep(10)
 
         raw_country_data = await fetch_tat_ua_data(cat["slug"])
         
