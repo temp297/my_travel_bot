@@ -18,6 +18,7 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.utils.keyboard import InlineKeyboardBuilder, ReplyKeyboardBuilder
 from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
 from aiogram_calendar import SimpleCalendar, SimpleCalendarCallback
+from playwright.async_api import async_playwright
 import google.generativeai as genai
 
 # Список команд для фільтрації
@@ -275,71 +276,124 @@ def generate_discount():
 
 # --- ФУНКЦІЇ ЕЛЕКТРОННОГО ПОМІЧНИКА (ПАРСИНГ ТА ШІ) ---
 
+from playwright.async_api import async_playwright
+
 async def fetch_tat_ua_data(country_slug: str):
     base_url = "https://tat.ua"
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-    }
+    url = f"{base_url}/search/{country_slug}/"
+    logging.info(f"🌐 [ПАРСЕР] Запуск реального браузера для країни: {url}")
     
-    url = f"https://tat.ua/search/{country_slug}/"
-    logging.info(f"🌐 КРОК 1: Скануємо посилання на готелі для країни: {url}")
-    
-    deep_links = set()
     all_text = ""
     
     try:
-        response = requests.get(url, headers=headers, timeout=15)
-        if response.status_code == 200:
-            soup = BeautifulSoup(response.text, 'html.parser')
-            all_text += f"\n\n--- Базові дані пошуку країни ({url}) ---\n" + soup.get_text(separator=" ", strip=True)
+        # Запускаємо Playwright у фоновому режимі (headless=True)
+        async with async_playwright() as p:
+            browser = await p.chromium.launch(headless=True)
+            # Емулюємо реальний браузер, щоб сайт не блокував запити
+            context = await browser.new_context(
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                viewport={"width": 1920, "height": 1080}
+            )
+            page = await context.new_page()
             
+            # Переходимо на сайт та чекаємо повного завантаження мережі
+            logging.info(f"🔎 Переходимо на сторінку пошуку...")
+            await page.goto(url, wait_until="networkidle", timeout=30000)
+            
+            # Додатково чекаємо 4 секунди, щоб відпрацювали всі JS-скрипти, які підтягують ціни
+            await page.wait_for_timeout(4000)
+            
+            # Отримуємо фінальний HTML, де вже точно є актуальні ціни
+            html_content = await page.content()
+            
+            soup = BeautifulSoup(html_content, 'html.parser')
+            
+            # Очищаємо код від непотрібних скриптів та стилів, щоб не перевантажувати контекст ШІ
+            for script in soup(["script", "style", "header", "footer", "nav"]):
+                script.decompose()
+                
+            main_text = soup.get_text(separator=" ", strip=True)
+            all_text += f"\n\n--- АКТУАЛЬНІ ДАНІ ПОШУКУ КРАЇНИ ({url}) ---\n" + main_text
+            
+            # Збір глибоких посилань для ШІ (щоб він знав, звідки інфа)
+            deep_links = set()
             for link in soup.find_all('a', href=True):
                 href = link['href']
                 href_lower = href.lower()
-                
                 if any(keyword in href_lower for keyword in ["/tur/", "/hotel/", "/hotel-"]) and "sitemap" not in href_lower:
-                    if href.startswith("/"):
-                        full_url = base_url + href
-                    elif href.startswith("http"):
-                        full_url = href
-                    else:
-                        continue
-                    
+                    full_url = href if href.startswith("http") else base_url + href
                     if base_url in full_url:
                         deep_links.add(full_url)
-                        
+            
+            logging.info(f"🔗 Знайдено {len(deep_links)} посилань на готелі з актуальними цінами.")
+            
+            await browser.close()
+            
     except Exception as e:
-        logging.error(f"❌ Помилка сканування сторінки країни {url}: {e}")
+        logging.error(f"❌ Помилка динамічного сканування сторінки країни {url}: {e}")
         return None
 
-    total_links = len(deep_links)
-    logging.info(f"🔗 Знайдено {total_links} глибоких посилань на конкретні готелі для напрямку '{country_slug}'.")
-    
-    if total_links == 0:
+    if not all_text.strip() or len(all_text) < 200:
         return None
         
-    visited_count = 0
-    logging.info(f"🕵️‍♂️ КРОК 2: Починаємо повний глибокий аналіз УСІХ сторінок готелів ({total_links} шт.)...")
+    return all_textfrom playwright.async_api import async_playwright
+
+async def fetch_tat_ua_data(country_slug: str):
+    base_url = "https://tat.ua"
+    url = f"{base_url}/search/{country_slug}/"
+    logging.info(f"🌐 [ПАРСЕР] Запуск реального браузера для країни: {url}")
     
-    for idx, deep_url in enumerate(deep_links):
-        try:
-            logging.info(f"🔎 [{idx+1}/{total_links}] Аналізуємо конкретний готель: {deep_url}")
-            await asyncio.sleep(0.3)
+    all_text = ""
+    
+    try:
+        # Запускаємо Playwright у фоновому режимі (headless=True)
+        async with async_playwright() as p:
+            browser = await p.chromium.launch(headless=True)
+            # Емулюємо реальний браузер, щоб сайт не блокував запити
+            context = await browser.new_context(
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                viewport={"width": 1920, "height": 1080}
+            )
+            page = await context.new_page()
             
-            page_res = requests.get(deep_url, headers=headers, timeout=10)
-            if page_res.status_code == 200:
-                page_soup = BeautifulSoup(page_res.text, 'html.parser')
-                hotel_text = page_soup.get_text(separator=" ", strip=True)
-                all_text += f"\n\n--- ДЕТАЛЬНИЙ ОПИС ТУРУ/ГОТЕЛЮ №{idx+1} {deep_url} ---\n" + hotel_text
-                visited_count += 1
+            # Переходимо на сайт та чекаємо повного завантаження мережі
+            logging.info(f"🔎 Переходимо на сторінку пошуку...")
+            await page.goto(url, wait_until="networkidle", timeout=30000)
+            
+            # Додатково чекаємо 4 секунди, щоб відпрацювали всі JS-скрипти, які підтягують ціни
+            await page.wait_for_timeout(4000)
+            
+            # Отримуємо фінальний HTML, де вже точно є актуальні ціни
+            html_content = await page.content()
+            
+            soup = BeautifulSoup(html_content, 'html.parser')
+            
+            # Очищаємо код від непотрібних скриптів та стилів, щоб не перевантажувати контекст ШІ
+            for script in soup(["script", "style", "header", "footer", "nav"]):
+                script.decompose()
                 
-        except Exception as deep_err:
-            logging.warning(f"Пропущено сторінку готелю {deep_url}: {deep_err}")
-            continue
+            main_text = soup.get_text(separator=" ", strip=True)
+            all_text += f"\n\n--- АКТУАЛЬНІ ДАНІ ПОШУКУ КРАЇНИ ({url}) ---\n" + main_text
             
-    logging.info(f"✅ Глибокий аналіз завершено. Успішно опрацьовано {visited_count} сторінок готелів.")
-    
-    if not all_text.strip():
+            # Збір глибоких посилань для ШІ (щоб він знав, звідки інфа)
+            deep_links = set()
+            for link in soup.find_all('a', href=True):
+                href = link['href']
+                href_lower = href.lower()
+                if any(keyword in href_lower for keyword in ["/tur/", "/hotel/", "/hotel-"]) and "sitemap" not in href_lower:
+                    full_url = href if href.startswith("http") else base_url + href
+                    if base_url in full_url:
+                        deep_links.add(full_url)
+            
+            logging.info(f"🔗 Знайдено {len(deep_links)} посилань на готелі з актуальними цінами.")
+            
+            await browser.close()
+            
+    except Exception as e:
+        logging.error(f"❌ Помилка динамічного сканування сторінки країни {url}: {e}")
+        return None
+
+    if not all_text.strip() or len(all_text) < 200:
         return None
         
     return all_text
