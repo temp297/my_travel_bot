@@ -283,46 +283,29 @@ async def fetch_tat_ua_data(country_slug: str):
     all_text = ""
     
     try:
-        # Запускаємо Playwright у фоновому режимі (headless=True)
         async with async_playwright() as p:
             browser = await p.chromium.launch(headless=True)
-            # Емулюємо реальний браузер, щоб сайт не блокував запити
             context = await browser.new_context(
                 user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
                 viewport={"width": 1920, "height": 1080}
             )
             page = await context.new_page()
             
-            # Переходимо на сайт та чекаємо повного завантаження мережі
             logging.info(f"🔎 Переходимо на сторінку пошуку...")
-            await page.goto(url, wait_until="networkidle", timeout=30000)
+            # Змінено wait_until на domcontentloaded (швидке завантаження без очікування аналітики)
+            await page.goto(url, wait_until="domcontentloaded", timeout=30000)
             
-            # Додатково чекаємо 4 секунди, щоб відпрацювали всі JS-скрипти, які підтягують ціни
+            logging.info(f"⏳ Очікуємо 4 секунди для промальовування актуальних цін...")
             await page.wait_for_timeout(4000)
             
-            # Отримуємо фінальний HTML, де вже точно є актуальні ціни
             html_content = await page.content()
-            
             soup = BeautifulSoup(html_content, 'html.parser')
             
-            # Очищаємо код від непотрібних скриптів та стилів, щоб не перевантажувати контекст ШІ
             for script in soup(["script", "style", "header", "footer", "nav"]):
                 script.decompose()
                 
             main_text = soup.get_text(separator=" ", strip=True)
             all_text += f"\n\n--- АКТУАЛЬНІ ДАНІ ПОШУКУ КРАЇНИ ({url}) ---\n" + main_text
-            
-            # Збір глибоких посилань для ШІ (щоб він знав, звідки інфа)
-            deep_links = set()
-            for link in soup.find_all('a', href=True):
-                href = link['href']
-                href_lower = href.lower()
-                if any(keyword in href_lower for keyword in ["/tur/", "/hotel/", "/hotel-"]) and "sitemap" not in href_lower:
-                    full_url = href if href.startswith("http") else base_url + href
-                    if base_url in full_url:
-                        deep_links.add(full_url)
-            
-            logging.info(f"🔗 Знайдено {len(deep_links)} посилань на готелі з актуальними цінами.")
             
             await browser.close()
             
