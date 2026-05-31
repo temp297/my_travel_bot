@@ -350,7 +350,7 @@ async def generate_and_send_ai_tour_post():
         logging.info("🤖 Помічник пропущений: немає моделі ШІ або AUTO_POST_CHAT_ID.")
         return
 
-    NAVIGATOR_DAY_TOPIC_ID = None 
+    NAVIGATOR_DAY_TOPIC_ID = int(os.getenv("NAVIGATOR_DAY_TOPIC_ID"))
     bot_link1 = "https://t.me/NavigatorToursBot?start=welcome"
     bot_link2 = "https://t.me/NavigatorToursBot?start=discount"
     current_date_str = datetime.now().strftime("%d.%m.%Y")
