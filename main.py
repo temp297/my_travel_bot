@@ -21,11 +21,6 @@ from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_applicati
 from aiogram_calendar import SimpleCalendar, SimpleCalendarCallback
 import google.generativeai as genai
 
-# --- ДОДАТКОВІ ІМПОРТИ ДЛЯ ЕЛЕКТРОННОГО ПОМІЧНИКА ---
-import requests
-from bs4 import BeautifulSoup
-import google.generativeai as genai
-
 # Список команд для фільтрації
 BOT_COMMANDS = ["start", "cancel", "admin", "discount", "check_discounts", "use_discount", "users"]
 
@@ -42,7 +37,7 @@ try:
     REVIEWS_CHAT_ID = int(os.getenv("REVIEWS_CHAT_ID"))
     FEEDBACK_HOUR = int(os.getenv("FEEDBACK_HOUR", "11"))
     FEEDBACK_MINUTE = int(os.getenv("FEEDBACK_MINUTE", "0"))
-    ASSISTANT_HOUR = int(os.getenv("ASSISTANT_HOUR", "10"))
+    ASSISTANT_HOUR = int(os.getenv("ASSISTANT_HOUR", "20"))
     ASSISTANT_MINUTE = int(os.getenv("ASSISTANT_MINUTE", "0"))
 except ValueError:
     raise ValueError("ADMIN_ID, REVIEWS_CHAT_ID, FEEDBACK_HOUR та FEEDBACK_MINUTE мають бути цілими числами!")
@@ -110,7 +105,6 @@ async def show_admin_base(message: types.Message, state: FSMContext):
     """Надсилає актуальний список туристів зі статусами відгуків"""
     global pool
     async with pool.acquire() as conn:
-        # Отримуємо користувачів, їхні знижки та статус останнього відгуку
         rows = await conn.fetch("""
             SELECT 
                 u.user_id, u.username, u.full_name, 
@@ -135,7 +129,6 @@ async def show_admin_base(message: types.Message, state: FSMContext):
             name = row['full_name'] or "Ім'я не вказано"
             discount = f" | 🎁 {row['discount_value']}%" if row['discount_value'] else ""
             
-            # Логіка статусів відгуку
             feedback_status = ""
             if row['return_date']:
                 if row['sent'] == 1:
@@ -145,7 +138,6 @@ async def show_admin_base(message: types.Message, state: FSMContext):
 
             text += f"👤 <b>{name}</b> — {username} (<code>{row['user_id']}</code>){discount}{feedback_status}\n"
     
-    # Додаємо розділювач в кінці для візуальної чистоти
     text += "━━━━━━━━━━━━━━━"
     
     new_msg = await bot.send_message(chat_id=message.chat.id, text=text, parse_mode="HTML")
@@ -160,10 +152,10 @@ pool = None
 async def init_db():
     global pool
     pool = await asyncpg.create_pool(
-    DATABASE_URL,
-    min_size=1,
-    max_size=2
-)
+        DATABASE_URL,
+        min_size=1,
+        max_size=2
+    )
     async with pool.acquire() as conn:
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS discounts (
@@ -214,7 +206,6 @@ async def check_returns():
     logging.info(f"🔎 [SCHEDULER] Перевірка бази на дату: {today}")
     
     async with pool.acquire() as conn:
-        # Вибираємо лише user_id, оскільки стовпця id немає
         rows = await conn.fetch(
             "SELECT user_id FROM feedbacks WHERE return_date = $1 AND sent = 0", 
             today
@@ -229,7 +220,6 @@ async def check_returns():
                     "✈️ З поверненням! Сподіваємося, Ваш відпочинок був чудовим.\n\nБудь ласка, оцініть нашу роботу:",
                     reply_markup=rating_kb()
                 )
-                # Оновлюємо статус за user_id
                 await conn.execute(
                     "UPDATE feedbacks SET sent = 1 WHERE user_id = $1 AND return_date = $2", 
                     row['user_id'], today
@@ -298,13 +288,11 @@ async def fetch_tat_ua_data(country_slug: str):
             page = await context.new_page()
             
             logging.info(f"🔎 Переходимо на сторінку пошуку...")
-            # wait_until="commit" спрацьовує миттєво при першій відповіді сервера
             await page.goto(url, wait_until="commit", timeout=45000)
             
             logging.info(f"⏳ Очікуємо первинне завантаження сторінки...")
             await page.wait_for_timeout(5000)
             
-            # Емулюємо плавне гортання сторінки вниз, щоб підвантажити ВСІ готелі та ціни
             logging.info(f"📜 Прокручуємо сторінку вниз для активації lazy-load цін...")
             for _ in range(3):
                 await page.evaluate("window.scrollBy(0, 800);")
@@ -335,17 +323,19 @@ async def generate_and_send_ai_tour_post():
         logging.info("🤖 Помічник пропущений: немає моделі ШІ або AUTO_POST_CHAT_ID.")
         return
 
-    # --- БЕЗПЕЧНА ПЕРЕВІРКА ТА ПЕРЕНАПРАВЛЕННЯ ---
+    # --- БЕЗПЕЧНА ПЕРЕВІРКА ТА ПЕРЕНАПРАВЛЕННЯ (ВИПРАВЛЕННЯ NAMEERROR І VALUEERROR) ---
     raw_topic_id = os.getenv("NAVIGATOR_DAY_TOPIC_ID")
-    if raw_topic_id and raw_topic_id.strip() != "None":
+    target_topic_id = None  # Створюємо чітку локальну змінну, що існуватиме завжди
+    
+    if raw_topic_id and raw_topic_id.strip() != "None" and raw_topic_id.strip() != "":
         try:
-            NAVIGATOR_DAY_TOPIC_ID = int(raw_topic_id)
+            target_topic_id = int(raw_topic_id)
             CURRENT_CHAT_ID = AUTO_POST_CHAT_ID
         except ValueError:
-            NAVIGATOR_DAY_TOPIC_ID = None
+            target_topic_id = None
             CURRENT_CHAT_ID = ADMIN_ID
     else:
-        NAVIGATOR_DAY_TOPIC_ID = None
+        target_topic_id = None
         CURRENT_CHAT_ID = ADMIN_ID
 
     bot_link1 = "https://t.me/NavigatorToursBot?start=welcome"
@@ -355,7 +345,7 @@ async def generate_and_send_ai_tour_post():
     cta_text = (
         f"⚠️ <b>Зверніть увагу: всі ціни вказані за тур та є актуальними на сьогодні!</b>\n\n"
         f"✈️ Бажаєте забронювати або підібрати інший варіант?\n"
-        f"Наш електронний помічник допоможе вам швидко сформувати запит, а професійний менеджер особисто опрацює ваші побажання.\n"
+        f"Наш електронний помічник поможет вам швидко сформувати запит, а професійний менеджер особисто опрацює ваші побажання.\n"
         f"👉 <a href='{bot_link1}'>Залишити запит менеджеру</a>\n\n"
         f"🎁 <b>Приємний бонус:</b> кожен наш клієнт може отримати персональну знижку за програмою лояльності!\n"
         f"👉 <a href='{bot_link2}'>Отримати знижку</a>"
@@ -456,13 +446,14 @@ async def generate_and_send_ai_tour_post():
             f"3. БЕЗ ТРАНСФЕРУ: Варіанти 'Власний транспорт / Без трансферу' дозволено брати лише в крайньому разі, якщо немає ні авіа, ні автобусів.\n\n"
             
             f"⚠️ КРИТИЧНО ВАЖЛИВЕ ПРАВИЛО ДЛЯ НАЙНИЖЧОЇ ЦІНИ ТА СИНХРОНІЗАЦІЇ:\n"
-            f"- Коли алгоритм відібрав готелі за пріоритетом трансферу (наприклад, авіа), вибирай среди них варіанти за ЯКІСТЮ та НАЙВИГІДНІШОЮ ціною для конкретної кількості ночей. \n"
+            f"- Коли алгоритм відібрав готелі за пріоритетом трансферу (наприклад, авіа), вибирай серед них варіанти за ЯКІСТЮ та НАЙВИГІДНІШОЮ ціною для конкретної кількості ночей. \n"
             f"- НІКОЛИ не зліплюй ціну від дешевого автобусного туру з описом авіатуру! Ціна, тип харчування, трансфер та кількість ночей у шаблоні мають бути СУВОРО СИНХРОНІЗОВАНІ між собою для обраного варіанту.\n"
             f"- Якщо для одного готелю є кілька цін (за 4, 5 чи 7 ночей), виводь ту, яка є найпривабливішою, чітко вказавши відповідну їй кількість ночей.\n"
             f"- Уникай 'оверпрайсу': не вибирай готелі з космічними цінами (наприклад, за 250-500 тис. грн), якщо в тексті є чудові варіанти за 60-100 тис. грн. Шукай 'золоту середину' ціни та сервісу.\n\n"
             
-            f"⚠️ СУВОРЕ ПРАВИЛО ДЛЯ АНАЛІЗУ ДАТ (БРАТИ СУГУБО З ТЕКСТУ ТУРУ):\n"
-            f"1. Ти зобов'язаний знайти в тексті конкретного туру дату вильоту/виїзду (день, місяць та рік), яка прописана поруч із обраною тобою ціною. Заборонено вигадувати день, місяць та рік самостійно.\n\n"
+            f"⚠️ СУВОРЕ ПРАВИЛО ДЛЯ АНАЛІЗУ ДАТ ТА АКТУАЛІЗАЦІЇ РОКУ (КРИТИЧНО ВАЖЛИВО ДЛЯ ПОТОЧНОГО 2026 РОКУ):\n"
+            f"1. Ти зобов'язаний знайти в тексті конкретного туру дату вильоту/виїзду (день і місяць), яка прописана поруч із обраною тобою ціною. Заборонено вигадувати день і місяць самостійно.\n"
+            f"2. ПРАВИЛО СИНХРОНІЗАЦІЇ РОКУ: Оскільки текстові блоки на сайті можуть містити застарілі архівні роки (наприклад, 2024), ти ЗОБОВ'ЯЗАНИЙ автоматично підставити поточний 2026 рік. Якщо ти знайшов дату 24.06.2024 або просто 24.06, ти повинен записати її виключно як 24.06.2026! Дати турів мають на 100% збігатися з 2026 роком у заголовку поста!\n\n"
             
             f"Суворо дотримуйся наступних правил конструювання тексту:\n"
             f"1. НІКОЛИ не згадуй назву сторонніх сайтів чи парсерів.\n"     
@@ -476,14 +467,14 @@ async def generate_and_send_ai_tour_post():
             f"🏨 <b>[Назва готелю латиницею в оригіналі] [Зірковість, наприклад: 4* або 5*]</b>\n"
             f"🚌 <b>Трансфер та виїзд:</b> [Вкажи тип і місто на основі обраного туру. Приклади: '✈️ Авіа з Варшави', '✈️ Авіа з Кишинева', '🚌 Автобус із Києва', '🚗 Власний транспорт / Без трансферу']\n"
             f"🍽 <b>Харчування:</b> [Вкажи тип харчування, що відповідає обраній ціні, наприклад: 'Все включено (AI)' або 'Без харчування (RO)']\n"
-            f"📅 <b>Виліт/Дата:</b> [Вкажи реальну дату цього туру з тексту у форматі ДД.ММ.РРРР], [Вкажи кількість ночей саме для цієї ціни]\n"
+            f"📅 <b>Виліт/Дата:</b> [Вкажи реальну дату цього туру з тексту у форматі ДД.ММ.2026 - рік обов'язково має бути 2026!], [Вкажи кількість ночей саме для цієї ціни]\n"
             f"💰 <b>Ціна:</b> [Вкажи саме вартість для обраного типу трансферу] грн. за 2-х дорослих\n"
             f"<i>[Тут напиши короткий художній опис саме цього готелю]</i>\n"
             f"➕ <b>Плюси:</b> [Коротко вкажи реальні матеріальні переваги самого готелю: інфраструктура, перша лінія, басейни, спа, свіжий ремонт, зелена територія, аквапарк тощо]\n"
             f"➖ <b>Мінуси:</b> [Коротко вкажи нюанси або мінуси самого готелю: старий номерний фонд, платні парасольки тощо.]\n\n"
             
             f"5. ДОДАТКОВІ ОБМЕЖЕННЯ ДЛЯ ОФОРМЛЕННЯ ГОТЕЛІВ:\n"
-            f"- СУВОРЕ ПРАВИЛО ДЛЯ ДАТИ: Записуй дату виключно у цифровому форматі ДД.ММ.РРРР. Ніколи не пиши місяць словами.\n"
+            f"- СУВОРЕ ПРАВИЛО ДЛЯ ДАТИ: Записуй дату виключно у цифровому форматі ДД.ММ.2026. Ніколи не пиши місяць словами.\n"
             f"- СУВОРЕ ПРАВИЛО ДЛЯ НАЗВИ ГОТЕЛЮ: Виводь назву готелю в оригіналі так, як вона вказана в тексті джерела (латиницею).\n"
             f"- СУВОРЕ ПРАВИЛО ДЛЯ ПЛЮСІВ ТА МІНУСІВ: Заборони собі писати сюди кількість відгуків (наприклад, 'понад 1300 відгуків') або бали рейтингу (наприклад, '6.1 з 8 оцінок'). Пиши ТІЛЬКИ про матеріальні якості самого готелю, готельного сервісу, території чи пляжу.\n"
             f"6. ОБМЕЖЕННЯ: Описуй кожен готель ємно. Твій підсумковий текст має бути не більше за 3200 символів. Використовуй тільки HTML-теги <b> та <i>.\n\n"
@@ -509,14 +500,14 @@ async def generate_and_send_ai_tour_post():
                 chat_id=CURRENT_CHAT_ID, 
                 text=full_message, 
                 parse_mode="HTML",
-                message_thread_id=NAVIGATOR_DAY_TOPIC_ID if NAVIGATOR_DAY_TOPIC_ID else None
+                message_thread_id=target_topic_id  # Використовуємо виправлену та безпечну змінну
             )
 
             # --- 2. ЗБЕРЕЖЕННЯ СВІЖОГО ID В БАЗУ ДАНИХ (ОДРАЗУ ПІСЛЯ ВІДПРАВКИ) ---
             async with pool.acquire() as conn:
                 await conn.execute("INSERT INTO daily_posts (message_id) VALUES ($1)", msg.message_id)
                 
-            logging.info(f"✅ Пост для категорії '{cat['name']}' успешно опубліковано! ID {msg.message_id} збережено в БД.")
+            logging.info(f"✅ Пост для категорії '{cat['name']}' успішно опубліковано! ID {msg.message_id} збережено в БД.")
             
         except Exception as ai_err:
             logging.error(f"❌ Помилка роботи ШІ Gemini для категорії {cat['name']}: {ai_err}")
