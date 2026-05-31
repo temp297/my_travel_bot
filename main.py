@@ -37,8 +37,8 @@ try:
     REVIEWS_CHAT_ID = int(os.getenv("REVIEWS_CHAT_ID"))
     FEEDBACK_HOUR = int(os.getenv("FEEDBACK_HOUR", "11"))
     FEEDBACK_MINUTE = int(os.getenv("FEEDBACK_MINUTE", "0"))
-    ASSISTANT_HOUR = int(os.getenv("ASSISTANT_HOUR", "0"))
-    ASSISTANT_MINUTE = int(os.getenv("ASSISTANT_MINUTE", "52"))
+    ASSISTANT_HOUR = int(os.getenv("ASSISTANT_HOUR", "1"))
+    ASSISTANT_MINUTE = int(os.getenv("ASSISTANT_MINUTE", "2"))
 except ValueError:
     raise ValueError("ADMIN_ID, REVIEWS_CHAT_ID, FEEDBACK_HOUR та FEEDBACK_MINUTE мають бути цілими числами!")
 
@@ -282,28 +282,50 @@ async def fetch_tat_ua_data(country_slug: str):
     logging.info(f"🌐 [ПАРСЕР] Запуск реального браузера для країни: {url}")
     
     all_text = ""
+    browser = None
+    context = None
+    page = None
     
     try:
         async with async_playwright() as p:
-            browser = await p.chromium.launch(headless=True)
+            browser = await p.chromium.launch(
+                headless=True,
+                args=[
+                    "--no-sandbox",
+                    "--disable-setuid-sandbox",
+                    "--disable-dev-shm-usage",  # КРИТИЧНО ДЛЯ RENDER
+                    "--disable-accelerated-2d-canvas",
+                    "--disable-gpu",            # Економія RAM
+                    "--no-first-run",
+                    "--no-zygote",
+                    "--single-process"          # Запуск в один процес
+                ]
+            )
             context = await browser.new_context(
                 user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
                 viewport={"width": 1920, "height": 1080}
             )
             page = await context.new_page()
             
+            # --- БЛОКУВАННЯ КАРТИНОК ТА ВАЖКИХ МЕДІА (ЗАХИСТ ВІД OUT OF MEMORY) ---
+            async def block_assets(route):
+                if route.request.resource_type in ["image", "media", "font"]:
+                    await route.abort()
+                else:
+                    await route.continue_()
+            
+            await page.route("**/*", block_assets)
+            
             logging.info(f"🔎 Переходимо на сторінку пошуку...")
-            # wait_until="commit" спрацьовує миттєво при першій відповіді сервера
             await page.goto(url, wait_until="commit", timeout=45000)
             
             logging.info(f"⏳ Очікуємо первинне завантаження сторінки...")
-            await page.wait_for_timeout(5000)
+            await page.wait_for_timeout(3000)
             
-            # Емулюємо плавне гортання сторінки вниз, щоб підвантажити ВСІ готелі та ціни
-            logging.info(f"📜 Прокручуємо сторінку вниз для активації lazy-load цін...")
+            logging.info(f"📜 Прокручуємо сторінку вниз...")
             for _ in range(3):
                 await page.evaluate("window.scrollBy(0, 800);")
-                await page.wait_for_timeout(1500)
+                await page.wait_for_timeout(1000)
             
             html_content = await page.content()
             soup = BeautifulSoup(html_content, 'html.parser')
@@ -314,11 +336,17 @@ async def fetch_tat_ua_data(country_slug: str):
             main_text = soup.get_text(separator=" ", strip=True)
             all_text += f"\n\n--- АКТУАЛЬНІ ДАНІ ПОШУКУ КРАЇНИ ({url}) ---\n" + main_text
             
-            await browser.close()
-            
     except Exception as e:
         logging.error(f"❌ Помилка динамічного сканування сторінки країни {url}: {e}")
         return None
+    finally:
+        # ЗАЛІЗОБЕТОННЕ ЗВІЛЬНЕННЯ ПАМ'ЯТІ ПІСЛЯ КОЖНОЇ КРАЇНИ
+        if page:
+            await page.close()
+        if context:
+            await context.close()
+        if browser:
+            await browser.close()
 
     if not all_text.strip() or len(all_text) < 200:
         return None
