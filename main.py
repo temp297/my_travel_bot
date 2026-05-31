@@ -293,7 +293,10 @@ async def fetch_tat_ua_data(country_slug: str):
             page = await context.new_page()
             
             logging.info(f"🔎 Переходимо на сторінку пошуку...")
-            await page.goto(url, wait_until="networkidle", timeout=30000)
+            # Змінено wait_until на domcontentloaded (швидке завантаження без очікування аналітики)
+            await page.goto(url, wait_until="domcontentloaded", timeout=30000)
+            
+            logging.info(f"⏳ Очікуємо 4 секунди для промальовування актуальних цін...")
             await page.wait_for_timeout(4000)
             
             html_content = await page.content()
