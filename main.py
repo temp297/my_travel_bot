@@ -276,8 +276,6 @@ def generate_discount():
 
 # --- ФУНКЦІЇ ЕЛЕКТРОННОГО ПОМІЧНИКА (ПАРСИНГ ТА ШІ) ---
 
-from playwright.async_api import async_playwright
-
 async def fetch_tat_ua_data(country_slug: str):
     base_url = "https://tat.ua"
     url = f"{base_url}/search/{country_slug}/"
