@@ -11,4 +11,4 @@ pydantic-settings
 pyrogram
 tgcrypto
 requests
-playwright==1.49.0
+playwright
