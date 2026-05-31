@@ -38,7 +38,7 @@ try:
     FEEDBACK_HOUR = int(os.getenv("FEEDBACK_HOUR", "11"))
     FEEDBACK_MINUTE = int(os.getenv("FEEDBACK_MINUTE", "0"))
     ASSISTANT_HOUR = int(os.getenv("ASSISTANT_HOUR", "14"))
-    ASSISTANT_MINUTE = int(os.getenv("ASSISTANT_MINUTE", "50"))
+    ASSISTANT_MINUTE = int(os.getenv("ASSISTANT_MINUTE", "55"))
 except ValueError:
     raise ValueError("ADMIN_ID, REVIEWS_CHAT_ID, FEEDBACK_HOUR та FEEDBACK_MINUTE мають бути цілими числами!")
 
@@ -336,8 +336,8 @@ async def fetch_tat_ua_data(country_slug: str):
     if not all_text.strip() or len(all_text) < 200:
         return None
         
-    return all_textfrom playwright.async_api import async_playwright
-
+    return all_text
+    
 async def fetch_tat_ua_data(country_slug: str):
     base_url = "https://tat.ua"
     url = f"{base_url}/search/{country_slug}/"
