@@ -36,8 +36,8 @@ try:
     REVIEWS_CHAT_ID = int(os.getenv("REVIEWS_CHAT_ID"))
     FEEDBACK_HOUR = int(os.getenv("FEEDBACK_HOUR", "11"))
     FEEDBACK_MINUTE = int(os.getenv("FEEDBACK_MINUTE", "0"))
-    ASSISTANT_HOUR = int(os.getenv("ASSISTANT_HOUR", "10"))
-    ASSISTANT_MINUTE = int(os.getenv("ASSISTANT_MINUTE", "0"))
+    ASSISTANT_HOUR = int(os.getenv("ASSISTANT_HOUR", "11"))
+    ASSISTANT_MINUTE = int(os.getenv("ASSISTANT_MINUTE", "30"))
 except ValueError:
     raise ValueError("ADMIN_ID, REVIEWS_CHAT_ID, FEEDBACK_HOUR та FEEDBACK_MINUTE мають бути цілими числами!")
 
@@ -350,7 +350,7 @@ async def generate_and_send_ai_tour_post():
         logging.info("🤖 Помічник пропущений: немає моделі ШІ або AUTO_POST_CHAT_ID.")
         return
 
-    NAVIGATOR_DAY_TOPIC_ID = 198 
+    # NAVIGATOR_DAY_TOPIC_ID = 198 
     bot_link1 = "https://t.me/NavigatorToursBot?start=welcome"
     bot_link2 = "https://t.me/NavigatorToursBot?start=discount"
     current_date_str = datetime.now().strftime("%d.%m.%Y")
