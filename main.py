@@ -7,6 +7,7 @@ import asyncpg
 import aiogram
 import requests
 from bs4 import BeautifulSoup
+from playwright.async_api import async_playwright
 from datetime import datetime
 from aiohttp import web
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -18,7 +19,6 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.utils.keyboard import InlineKeyboardBuilder, ReplyKeyboardBuilder
 from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
 from aiogram_calendar import SimpleCalendar, SimpleCalendarCallback
-from playwright.async_api import async_playwright
 import google.generativeai as genai
 
 # Список команд для фільтрації
