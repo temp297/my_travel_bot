@@ -18,10 +18,6 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.utils.keyboard import InlineKeyboardBuilder, ReplyKeyboardBuilder
 from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
 from aiogram_calendar import SimpleCalendar, SimpleCalendarCallback
-
-# --- ДОДАТКОВІ ІМПОРТИ ДЛЯ ЕЛЕКТРОННОГО ПОМІЧНИКА ---
-import requests
-from bs4 import BeautifulSoup
 import google.generativeai as genai
 
 # Список команд для фільтрації
@@ -108,7 +104,6 @@ async def show_admin_base(message: types.Message, state: FSMContext):
     """Надсилає актуальний список туристів зі статусами відгуків"""
     global pool
     async with pool.acquire() as conn:
-        # Отримуємо користувачів, їхні знижки та статус останнього відгуку
         rows = await conn.fetch("""
             SELECT 
                 u.user_id, u.username, u.full_name, 
@@ -133,7 +128,6 @@ async def show_admin_base(message: types.Message, state: FSMContext):
             name = row['full_name'] or "Ім'я не вказано"
             discount = f" | 🎁 {row['discount_value']}%" if row['discount_value'] else ""
             
-            # Логіка статусів відгуку
             feedback_status = ""
             if row['return_date']:
                 if row['sent'] == 1:
@@ -143,7 +137,6 @@ async def show_admin_base(message: types.Message, state: FSMContext):
 
             text += f"👤 <b>{name}</b> — {username} (<code>{row['user_id']}</code>){discount}{feedback_status}\n"
     
-    # Додаємо розділювач в кінці для візуальної чистоти
     text += "━━━━━━━━━━━━━━━"
     
     new_msg = await bot.send_message(chat_id=message.chat.id, text=text, parse_mode="HTML")
@@ -158,10 +151,10 @@ pool = None
 async def init_db():
     global pool
     pool = await asyncpg.create_pool(
-    DATABASE_URL,
-    min_size=1,
-    max_size=2
-)
+        DATABASE_URL,
+        min_size=1,
+        max_size=2
+    )
     async with pool.acquire() as conn:
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS discounts (
@@ -184,6 +177,11 @@ async def init_db():
                 username TEXT,
                 full_name TEXT
                 )
+        """)
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS daily_posts (
+                message_id INTEGER PRIMARY KEY
+            )
         """)
         try:
             await conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS full_name TEXT")
@@ -209,10 +207,9 @@ async def get_user_discount(user_id: int):
 async def check_returns():
     now = datetime.now(ukraine_tz)
     today = now.strftime("%d.%m.%Y")
-    logging.info(f"🔎 [SCHEDULER] Перевірка бази на дату: {today}")
+    logging.info(f"🔎 [SCHEDULER] Перевірка bases на дату: {today}")
     
     async with pool.acquire() as conn:
-        # Вибираємо лише user_id, оскільки стовпця id немає
         rows = await conn.fetch(
             "SELECT user_id FROM feedbacks WHERE return_date = $1 AND sent = 0", 
             today
@@ -227,7 +224,6 @@ async def check_returns():
                     "✈️ З поверненням! Сподіваємося, Ваш відпочинок був чудовим.\n\nБудь ласка, оцініть нашу роботу:",
                     reply_markup=rating_kb()
                 )
-                # Оновлюємо статус за user_id
                 await conn.execute(
                     "UPDATE feedbacks SET sent = 1 WHERE user_id = $1 AND return_date = $2", 
                     row['user_id'], today
@@ -280,10 +276,6 @@ def generate_discount():
 # --- ФУНКЦІЇ ЕЛЕКТРОННОГО ПОМІЧНИКА (ПАРСИНГ ТА ШІ) ---
 
 async def fetch_tat_ua_data(country_slug: str):
-    """
-    Збирає дані з сайту tat.ua суто для конкретної країни без жодних обмежень.
-    country_slug — це унікальний ідентифікатор країни в URL (наприклад: 'turkey', 'ukraine' тощо)
-    """
     base_url = "https://tat.ua"
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
@@ -299,7 +291,6 @@ async def fetch_tat_ua_data(country_slug: str):
         response = requests.get(url, headers=headers, timeout=15)
         if response.status_code == 200:
             soup = BeautifulSoup(response.text, 'html.parser')
-            # Зберігаємо базовий текст сторінки пошуку (там часто вказано загальне місто виїзду для турів)
             all_text += f"\n\n--- Базові дані пошуку країни ({url}) ---\n" + soup.get_text(separator=" ", strip=True)
             
             for link in soup.find_all('a', href=True):
@@ -338,7 +329,6 @@ async def fetch_tat_ua_data(country_slug: str):
             page_res = requests.get(deep_url, headers=headers, timeout=10)
             if page_res.status_code == 200:
                 page_soup = BeautifulSoup(page_res.text, 'html.parser')
-                # separator=" " допомагає не склеювати слова докупи, щоб ШІ чітко бачив міста і транспорт
                 hotel_text = page_soup.get_text(separator=" ", strip=True)
                 all_text += f"\n\n--- ДЕТАЛЬНИЙ ОПИС ТУРУ/ГОТЕЛЮ №{idx+1} {deep_url} ---\n" + hotel_text
                 visited_count += 1
@@ -363,7 +353,6 @@ async def generate_and_send_ai_tour_post():
     NAVIGATOR_DAY_TOPIC_ID = 198 
     bot_link1 = "https://t.me/NavigatorToursBot?start=welcome"
     bot_link2 = "https://t.me/NavigatorToursBot?start=discount"
-    IDS_FILE = "vchora_posts.txt"
     current_date_str = datetime.now().strftime("%d.%m.%Y")
 
     cta_text = (
@@ -380,21 +369,20 @@ async def generate_and_send_ai_tour_post():
         f"Поширюйте канал серед знайомих мандрівників — разом шукати вигідні тури цікавіше!"
     )
 
-    if os.path.exists(IDS_FILE):
-        try:
-            with open(IDS_FILE, "r") as f:
-                old_ids = f.read().splitlines()
-            
-            for msg_id in old_ids:
+    # --- 1. ВИДАЛЕННЯ МИНУЛОНІЧНІХ ПОСТІВ З БАЗИ ДАНИХ (ПЕРЕД ЦИКЛОМ) ---
+    async with pool.acquire() as conn:
+        old_rows = await conn.fetch("SELECT message_id FROM daily_posts")
+        
+        if old_rows:
+            logging.info(f"🧹 Знайдено вчорашні пости для видалення в БД. Кількість: {len(old_rows)}")
+            for row in old_rows:
                 try:
-                    await bot.delete_message(chat_id=AUTO_POST_CHAT_ID, message_id=int(msg_id))
-                except Exception:
-                    pass
-            os.remove(IDS_FILE)
-        except Exception as file_err:
-            logging.error(f"Помилка при роботі з файлом очищення: {file_err}")
-
-    new_message_ids = []
+                    await bot.delete_message(chat_id=AUTO_POST_CHAT_ID, message_id=row['message_id'])
+                except Exception as del_err:
+                    logging.warning(f"Не вдалося видалити старий post {row['message_id']}: {del_err}")
+            
+            await conn.execute("DELETE FROM daily_posts")
+            logging.info("✨ Таблиця вчорашніх постів в БД успішно очищена.")
 
     categories = [
         {
@@ -459,8 +447,6 @@ async def generate_and_send_ai_tour_post():
             logging.info(f"⏩ Пропущено блок '{cat['name']}', бо на сайті немає актуальних даних по цій країні.")
             continue
 
-        # ПРІОРИТЕТНІСТЬ ТРАНСПОРТУ (АВІА -> АВТОБУС -> БЕЗ ТРАНСФЕРУ)
-        # ОНОВЛЕНИЙ ПРОМПТ: СУВОРЕ КЕРУВАННЯ БЛОКАМИ "ПЛЮСИ" ТА "МІНУСИ"
         prompt = (
             f"Ти — професійний travel-копірайтер компанії. На основі НАДАНИХ ТЕКСТОВИХ ДАНИХ склади один цікавий, "
             f"структурований і залучаючий пост для Telegram-каналу українською мовою.\n\n"
@@ -471,14 +457,12 @@ async def generate_and_send_ai_tour_post():
             f"2. ЯКЩО АВІАТУРІВ НЕМАЄ (або їх замало для добірки), шукай та додавай АВТОБУСНІ тури (наприклад: автобус із Києва, Одеси, Львова тощо).\n"
             f"3. В ОСТАННЮ ЧЕРГУ (якщо немає авіа та автобусних варіантів, або це внутрішній туризм по Україні), додавай пропозиції БЕЗ ТРАНСФЕРУ / ВЛАСНИЙ ТРАНСПОРТ.\n\n"
             f"Суворо дотримуйся наступних правил конструювання тексту:\n"
-            f"1. НІКОЛИ не згадуй назву сторонніх сайтів чи парсерів.\n"
-            f"2. Першим рядком поста ОБОВ'ЯЗКОВО має бути виключно заголовок суворо у такому форматі (замість дати підстав {current_date_str}):\n"
-            f"🧭 <b>Навігатор дня: {cat['name']} {cat['stars']} {cat['flag']} | {current_date_str}</b>\n"
-            f"3. ХУДОЖНІЙ ВСТУП (ОБОВ'ЯЗКОВО): Одразу після заголовка напиши один короткий, емоційний та вступний художній абзац, який яскраво описує переваги відпочинку в цьому напрямку.\n"
-            f"4. СУВОРЕ ПРАВИЛО ДЛЯ ВСТУПУ:\n"
+            f"1. НІКОЛИ не згадуй назву сторонніх сайтів чи парсерів.\n"     
+            f"2. Текст ОБОВ'ЯЗКОВО має починатися одразу з ХУДОЖНЬОГО ВСТУПУ: напиши один короткий, емоційний та вступний художній абзац про країну {cat['name']}, який яскраво описує переваги відпочинку в цьому напрямку.\n"
+            f"3. СУВОРЕ ПРАВИЛО ДЛЯ ВСТУПУ:\n"
             f"   - Заборони будь-які технічні чи робочі фрази типу 'Згідно з наявними даними...', 'Ми знайшли...'. Текст повинен виглядати як рекомендація живого експерта.\n"
             f"   - Якщо ти пишеш фразу-перехід до списку готелів, вона має суворо відповідати зірковості в заголовку, наприклад: 'Ось наша добірка найкращих готелів 4★ та 5★, які зроблять ваш відпочинок незабутнім:'.\n"
-            f"5. Після художнього вступу виведи список готелів. Для КОЖНОГО готелю суворо використовуй наступний візуальний шаблон (заповнюй дані, зберігаючи емодзі та жирний шрифт):\n\n"
+            f"4. Після художнього вступу виведи список готелів. Для КОЖНОГО готелю суворо використовуй наступний візуальний шаблон (заповнюй дані, зберігаючи емодзі та жирний шрифт):\n\n"
             f"📍 <b>КРАЇНА (Регіон/Курорт)</b>\n"
             f"🏨 <b>Назва готелю і зірковість (наприклад: Grand Konakli Resort 4* або Hawaii Riviera Aqua Park 5*)</b>\n"
             f"🚌 <b>Трансфер та виїзд:</b> [Тут чітко вкажи тип і місто на основі правил пріоритету вище. Приклади: '✈️ Авіа з Кишинева', '🚌 Автобус із Києва', '🚗 Власний транспорт / Без трансферу']\n"
@@ -488,11 +472,11 @@ async def generate_and_send_ai_tour_post():
             f"<i>[Тут напиши короткий художній опис саме цього готелю, обов'язково застосувавши до цього опису теги &lt;i&gt; та &lt;/i&gt;]</i>\n"
             f"➕ <b>Плюси:</b> [Коротко вкажи реальні матеріальні переваги самого готелю: інфраструктура, перша лінія, басейни, спа, свіжий ремонт, зелена територія, аквапарк тощо]\n"
             f"➖ <b>Мінуси:</b> [Коротко вкажи нюанс або мінус самого готелю: старий номерний фонд, маленька територія, платні парасольки, далеко до моря тощо. Якщо явних мінусів немає, напиши щось нейтральне, наприклад: 'потребує завчасного бронювання']\n\n"
-            f"6. КРИТИЧНІ ПРАВИЛА ДЛЯ ОФОРМЛЕННЯ ГОТЕЛІВ:\n"
+            f"5. КРИТИЧНІ ПРАВИЛА ДЛЯ ОФОРМЛЕННЯ ГОТЕЛІВ:\n"
             f"   - СУВОРЕ ПРАВИЛО ДЛЯ ДАТИ: Записуй дату виключно у цифровому форматі ДД.ММ.РРРР. Ніколи не пиши місяць словами.\n"
-            f"   - СУВОРЕ ПРАВИЛО ДЛЯ НАЗВИ ГОТЕЛЮ: Виводь назву готелю в оригіналі так, як вона вказана в тексті джерела (латиницею).\n"
+            f"   - СУВОРЕ ПРАВИЛО ДЛЯ НАЗВИ ГОТЕЛЮ: Виводь назву готелю в оригіналі так, як вона вказана в тексту джерела (латиницею).\n"
             f"   - СУВОРЕ ПРАВИЛО ДЛЯ ПЛЮСІВ ТА МІНУСІВ: Заборони собі писати сюди кількість відгуків (наприклад, 'понад 1300 відгуків') або бали рейтингу (наприклад, '6.1 з 8 оцінок'). Пиши ТІЛЬКИ про матеріальні якості самого готелю, готельного сервісу, території чи пляжу.\n"
-            f"7. ОБМЕЖЕННЯ: Описуй кожен готель ємно. Твій підсумковий текст має бути не більше за 3500 символів. Використовуй тільки HTML-теги <b> та <i>.\n\n"
+            f"6. ОБМЕЖЕННЯ: Описуй кожен готель ємно. Твій підсумковий текст має бути не більше за 3500 символів. Використовуй тільки HTML-теги <b> та <i>.\n\n"
             f"Ось текстові дані з усіма готелями суто для напрямку {cat['name']}: {raw_country_data}"
         )
 
@@ -504,31 +488,27 @@ async def generate_and_send_ai_tour_post():
                 logging.info(f"⏩ Пропущено публікацію категорії '{cat['name']}', бо в згенерованому ШІ тексті відсутні картки готелів.")
                 continue
 
-            full_message = f"{post_text}\n\n{cta_text}"
+            header_text = f"🧭 <b>Навігатор дня: {cat['name'].upper()} {cat['stars']} {cat['flag']} | {current_date_str}</b>\n\n"
+            full_message = f"{header_text}{post_text}\n\n{cta_text}"
             
             if index == len(categories) - 1:
                 full_message += share_text
             
-            # ТУТ КОМУ ВИПРАВЛЕНО (ПІСЛЯ "HTML"):
             msg = await bot.send_message(
                 chat_id=AUTO_POST_CHAT_ID, 
                 text=full_message, 
                 parse_mode="HTML",
                 message_thread_id=NAVIGATOR_DAY_TOPIC_ID
             )
-            new_message_ids.append(str(msg.message_id))
-            logging.info(f"✅ Пост для категорії '{cat['name']}' успешно опубліковано! ID: {msg.message_id}")
+
+            # --- 2. ЗБЕРЕЖЕННЯ СВІЖОГО ID В БАЗУ ДАНИХ (ОДРАЗУ ПІСЛЯ ВІДПРАВКИ) ---
+            async with pool.acquire() as conn:
+                await conn.execute("INSERT INTO daily_posts (message_id) VALUES ($1)", msg.message_id)
+                
+            logging.info(f"✅ Пост для категорії '{cat['name']}' успішно опубліковано! ID {msg.message_id} збережено в БД.")
             
         except Exception as ai_err:
             logging.error(f"❌ Помилка роботи ШІ Gemini для категорії {cat['name']}: {ai_err}")
-
-    if new_message_ids:
-        try:
-            with open(IDS_FILE, "w") as f:
-                f.write("\n".join(new_message_ids))
-            logging.info(f"💾 Нові ID збережено у файл для видалення завтра: {new_message_ids}")
-        except Exception as save_err:
-            logging.error(f"Не вдалося зберегти ID у файл: {save_err}")
             
 # --- ОБРОБНИКИ КОМАНД (ВЕРХНІЙ ПРІОРИТЕТ) ---
 
