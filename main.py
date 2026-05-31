@@ -37,8 +37,8 @@ try:
     REVIEWS_CHAT_ID = int(os.getenv("REVIEWS_CHAT_ID"))
     FEEDBACK_HOUR = int(os.getenv("FEEDBACK_HOUR", "11"))
     FEEDBACK_MINUTE = int(os.getenv("FEEDBACK_MINUTE", "0"))
-    ASSISTANT_HOUR = int(os.getenv("ASSISTANT_HOUR", "22"))
-    ASSISTANT_MINUTE = int(os.getenv("ASSISTANT_MINUTE", "57"))
+    ASSISTANT_HOUR = int(os.getenv("ASSISTANT_HOUR", "23"))
+    ASSISTANT_MINUTE = int(os.getenv("ASSISTANT_MINUTE", "11"))
 except ValueError:
     raise ValueError("ADMIN_ID, REVIEWS_CHAT_ID, FEEDBACK_HOUR та FEEDBACK_MINUTE мають бути цілими числами!")
 
@@ -458,7 +458,7 @@ async def generate_and_send_ai_tour_post():
             f"- Уникай 'оверпрайсу': не вибирай готелі з космічними цінами (наприклад, за 250-500 тис. грн), якщо в тексті є чудові варіанти за 60-100 тис. грн. Шукай 'золоту середину' ціни та сервісу.\n\n"
             
             f"⚠️ СУВОРЕ ПРАВИЛО ДЛЯ АНАЛІЗУ ДАТ (БРАТИ СУГУБО З ТЕКСТУ ТУРУ):\n"
-            f"1. Ти зобов'язаний знайти в тексті конкретного туру дату вильоту/виїзду (день, місяць), яка прописана поруч із обраною тобою ціною. Заборонено вигадувати день, місяць самостійно.\n"
+            f"1. Ти зобов'язаний знайти в тексті конкретного туру дату вильоту/виїзду (день, місяць), яка прописана поруч із обраною тобою ціною. Заборонено вигадувати день, місяць, рік самостійно. Якщо рік не прописаний, то відображай так як в знайденому тексті (наприклад: 19 червня)\n"
             
             f"Суворо дотримуйся наступних правил конструювання тексту:\n"
             f"1. НІКОЛИ не згадуй назву сторонніх сайтів чи парсерів.\n"     
