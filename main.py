@@ -36,8 +36,8 @@ try:
     REVIEWS_CHAT_ID = int(os.getenv("REVIEWS_CHAT_ID"))
     FEEDBACK_HOUR = int(os.getenv("FEEDBACK_HOUR", "11"))
     FEEDBACK_MINUTE = int(os.getenv("FEEDBACK_MINUTE", "0"))
-    ASSISTANT_HOUR = int(os.getenv("ASSISTANT_HOUR", "10"))
-    ASSISTANT_MINUTE = int(os.getenv("ASSISTANT_MINUTE", "0"))
+    ASSISTANT_HOUR = int(os.getenv("ASSISTANT_HOUR", "12"))
+    ASSISTANT_MINUTE = int(os.getenv("ASSISTANT_MINUTE", "20"))
 except ValueError:
     raise ValueError("ADMIN_ID, REVIEWS_CHAT_ID, FEEDBACK_HOUR та FEEDBACK_MINUTE мають бути цілими числами!")
 
@@ -131,9 +131,9 @@ async def show_admin_base(message: types.Message, state: FSMContext):
             feedback_status = ""
             if row['return_date']:
                 if row['sent'] == 1:
-                    feedback_status = f"\n    └ ✅ Запит на відгук надіслано ({row['return_date']})"
+                    feedback_status = f"\n     └ ✅ Запит на відгук надіслано ({row['return_date']})"
                 else:
-                    feedback_status = f"\n    └ ⏳ Запит на відгук заплановано ({row['return_date']})"
+                    feedback_status = f"\n     └ ⏳ Запит на відгук заплановано ({row['return_date']})"
 
             text += f"👤 <b>{name}</b> — {username} (<code>{row['user_id']}</code>){discount}{feedback_status}\n"
     
@@ -350,7 +350,19 @@ async def generate_and_send_ai_tour_post():
         logging.info("🤖 Помічник пропущений: немає моделі ШІ або AUTO_POST_CHAT_ID.")
         return
 
-    NAVIGATOR_DAY_TOPIC_ID = 198 
+    # --- БЕЗПЕЧНА ПЕРЕВІРКА ТА ПЕРЕНАПРАВЛЕННЯ ---
+    raw_topic_id = os.getenv("NAVIGATOR_DAY_TOPIC_ID")
+    if raw_topic_id and raw_topic_id.strip() != "None":
+        try:
+            NAVIGATOR_DAY_TOPIC_ID = int(raw_topic_id)
+            CURRENT_CHAT_ID = AUTO_POST_CHAT_ID
+        except ValueError:
+            NAVIGATOR_DAY_TOPIC_ID = None
+            CURRENT_CHAT_ID = ADMIN_ID
+    else:
+        NAVIGATOR_DAY_TOPIC_ID = None
+        CURRENT_CHAT_ID = ADMIN_ID
+
     bot_link1 = "https://t.me/NavigatorToursBot?start=welcome"
     bot_link2 = "https://t.me/NavigatorToursBot?start=discount"
     current_date_str = datetime.now().strftime("%d.%m.%Y")
@@ -360,7 +372,7 @@ async def generate_and_send_ai_tour_post():
         f"✈️ Бажаєте забронювати або підібрати інший варіант?\n"
         f"Наш електронний помічник допоможе вам швидко сформувати запит, а професійний менеджер особисто опрацює ваші побажання.\n"
         f"👉 <a href='{bot_link1}'>Залишити запит менеджеру</a>\n\n"
-        f"🎁 <b>Приємний бонус:</b> кожен наш клієнт може отримати персональну знижку за програмою лояльності!\n"
+        f"🎁 <b>Приємний бонус:</b> кожен наш клієнт може отримати персональну знижку за програмую лояльності!\n"
         f"👉 <a href='{bot_link2}'>Отримати знижку</a>"
     )
 
@@ -377,7 +389,7 @@ async def generate_and_send_ai_tour_post():
             logging.info(f"🧹 Знайдено вчорашні пости для видалення в БД. Кількість: {len(old_rows)}")
             for row in old_rows:
                 try:
-                    await bot.delete_message(chat_id=AUTO_POST_CHAT_ID, message_id=row['message_id'])
+                    await bot.delete_message(chat_id=CURRENT_CHAT_ID, message_id=row['message_id'])
                 except Exception as del_err:
                     logging.warning(f"Не вдалося видалити старий post {row['message_id']}: {del_err}")
             
@@ -495,10 +507,10 @@ async def generate_and_send_ai_tour_post():
                 full_message += share_text
             
             msg = await bot.send_message(
-                chat_id=AUTO_POST_CHAT_ID, 
+                chat_id=CURRENT_CHAT_ID, 
                 text=full_message, 
                 parse_mode="HTML",
-                message_thread_id=NAVIGATOR_DAY_TOPIC_ID
+                message_thread_id=NAVIGATOR_DAY_TOPIC_ID if NAVIGATOR_DAY_TOPIC_ID else None
             )
 
             # --- 2. ЗБЕРЕЖЕННЯ СВІЖОГО ID В БАЗУ ДАНИХ (ОДРАЗУ ПІСЛЯ ВІДПРАВКИ) ---
