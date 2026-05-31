@@ -335,10 +335,21 @@ async def generate_and_send_ai_tour_post():
         logging.info("🤖 Помічник пропущений: немає моделі ШІ або AUTO_POST_CHAT_ID.")
         return
 
-    NAVIGATOR_DAY_TOPIC_ID = 198 
+    # --- БЕЗПЕЧНА ПЕРЕВІРКА ТА ПЕРЕНАПРАВЛЕННЯ ---
+    raw_topic_id = os.getenv("NAVIGATOR_DAY_TOPIC_ID")
+    if raw_topic_id and raw_topic_id.strip() != "None":
+        try:
+            NAVIGATOR_DAY_TOPIC_ID = int(raw_topic_id)
+            CURRENT_CHAT_ID = AUTO_POST_CHAT_ID
+        except ValueError:
+            NAVIGATOR_DAY_TOPIC_ID = None
+            CURRENT_CHAT_ID = ADMIN_ID
+    else:
+        NAVIGATOR_DAY_TOPIC_ID = None
+        CURRENT_CHAT_ID = ADMIN_ID
+
     bot_link1 = "https://t.me/NavigatorToursBot?start=welcome"
     bot_link2 = "https://t.me/NavigatorToursBot?start=discount"
-    IDS_FILE = "vchora_posts.txt"
     current_date_str = datetime.now().strftime("%d.%m.%Y")
 
     cta_text = (
@@ -355,21 +366,20 @@ async def generate_and_send_ai_tour_post():
         f"Поширюйте канал серед знайомих мандрівників — разом шукати вигідні тури цікавіше!"
     )
 
-    if os.path.exists(IDS_FILE):
-        try:
-            with open(IDS_FILE, "r") as f:
-                old_ids = f.read().splitlines()
-            
-            for msg_id in old_ids:
+    # --- 1. ВИДАЛЕННЯ МИНУЛОНІЧНІХ ПОСТІВ З БАЗИ ДАНИХ (ПЕРЕД ЦИКЛОМ) ---
+    async with pool.acquire() as conn:
+        old_rows = await conn.fetch("SELECT message_id FROM daily_posts")
+        
+        if old_rows:
+            logging.info(f"🧹 Знайдено вчорашні пости для видалення в БД. Кількість: {len(old_rows)}")
+            for row in old_rows:
                 try:
-                    await bot.delete_message(chat_id=AUTO_POST_CHAT_ID, message_id=int(msg_id))
-                except Exception:
-                    pass
-            os.remove(IDS_FILE)
-        except Exception as file_err:
-            logging.error(f"Помилка при роботі з файлом очищення: {file_err}")
-
-    new_message_ids = []
+                    await bot.delete_message(chat_id=CURRENT_CHAT_ID, message_id=row['message_id'])
+                except Exception as del_err:
+                    logging.warning(f"Не вдалося видалити старий post {row['message_id']}: {del_err}")
+            
+            await conn.execute("DELETE FROM daily_posts")
+            logging.info("✨ Таблиця вчорашніх постів в БД успішно очищена.")
 
     categories = [
         {
@@ -377,14 +387,14 @@ async def generate_and_send_ai_tour_post():
             "slug": "turkey",
             "flag": "🇹🇷", 
             "stars": "4★ та 5★", 
-            "prompt_part": "Уважно проскануй весь наданий текст. Твоє завдання — вибрати до 5 НАЙКРАЩИХ РІЗНИХ готелів СУТО в ТУРЕЧЧИНІ. КРИТИЧНО ВАЖЛИВО: у фінальному списку ОБОВ'ЯЗКОВО мають бути ЯК готелі 4★, ТАК І готелі 5★ (зроби збалансований мікс із четвірок і п'ятірок, не виводь тільки 5★!)."
+            "prompt_part": "Уважно проскануй весь наданий текст. Твоє завдання — вибрати до 5 НАЙКРАЩИХ РІЗНИХ готелів СУТО в ТУРЕЧЧИНІ. КРИТИЧНО ВАЖЛИВО: у фінальному списку ОБОВ'ЯЗКОВО мають бути ЯК готелі 4★, ТАК І готелі 5★ (зроби збалансований мікс із чітвірок і п'ятірок, не виводь тільки 5★!)."
         },
         {
             "name": "ЄГИПЕТ", 
             "slug": "egypt",
             "flag": "🇪🇬", 
             "stars": "4★ та 5★", 
-            "prompt_part": "Уважно проскануй весь наданий текст. Твоє завдання — вибрати до 5 НАЙКРАЩИХ РІЗНИХ готелів СУТО в ЄГИПТІ. КРИТИЧНО ВАЖЛИВО: у фінальному списку ОБОВ'ЯЗКОВО мають бути ЯК готелі 4★, ТАК І готелі 5★ (зроби збалансований мікс із четвірок і п'ятірок, не виводь тільки 5★!)."
+            "prompt_part": "Уважно проскануй весь наданий текст. Твоє завдання — вибрати до 5 НАЙКРАЩИХ РІЗНИХ готелів СУТО в ЄГИПТІ. КРИТИЧНО ВАЖЛИВО: у фінальному списку ОБОВ'ЯЗКОВО мають бути ЯК готелі 4★, ТАК І готелі 5★ (зроби збалансований мікс із чітвірок і п'ятірок, не виводь тільки 5★!)."
         },
         {
             "name": "БОЛГАРІЯ", 
@@ -489,31 +499,27 @@ async def generate_and_send_ai_tour_post():
                 logging.info(f"⏩ Пропущено публікацію категорії '{cat['name']}', бо в згенерованому ШІ тексті відсутні картки готелів.")
                 continue
 
-            full_message = f"{post_text}\n\n{cta_text}"
+            header_text = f"🧭 <b>Навігатор дня: {cat['name'].upper()} {cat['stars']} {cat['flag']} | {current_date_str}</b>\n\n"
+            full_message = f"{header_text}{post_text}\n\n{cta_text}"
             
             if index == len(categories) - 1:
                 full_message += share_text
             
-            # ТУТ КОМУ ВИПРАВЛЕНО (ПІСЛЯ "HTML"):
             msg = await bot.send_message(
-                chat_id=AUTO_POST_CHAT_ID, 
+                chat_id=CURRENT_CHAT_ID, 
                 text=full_message, 
                 parse_mode="HTML",
-                message_thread_id=NAVIGATOR_DAY_TOPIC_ID
+                message_thread_id=NAVIGATOR_DAY_TOPIC_ID if NAVIGATOR_DAY_TOPIC_ID else None
             )
-            new_message_ids.append(str(msg.message_id))
-            logging.info(f"✅ Пост для категорії '{cat['name']}' успешно опубліковано! ID: {msg.message_id}")
+
+            # --- 2. ЗБЕРЕЖЕННЯ СВІЖОГО ID В БАЗУ ДАНИХ (ОДРАЗУ ПІСЛЯ ВІДПРАВКИ) ---
+            async with pool.acquire() as conn:
+                await conn.execute("INSERT INTO daily_posts (message_id) VALUES ($1)", msg.message_id)
+                
+            logging.info(f"✅ Пост для категорії '{cat['name']}' успешно опубліковано! ID {msg.message_id} збережено в БД.")
             
         except Exception as ai_err:
             logging.error(f"❌ Помилка роботи ШІ Gemini для категорії {cat['name']}: {ai_err}")
-
-    if new_message_ids:
-        try:
-            with open(IDS_FILE, "w") as f:
-                f.write("\n".join(new_message_ids))
-            logging.info(f"💾 Нові ID збережено у файл для видалення завтра: {new_message_ids}")
-        except Exception as save_err:
-            logging.error(f"Не вдалося зберегти ID у файл: {save_err}")
             
 # --- ОБРОБНИКИ КОМАНД (ВЕРХНІЙ ПРІОРИТЕТ) ---
 
