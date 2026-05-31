@@ -7,18 +7,21 @@ import asyncpg
 import aiogram
 import requests
 from bs4 import BeautifulSoup
-from playwright.async_api import async_playwright
 from datetime import datetime
 from aiohttp import web
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from aiogram import Bot, Dispatcher, types, F
-from aiogram.filters import Command, CommandStart, CommandObject, StateFilter
+from aiogram.filters import Command, CommandStart, CommandObject, StateFilter, Command as CommandFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.utils.keyboard import InlineKeyboardBuilder, ReplyKeyboardBuilder
 from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
 from aiogram_calendar import SimpleCalendar, SimpleCalendarCallback
+
+# --- ДОДАТКОВІ ІМПОРТИ ДЛЯ ЕЛЕКТРОННОГО ПОМІЧНИКА ---
+import requests
+from bs4 import BeautifulSoup
 import google.generativeai as genai
 
 # Список команд для фільтрації
@@ -37,9 +40,9 @@ try:
     REVIEWS_CHAT_ID = int(os.getenv("REVIEWS_CHAT_ID"))
     FEEDBACK_HOUR = int(os.getenv("FEEDBACK_HOUR", "11"))
     FEEDBACK_MINUTE = int(os.getenv("FEEDBACK_MINUTE", "0"))
-    ASSISTANT_HOUR = int(os.getenv("ASSISTANT_HOUR", "19"))
+    ASSISTANT_HOUR = int(os.getenv("ASSISTANT_HOUR", "10"))
     ASSISTANT_MINUTE = int(os.getenv("ASSISTANT_MINUTE", "0"))
-except (ValueError, TypeError):
+except ValueError:
     raise ValueError("ADMIN_ID, REVIEWS_CHAT_ID, FEEDBACK_HOUR та FEEDBACK_MINUTE мають бути цілими числами!")
 
 if not API_TOKEN or not DATABASE_URL:
@@ -105,6 +108,7 @@ async def show_admin_base(message: types.Message, state: FSMContext):
     """Надсилає актуальний список туристів зі статусами відгуків"""
     global pool
     async with pool.acquire() as conn:
+        # Отримуємо користувачів, їхні знижки та статус останнього відгуку
         rows = await conn.fetch("""
             SELECT 
                 u.user_id, u.username, u.full_name, 
@@ -129,15 +133,17 @@ async def show_admin_base(message: types.Message, state: FSMContext):
             name = row['full_name'] or "Ім'я не вказано"
             discount = f" | 🎁 {row['discount_value']}%" if row['discount_value'] else ""
             
+            # Логіка статусів відгуку
             feedback_status = ""
             if row['return_date']:
                 if row['sent'] == 1:
-                    feedback_status = f"\n     └ ✅ Запит на відгук надіслано ({row['return_date']})"
+                    feedback_status = f"\n    └ ✅ Запит на відгук надіслано ({row['return_date']})"
                 else:
-                    feedback_status = f"\n     └ ⏳ Запит на відгук заплановано ({row['return_date']})"
+                    feedback_status = f"\n    └ ⏳ Запит на відгук заплановано ({row['return_date']})"
 
             text += f"👤 <b>{name}</b> — {username} (<code>{row['user_id']}</code>){discount}{feedback_status}\n"
     
+    # Додаємо розділювач в кінці для візуальної чистоти
     text += "━━━━━━━━━━━━━━━"
     
     new_msg = await bot.send_message(chat_id=message.chat.id, text=text, parse_mode="HTML")
@@ -152,10 +158,10 @@ pool = None
 async def init_db():
     global pool
     pool = await asyncpg.create_pool(
-        DATABASE_URL,
-        min_size=1,
-        max_size=2
-    )
+    DATABASE_URL,
+    min_size=1,
+    max_size=2
+)
     async with pool.acquire() as conn:
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS discounts (
@@ -179,12 +185,6 @@ async def init_db():
                 full_name TEXT
                 )
         """)
-        await conn.execute("""
-            CREATE TABLE IF NOT EXISTS daily_posts (
-                message_id INTEGER PRIMARY KEY
-            )
-        """)
-        
         try:
             await conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS full_name TEXT")
         except Exception as e:
@@ -209,9 +209,10 @@ async def get_user_discount(user_id: int):
 async def check_returns():
     now = datetime.now(ukraine_tz)
     today = now.strftime("%d.%m.%Y")
-    logging.info(f"🔎 [SCHEDULER] Перевірка bases на дату: {today}")
+    logging.info(f"🔎 [SCHEDULER] Перевірка бази на дату: {today}")
     
     async with pool.acquire() as conn:
+        # Вибираємо лише user_id, оскільки стовпця id немає
         rows = await conn.fetch(
             "SELECT user_id FROM feedbacks WHERE return_date = $1 AND sent = 0", 
             today
@@ -226,6 +227,7 @@ async def check_returns():
                     "✈️ З поверненням! Сподіваємося, Ваш відпочинок був чудовим.\n\nБудь ласка, оцініть нашу роботу:",
                     reply_markup=rating_kb()
                 )
+                # Оновлюємо статус за user_id
                 await conn.execute(
                     "UPDATE feedbacks SET sent = 1 WHERE user_id = $1 AND return_date = $2", 
                     row['user_id'], today
@@ -331,27 +333,16 @@ async def generate_and_send_ai_tour_post():
         logging.info("🤖 Помічник пропущений: немає моделі ШІ або AUTO_POST_CHAT_ID.")
         return
 
-    # --- БЕЗПЕЧНА ПЕРЕВІРКА ТА ПЕРЕНАПРАВЛЕННЯ ---
-    raw_topic_id = os.getenv("NAVIGATOR_DAY_TOPIC_ID")
-    if raw_topic_id and raw_topic_id.strip() != "None":
-        try:
-            NAVIGATOR_DAY_TOPIC_ID = int(raw_topic_id)
-            CURRENT_CHAT_ID = AUTO_POST_CHAT_ID
-        except ValueError:
-            NAVIGATOR_DAY_TOPIC_ID = None
-            CURRENT_CHAT_ID = ADMIN_ID
-    else:
-        NAVIGATOR_DAY_TOPIC_ID = None
-        CURRENT_CHAT_ID = ADMIN_ID
-
+    NAVIGATOR_DAY_TOPIC_ID = 198 
     bot_link1 = "https://t.me/NavigatorToursBot?start=welcome"
     bot_link2 = "https://t.me/NavigatorToursBot?start=discount"
+    IDS_FILE = "vchora_posts.txt"
     current_date_str = datetime.now().strftime("%d.%m.%Y")
 
     cta_text = (
         f"⚠️ <b>Зверніть увагу: всі ціни вказані за тур та є актуальними на сьогодні!</b>\n\n"
         f"✈️ Бажаєте забронювати або підібрати інший варіант?\n"
-        f"Наш electronic помічник поможет вам швидко сформувати запит, а професійний менеджер особисто опрацює ваші побажання.\n"
+        f"Наш електронний помічник допоможе вам швидко сформувати запит, а професійний менеджер особисто опрацює ваші побажання.\n"
         f"👉 <a href='{bot_link1}'>Залишити запит менеджеру</a>\n\n"
         f"🎁 <b>Приємний бонус:</b> кожен наш клієнт може отримати персональну знижку за програмою лояльності!\n"
         f"👉 <a href='{bot_link2}'>Отримати знижку</a>"
@@ -359,23 +350,24 @@ async def generate_and_send_ai_tour_post():
 
     share_text = (
         f"\n\n🗣 <b>Сподобалася добірка?</b>\n"
-        f"Поширюйте канал серед знайомих мандрівників — разом шукать вигідні тури цікавіше!"
+        f"Поширюйте канал серед знайомих мандрівників — разом шукати вигідні тури цікавіше!"
     )
 
-    # --- 1. ВИДАЛЕННЯ МИНУЛОНІЧНІХ ПОСТІВ З БАЗИ ДАНИХ (ПЕРЕД ЦИКЛОМ) ---
-    async with pool.acquire() as conn:
-        old_rows = await conn.fetch("SELECT message_id FROM daily_posts")
-        
-        if old_rows:
-            logging.info(f"🧹 Знайдено вчорашні пости для видалення в БД. Кількість: {len(old_rows)}")
-            for row in old_rows:
-                try:
-                    await bot.delete_message(chat_id=CURRENT_CHAT_ID, message_id=row['message_id'])
-                except Exception as del_err:
-                    logging.warning(f"Не вдалося видалити старий post {row['message_id']}: {del_err}")
+    if os.path.exists(IDS_FILE):
+        try:
+            with open(IDS_FILE, "r") as f:
+                old_ids = f.read().splitlines()
             
-            await conn.execute("DELETE FROM daily_posts")
-            logging.info("✨ Таблиця вчорашніх постів в БД успішно очищена.")
+            for msg_id in old_ids:
+                try:
+                    await bot.delete_message(chat_id=AUTO_POST_CHAT_ID, message_id=int(msg_id))
+                except Exception:
+                    pass
+            os.remove(IDS_FILE)
+        except Exception as file_err:
+            logging.error(f"Помилка при роботі з файлом очищення: {file_err}")
+
+    new_message_ids = []
 
     categories = [
         {
@@ -383,49 +375,49 @@ async def generate_and_send_ai_tour_post():
             "slug": "turkey",
             "flag": "🇹🇷", 
             "stars": "4★ та 5★", 
-            "prompt_part": "Уважно проскануй весь наданий text. Твоє завдання — вибрати до 5 НАЙКРАЩИХ РІЗНИХ готелів СУТО в ТУРЕЧЧИНІ. КРИТИЧНО ВАЖЛИВО: у фінальному списку ОБОВ'ЯЗКОВО мають бути ЯК готелі 4★, ТАК І готелі 5★ (зроби збалансований мікс із чітвірок і п'ятірок, не виводь тільки 5★!)."
+            "prompt_part": "Уважно проскануй весь наданий текст. Твоє завдання — вибрати до 5 НАЙКРАЩИХ РІЗНИХ готелів СУТО в ТУРЕЧЧИНІ. КРИТИЧНО ВАЖЛИВО: у фінальному списку ОБОВ'ЯЗКОВО мають бути ЯК готелі 4★, ТАК І готелі 5★ (зроби збалансований мікс із четвірок і п'ятірок, не виводь тільки 5★!)."
         },
         {
             "name": "ЄГИПЕТ", 
             "slug": "egypt",
             "flag": "🇪🇬", 
             "stars": "4★ та 5★", 
-            "prompt_part": "Уважно проскануй весь наданий text. Твоє завдання — вибрати до 5 НАЙКРАЩИХ РІЗНИХ готелів СУТО в ЄГИПТІ. КРИТИЧНО ВАЖЛИВО: у фінальному списку ОБОВ'ЯЗКОВО мають бути ЯК готелі 4★, ТАК І готелі 5★ (зроби збалансований мікс із чітвірок і п'ятірок, не виводь тільки 5★!)."
+            "prompt_part": "Уважно проскануй весь наданий текст. Твоє завдання — вибрати до 5 НАЙКРАЩИХ РІЗНИХ готелів СУТО в ЄГИПТІ. КРИТИЧНО ВАЖЛИВО: у фінальному списку ОБОВ'ЯЗКОВО мають бути ЯК готелі 4★, ТАК І готелі 5★ (зроби збалансований мікс із четвірок і п'ятірок, не виводь тільки 5★!)."
         },
         {
             "name": "БОЛГАРІЯ", 
             "slug": "bulgaria",
             "flag": "🇧🇬", 
             "stars": "4★ та 5★", 
-            "prompt_part": "Уважно проскануй весь наданий text. Твоє завдання — вибрати до 5 НАЙКРАЩИХ РІЗНИХ готелів СУТО в БОЛГАРІЇ. Сформуй мікс із готелів зірковості 4★ та 5★."
+            "prompt_part": "Уважно проскануй весь наданий текст. Твоє завдання — вибрати до 5 НАЙКРАЩИХ РІЗНИХ готелів СУТО в БОЛГАРІЇ. Сформуй мікс із готелів зірковості 4★ та 5★."
         },
         {
             "name": "ГРЕЦІЯ", 
             "slug": "greece",
             "flag": "🇬🇷", 
             "stars": "4★ та 5★", 
-            "prompt_part": "Уважно проскануй весь наданий text. Твоє завдання — вибрати до 5 НАЙКРАЩИХ РІЗНИХ готелів СУТО в ГРЕЦІЇ. Сформуй мікс із готелів зірковості 4★ та 5★."
+            "prompt_part": "Уважно проскануй весь наданий текст. Твоє завдання — вибрати до 5 НАЙКРАЩИХ РІЗНИХ готелів СУТО в ГРЕЦІЇ. Сформуй мікс із готелів зірковості 4★ та 5★."
         },
         {
             "name": "ЧОРНОГОРІЯ", 
             "slug": "montenegro",
             "flag": "🇲🇪", 
             "stars": "4★ та 5★", 
-            "prompt_part": "Уважно проскануй весь наданий text. Твоє завдання — вибрати до 5 НАЙКРАЩИХ РІЗНИХ готелів СУТО в ЧОРНОГОРІЇ. Сформуй мікс із готелів зірковості 4★ та 5★."
+            "prompt_part": "Уважно проскануй весь наданий текст. Твоє завдання — вибрати до 5 НАЙКРАЩИХ РІЗНИХ готелів СУТО в ЧОРНОГОРІЇ. Сформуй мікс із готелів зірковості 4★ та 5★."
         },
         {
             "name": "ІСПАНІЯ", 
             "slug": "spain",
             "flag": "🇪🇸", 
             "stars": "4★ та 5★", 
-            "prompt_part": "Уважно проскануй весь наданий text. Твоє завдання — вибрати до 5 НАЙКРАЩИХ РІЗНИХ готелів СУТО в ІСПАНІЇ. Сформуй мікс із готелів зірковості 4★ та 5★."
+            "prompt_part": "Уважно проскануй весь наданий текст. Твоє завдання — вибрати до 5 НАЙКРАЩИХ РІЗНИХ готелів СУТО в ІСПАНІЇ. Сформуй мікс із готелів зірковості 4★ та 5★."
         },
         {
             "name": "УКРАЇНА", 
             "slug": "ukraine",
             "flag": "🇺🇦", 
             "stars": "4★ та 5★", 
-            "prompt_part": "Уважно проскануй весь наданий text. Витягни до 5 РІЗНИХ найкращих пропозицій або готелів СУТО в УКРАЇНІ. Якщо в тексті є готелі різної зірковості (і 4★, і 5★), обов'язково додай обидва типу у фінальний список."
+            "prompt_part": "Уважно проскануй весь наданий текст. Витягни до 5 РІЗНИХ найкращих пропозицій або готелів СУТО в УКРАЇНІ. Якщо в тексті є готелі різної зірковості (і 4★, і 5★), обов'язково додай обидва типу у фінальний список."
         }
     ]
 
@@ -437,7 +429,7 @@ async def generate_and_send_ai_tour_post():
         raw_country_data = await fetch_tat_ua_data(cat["slug"])
         
         if not raw_country_data or len(raw_country_data.strip()) < 100:
-            logging.info(f"⏩ Пропущено публікацію категорії '{cat['name']}', бо на сайті немає актуальних даних по цій країні.")
+            logging.info(f"⏩ Пропущено блок '{cat['name']}', бо на сайті немає актуальних даних по цій країні.")
             continue
 
         prompt = (
@@ -486,6 +478,7 @@ async def generate_and_send_ai_tour_post():
             
             f"Ось текстові дані з усіма готелями суто для напрямку {cat['name']}: {raw_country_data}"
         )
+
         try:
             response = ai_model.generate_content(prompt)
             post_text = response.text
@@ -494,27 +487,31 @@ async def generate_and_send_ai_tour_post():
                 logging.info(f"⏩ Пропущено публікацію категорії '{cat['name']}', бо в згенерованому ШІ тексті відсутні картки готелів.")
                 continue
 
-            header_text = f"🧭 <b>Навігатор дня: {cat['name'].upper()} {cat['stars']} {cat['flag']} | {current_date_str}</b>\n\n"
-            full_message = f"{header_text}{post_text}\n\n{cta_text}"
+            full_message = f"{post_text}\n\n{cta_text}"
             
             if index == len(categories) - 1:
                 full_message += share_text
             
+            # ТУТ КОМУ ВИПРАВЛЕНО (ПІСЛЯ "HTML"):
             msg = await bot.send_message(
-                chat_id=CURRENT_CHAT_ID, 
+                chat_id=AUTO_POST_CHAT_ID, 
                 text=full_message, 
                 parse_mode="HTML",
-                message_thread_id=NAVIGATOR_DAY_TOPIC_ID if NAVIGATOR_DAY_TOPIC_ID else None
+                message_thread_id=NAVIGATOR_DAY_TOPIC_ID
             )
-
-            # --- 2. ЗБЕРЕЖЕННЯ СВІЖОГО ID В БАЗУ ДАНИХ (ОДРАЗУ ПІСЛЯ ВІДПРАВКИ) ---
-            async with pool.acquire() as conn:
-                await conn.execute("INSERT INTO daily_posts (message_id) VALUES ($1)", msg.message_id)
-                
-            logging.info(f"✅ Пост для категорії '{cat['name']}' успешно опубліковано! ID {msg.message_id} збережено в БД.")
+            new_message_ids.append(str(msg.message_id))
+            logging.info(f"✅ Пост для категорії '{cat['name']}' успешно опубліковано! ID: {msg.message_id}")
             
         except Exception as ai_err:
             logging.error(f"❌ Помилка роботи ШІ Gemini для категорії {cat['name']}: {ai_err}")
+
+    if new_message_ids:
+        try:
+            with open(IDS_FILE, "w") as f:
+                f.write("\n".join(new_message_ids))
+            logging.info(f"💾 Нові ID збережено у файл для видалення завтра: {new_message_ids}")
+        except Exception as save_err:
+            logging.error(f"Не вдалося зберегти ID у файл: {save_err}")
             
 # --- ОБРОБНИКИ КОМАНД (ВЕРХНІЙ ПРІОРИТЕТ) ---
 
