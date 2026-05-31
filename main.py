@@ -488,7 +488,8 @@ prompt = (
     
     f"Ось текстові дані з усіма готелями суто для напрямку {cat['name']}: {raw_country_data}"
 )
-        try:
+
+    try:
             response = ai_model.generate_content(prompt)
             post_text = response.text
             
