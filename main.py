@@ -12,7 +12,7 @@ from datetime import datetime
 from aiohttp import web
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from aiogram import Bot, Dispatcher, types, F
-from aiogram.filters import Command, CommandStart, CommandObject, StateFilter, Command as CommandFilter
+from aiogram.filters import Command, CommandStart, CommandObject, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
@@ -39,7 +39,7 @@ try:
     FEEDBACK_MINUTE = int(os.getenv("FEEDBACK_MINUTE", "0"))
     ASSISTANT_HOUR = int(os.getenv("ASSISTANT_HOUR", "19"))
     ASSISTANT_MINUTE = int(os.getenv("ASSISTANT_MINUTE", "0"))
-except ValueError:
+except (ValueError, TypeError):
     raise ValueError("ADMIN_ID, REVIEWS_CHAT_ID, FEEDBACK_HOUR та FEEDBACK_MINUTE мають бути цілими числами!")
 
 if not API_TOKEN or not DATABASE_URL:
@@ -351,7 +351,7 @@ async def generate_and_send_ai_tour_post():
     cta_text = (
         f"⚠️ <b>Зверніть увагу: всі ціни вказані за тур та є актуальними на сьогодні!</b>\n\n"
         f"✈️ Бажаєте забронювати або підібрати інший варіант?\n"
-        f"Наш electronic помічник допоможе вам швидко сформувати запит, а професійний менеджер особисто опрацює ваші побажання.\n"
+        f"Наш electronic помічник поможет вам швидко сформувати запит, а професійний менеджер особисто опрацює ваші побажання.\n"
         f"👉 <a href='{bot_link1}'>Залишити запит менеджеру</a>\n\n"
         f"🎁 <b>Приємний бонус:</b> кожен наш клієнт може отримати персональну знижку за програмою лояльності!\n"
         f"👉 <a href='{bot_link2}'>Отримати знижку</a>"
@@ -437,7 +437,7 @@ async def generate_and_send_ai_tour_post():
         raw_country_data = await fetch_tat_ua_data(cat["slug"])
         
         if not raw_country_data or len(raw_country_data.strip()) < 100:
-            logging.info(f"⏩ Пропущено блок '{cat['name']}', бо на сайті немає актуальних даних по цій країні.")
+            logging.info(f"⏩ Пропущено публікацію категорії '{cat['name']}', бо на сайті немає актуальних даних по цій країні.")
             continue
 
         prompt = (
@@ -458,7 +458,7 @@ async def generate_and_send_ai_tour_post():
             f"- Уникай 'оверпрайсу': не вибирай готелі з космічними цінами (наприклад, за 250-500 тис. грн), якщо в тексті є чудові варіанти за 60-100 тис. грн. Шукай 'золоту середину' ціни та сервісу.\n\n"
             
             f"⚠️ СУВОРЕ ПРАВИЛО ДЛЯ АНАЛІЗУ ДАТ (БРАТИ СУГУБО З ТЕКСТУ ТУРУ):\n"
-            f"1. Ти зобов'язаний знайти в тексті конкретного туру дату вильоту/виїзду (день, місяць та рік), яка прописана поруч із обраною тобою ціною. Заборонено вигадувати день, місяць та рік самостійно.\n"
+            f"1. Ти зобов'язаний знайти в тексті конкретного туру дату вильоту/виїзду (день, місяць та рік), яка прописана поруч із обраною тобою ціною. Заборонено вигадувати день, місяць та рік самостійно.\n\n"
             
             f"Суворо дотримуйся наступних правил конструювання тексту:\n"
             f"1. НІКОЛИ не згадуй назву сторонніх сайтів чи парсерів.\n"     
