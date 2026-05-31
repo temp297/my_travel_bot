@@ -11,3 +11,4 @@ pydantic-settings
 pyrogram
 tgcrypto
 requests
+playwright
