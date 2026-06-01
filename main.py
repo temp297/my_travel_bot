@@ -280,14 +280,12 @@ def generate_discount():
 
 async def fetch_tat_ua_data(country_slug: str):
     url = "https://turne.ua/ua/hottours"
-    logging.info(f"🌐 [ПАРСЕР] Запуск ультра-оптимізованого скролу сторінки: {url}")
+    logging.info(f"🌐 [ПАРСЕР] Запуск збалансованого глибокого скролу для: {url}")
     
-    # Використовуємо set для автоматичного відсікання дублікатів текстових блоків
-    collected_chunks = set()
+    all_text = ""
     
     try:
         async with async_playwright() as p:
-            # Запуск Chromium у супер-легкому режимі (максимальна економія пам'яті під 512MB RAM)
             browser = await p.chromium.launch(
                 headless=True,
                 args=[
@@ -298,17 +296,16 @@ async def fetch_tat_ua_data(country_slug: str):
                     "--disable-gpu",
                     "--no-first-run",
                     "--no-zygote",
-                    "--single-process",
-                    "--js-flags='--max-old-space-size=120'"  # обмежуємо апетити самого JS двигуна
+                    "--single-process"
                 ]
             )
             context = await browser.new_context(
                 user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-                viewport={"width": 1280, "height": 800}
+                viewport={"width": 1280, "height": 1080}
             )
             page = await context.new_page()
             
-            # Жорстко блокуємо завантаження картинок, відео, шрифтів та будь-якої аналітики
+            # Блокуємо картинки, шрифти та аналітику для економії RAM
             async def block_assets(route):
                 req_type = route.request.resource_type
                 req_url = route.request.url.lower()
@@ -320,77 +317,59 @@ async def fetch_tat_ua_data(country_slug: str):
             await page.route("**/*", block_assets)
             
             try:
-                logging.info(f"🔎 Переходимо на сторінку пошуку...")
+                logging.info(f"🔎 Переходимо на сторінку...")
                 await page.goto(url, wait_until="commit", timeout=45000)
                 await page.wait_for_timeout(3000)
                 
-                logging.info(f"📜 ЗАПУСК СТРИМІНГ-СКРОЛУ З ОЧИЩЕННЯМ ПАМ'ЯТІ DOM...")
+                # Оптимальна кількість кроків, щоб дістати дуже багато турів, але не впасти по пам'яті
+                total_scroll_steps = 11 
+                logging.info(f"📜 Виконуємо глибоке покрокове прокручування ({total_scroll_steps} кроків)...")
                 
-                scroll_count = 0
-                max_scrolls = 25  # Дозволяємо глибокий скрол (до 25 разів поспіль)
+                for step in range(1, total_scroll_steps + 1):
+                    await page.evaluate("window.scrollBy(0, 1200);")
+                    await page.wait_for_timeout(1800) # Оптимальна пауза для рендерингу карток
+                    if step % 3 == 0:
+                        logging.info(f"🔄 Прокручено кроків: {step}/{total_scroll_steps}")
                 
-                while scroll_count < max_scrolls:
-                    # 1. Витягуємо корисний текст із поточних видимих елементів на сторінці перед скролом
-                    current_html = await page.content()
-                    soup = BeautifulSoup(current_html, 'html.parser')
-                    
-                    # Очищаємо HTML-копію від сміття для стабільності get_text
-                    for el in soup(["script", "style", "header", "footer", "nav", "aside"]):
-                        el.decompose()
-                    
-                    # Збираємо весь текстовий контент та ділимо його на логічні рядки
-                    lines = soup.get_text(separator="\n", strip=True).split("\n")
-                    temp_chunk = ""
-                    for line in lines:
-                        clean_line = " ".join(line.split())
-                        if not clean_line:
-                            continue
-                        temp_chunk += " " + clean_line
-                        # Якщо бачимо кінець картки туру (ціна або ночі), зберігаємо фрагмент
-                        if "грн" in clean_line or "ноч" in clean_line or len(temp_chunk) > 350:
-                            if "грн" in temp_chunk and len(temp_chunk) > 50:
-                                collected_chunks.add(temp_chunk.strip())
-                            temp_chunk = ""
-                    
-                    # 2. ОЧИЩЕННЯ DOM ЧЕРЕЗ JAVASCRIPT: видаляємо вже відрендерені блоки з пам'яті браузера, 
-                    # щоб звільнити RAM, залишаючи лише нижній маркер для підвантаження наступних турів
-                    await page.evaluate("""() => {
-                        // Знаходимо картки готелів або блоки турів за характерними ознаками структури
-                        const items = document.querySelectorAll('div, a, li');
-                        items.forEach(el => {
-                            if ((el.innerText && el.innerText.includes('грн') && el.innerText.length < 600) || el.tagName === 'HEADER' || el.tagName === 'FOOTER') {
-                                // Залишаємо останні 3 елементи, щоб скрипт сайту бачив, що скрол триває, решту — видаляємо
-                                if (el.getBoundingClientRect().bottom < window.innerHeight - 400) {
-                                    el.remove();
-                                }
-                            }
-                        });
-                    }""")
-                    
-                    # 3. Робимо крок скролу вниз для виклику нової порції турів
-                    await page.evaluate("window.scrollTo(0, document.body.scrollHeight);")
-                    await page.wait_for_timeout(2000)  # Пауза для підвантаження даних із мережі
-                    
-                    scroll_count += 1
-                    if scroll_count % 5 == 0:
-                        logging.info(f"🔄 Прокручено {scroll_count}/{max_scrolls} рівнів. Зібрано унікальних фрагментів: {len(collected_chunks)}")
-                        
+                # Забираємо HTML після завершення скролу
+                html_content = await page.content()
+                soup = BeautifulSoup(html_content, 'html.parser')
+                
+                # Вирізаємо непотрібні важкі теги
+                for script in soup(["script", "style", "header", "footer", "nav", "aside", "form"]):
+                    script.decompose()
+                
+                raw_text = soup.get_text(separator=" ", strip=True)
+                
+                # ОПТИМІЗАЦІЯ І СТИСНЕННЯ ТЕКСТУ:
+                # Прибираємо повторювані системні фрази сайту, які роздувають контекст для Gemini
+                words_to_clean = [
+                    "Цена за тур 2 взрослых", "ПОДРОБНЕЕ", "Цена за тур", 
+                    "Все типы отдыха", "Горящие туры", "Поиск туров", "Екскурсійні тури"
+                ]
+                
+                for word in words_to_clean:
+                    raw_text = raw_text.replace(word, "")
+                    raw_text = raw_text.replace(word.lower(), "")
+                
+                # Прибираємо зайві пробіли
+                clean_text = " ".join(raw_text.split())
+                all_text += f"\n\n--- ДАНІ ГЛИБОКОГО ПОШУКУ ТУРІВ ({url}) ---\n" + clean_text
+                
             finally:
                 await page.close()
                 await context.close()
                 await browser.close()
                 
     except Exception as e:
-        logging.error(f"❌ Помилка динамічного сканування сторінки: {e}")
+        logging.error(f"❌ Помилка сканування сторінки: {e}")
         return None
 
-    # Формуємо фінальний суцільний текст для Gemini
-    if not collected_chunks:
-        logging.warning("⚠️ Не вдалося зібрати дані з сайту.")
+    if not all_text.strip() or len(all_text) < 300:
+        logging.warning("⚠️ Текст не зібрано або він занадто короткий.")
         return None
         
-    all_text = f"\n\n--- АКТУАЛЬНІ ДАНІ ПОВНОГО ПОШУКУ САЙТУ ({url}) ---\n" + " \n ".join(collected_chunks)
-    logging.info(f"✅ [УСПІХ] Пам'ять збережено! Зібрано {len(all_text)} символів для ШІ Gemini!")
+    logging.info(f"✅ Успішно підготовлено {len(all_text)} символів стисненого тексту для Gemini без вильоту RAM!")
     return all_text
 
 async def generate_and_send_ai_tour_post():
