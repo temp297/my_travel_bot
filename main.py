@@ -40,7 +40,7 @@ try:
     FEEDBACK_HOUR = int(os.getenv("FEEDBACK_HOUR", "11"))
     FEEDBACK_MINUTE = int(os.getenv("FEEDBACK_MINUTE", "0"))
     ASSISTANT_HOUR = int(os.getenv("ASSISTANT_HOUR", "12"))
-    ASSISTANT_MINUTE = int(os.getenv("ASSISTANT_MINUTE", "44"))
+    ASSISTANT_MINUTE = int(os.getenv("ASSISTANT_MINUTE", "55"))
 except ValueError:
     raise ValueError("ADMIN_ID, REVIEWS_CHAT_ID, FEEDBACK_HOUR та FEEDBACK_MINUTE мають бути цілими числами!")
 
@@ -279,11 +279,9 @@ def generate_discount():
 # --- ФУНКЦІЇ ЕЛЕКТРОННОГО ПОМІЧНИКА (ПАРСИНГ ТА ШІ) ---
 
 async def fetch_tat_ua_data(country_slug: str):
-    # Приводимо назву країни до нижнього регістру для гнучкого пошуку
     c_name = country_slug.strip().lower()
     
-    # Словник для точного пошуку. Оскільки на сайті в картках назва країни може писатися 
-    # як українською, так і російською (наприклад, "Турция, Сиде"), ми враховуємо обидва варіанти.
+    # Словник для точного пошуку. Забезпечує збіг, навіть якщо на сайті назва країни написана російською
     country_variants = {
         "туреччина": ["туреччина", "турция", "turkey"],
         "єгипет": ["єгипет", "египет", "egypt"],
@@ -299,12 +297,11 @@ async def fetch_tat_ua_data(country_slug: str):
     search_keywords = country_variants.get(c_name, [c_name])
     url = "https://turne.ua/ua/hottours"
     
-    logging.info(f"🌐 [ПАРСЕР TURNE.UA] Запуск реального браузера для країни '{country_slug}'...")
+    logging.info(f"🌐 [ПАРСЕР TURNE.UA] Оптимізований запуск для: '{country_slug}'...")
     filtered_tours = []
     
     try:
         async with async_playwright() as p:
-            # Запускаємо Chromium у максимально полегшеному режимі для економії RAM на Render
             browser = await p.chromium.launch(
                 headless=True,
                 args=[
@@ -319,96 +316,85 @@ async def fetch_tat_ua_data(country_slug: str):
                 ]
             )
             context = await browser.new_context(
-                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-                viewport={"width": 1280, "height": 800}
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, Gecko) Chrome/122.0.0.0 Safari/537.36",
+                viewport={"width": 1400, "height": 900}
             )
             page = await context.new_page()
             
-            # Блокуємо важкі картинки та шрифти, щоб Render не вилітав через ліміт пам'яті
+            # Жорстко блокуємо медіа та аналітику для миттєвого завантаження
             async def block_assets(route):
-                if route.request.resource_type in ["image", "media", "font"]:
+                req_type = route.request.resource_type
+                req_url = route.request.url.lower()
+                if req_type in ["image", "media", "font"] or "analytics" in req_url or "google" in req_url or "facebook" in req_url:
                     await route.abort()
                 else:
                     await route.continue_()
             await page.route("**/*", block_assets)
             
             try:
-                # Переходимо на сайт україномовної версії гарячих турів
-                await page.goto(url, wait_until="networkidle", timeout=60000)
+                # Зміна ПАРАМЕТРА: замість networkidle використовуємо domcontentloaded (не чекає зависання мережі)
+                await page.goto(url, wait_until="domcontentloaded", timeout=25000)
                 
-                # Чекаємо 5 секунд, поки відпрацюють внутрішні API-скрипти сайту і з'являться картки
-                await page.wait_for_timeout(5000)
+                # Даємо 3.5 секунди, щоб JavaScript просто відрендерив картки турів на екрані
+                await page.wait_for_timeout(3500)
                 
-                # Робимо кілька плавних скролів вниз, щоб ініціювати завантаження lazy-load блоків
-                for _ in range(3):
-                    await page.evaluate("window.scrollBy(0, 800);")
-                    await page.wait_for_timeout(1000)
-                
-                # Забираємо згенерований HTML-код сторінки
+                # Зчитуємо HTML сторінки
                 html_content = await page.content()
                 soup = BeautifulSoup(html_content, 'html.parser')
                 
-                # На сайті turne.ua кожна плитка туру загорнута в посилання або div з класом, що містить "item" або "card"
-                # Застосовуємо універсальний пошук блоків, які містять кнопку "Подробнее" або ціну в грн
-                potential_cards = soup.find_all(['div', 'a', 'li'], class_=True)
-                
-                for card in potential_cards:
-                    card_text = card.get_text(separator=" ", strip=True)
-                    clean_text = " ".join(card_text.split())
+                # Аналізуємо всі div-контейнери на сторінці
+                all_divs = soup.find_all('div')
+                for div in all_divs:
+                    # Шукаємо конкретно блоки, які містять кнопку або посилання з текстом "подробнее"
+                    div_text = div.get_text(separator=" ", strip=True)
+                    clean_text = " ".join(div_text.split())
                     
-                    # Валідація: це має бути саме картка туру з ціною та тривалістю
-                    if "грн" not in clean_text or len(clean_text) < 60 or len(clean_text) > 600:
-                        continue
-                    
-                    # 1. ФІЛЬТР КРАЇНИ: перевіряємо, чи є ключові слова країни в цій конкретній картці
-                    text_lower = clean_text.lower()
-                    if not any(keyword in text_lower for keyword in search_keywords):
-                        continue
-                    
-                    # 2. ЖОРСТКИЙ ФІЛЬТР ЗІРКОВОСТІ: повністю ігноруємо готелі 3*
-                    if any(bad_star in clean_text for bad_star in ["3*", "3★", "3 *", "3-зв"]):
-                        continue
-                    
-                    # 3. ПЕРЕВІРКА ПРЕМІУМУ: додаємо лише готелі 4* та 5*
-                    if any(star in clean_text for star in ["4*", "5*", "4★", "5★", "4 *", "5 *", "4-зв", "5-зв"]):
-                        if clean_text not in filtered_tours:
-                            filtered_tours.append(clean_text)
-                            
+                    # Валідація картки туру за довжиною та наявністю ціни
+                    if "грн" in clean_text and 80 < len(clean_text) < 550:
+                        text_lower = clean_text.lower()
+                        
+                        # 1. Перевірка країни за словником варіантів
+                        if any(keyword in text_lower for keyword in search_keywords):
+                            # 2. Суворий фільтр: якщо в картці затесалися 3 зірки — ігноруємо
+                            if any(bad_star in clean_text for bad_star in ["3*", "3★", "3 *", "3-зв"]):
+                                continue
+                            # 3. Дозволяємо виключно 4* та 5*
+                            if any(star in clean_text for star in ["4*", "5*", "4★", "5★", "4 *", "5 *", "4-зв", "5-зв"]):
+                                if clean_text not in filtered_tours:
+                                    filtered_tours.append(clean_text)
+                                    
             finally:
                 await page.close()
                 await context.close()
                 await browser.close()
                 
     except Exception as e:
-        logging.error(f"❌ Помилка роботи Playwright на turne.ua: {e}")
+        logging.error(f"❌ Помилка зчитування turne.ua: {e}")
         return None
 
-    # Якщо картки за класами не розділилися через специфіку DOM структури SPA, робимо текстовий зріз
+    # Резервний загальний пошук (якщо попередня фільтрація виявилася занадто жорсткою)
     if not filtered_tours and 'html_content' in locals():
-        logging.warning("⚠️ Структурні блоки не знайдено, застосовуємо лінійний контентний аналіз...")
         for el in soup(["script", "style", "header", "footer", "nav", "aside"]):
             el.decompose()
-            
         lines = soup.get_text(separator="\n", strip=True).split("\n")
         temp_chunk = ""
         for line in lines:
             temp_chunk += " " + " ".join(line.split())
-            if "грн" in line or len(temp_chunk) > 300:
+            if "грн" in line or len(temp_chunk) > 250:
                 chunk_lower = temp_chunk.lower()
                 if any(k in chunk_lower for k in search_keywords):
                     if not any(bs in temp_chunk for bs in ["3*", "3★", "3 *"]):
                         if any(star in temp_chunk for star in ["4*", "5*", "4★", "5★"]):
-                            if temp_chunk.strip() not in filtered_tours:
-                                filtered_tours.append(temp_chunk.strip())
+                            filtered_tours.append(temp_chunk.strip())
                 temp_chunk = ""
 
     if not filtered_tours:
-        logging.warning(f"ℹ️ На сторінці turne.ua зараз немає активних турів 4* або 5* для країни '{country_slug}'")
+        logging.warning(f"ℹ️ Для напрямку '{country_slug}' на сайті turne.ua зараз немає доступних турів 4*-5*")
         return None
         
     filtered_tours = list(set(filtered_tours))
-    logging.info(f"✅ Парсер успішно знайшов {len(filtered_tours)} турів 4*-5* для напрямку {country_slug}!")
-    return f"\n\n=== РЕАЛЬНІ ГОРЯЧІ ТУРИ TURNE.UA ДЛЯ НАПРЯМКУ {country_slug.upper()} (4* ТА 5*) ===\n" + "\n---\n".join(filtered_tours[:12])
+    logging.info(f"✅ [УСПІХ] Знайдено {len(filtered_tours)} турів 4*-5* для країни {country_slug}!")
+    return f"\n\n=== ГОРЯЧІ ТУРИ TURNE.UA ДЛЯ НАПРЯМКУ {country_slug.upper()} (4* ТА 5*) ===\n" + "\n---\n".join(filtered_tours[:10])
 
 
 async def generate_and_send_ai_tour_post():
