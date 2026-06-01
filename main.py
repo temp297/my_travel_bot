@@ -39,8 +39,8 @@ try:
     REVIEWS_CHAT_ID = int(os.getenv("REVIEWS_CHAT_ID"))
     FEEDBACK_HOUR = int(os.getenv("FEEDBACK_HOUR", "11"))
     FEEDBACK_MINUTE = int(os.getenv("FEEDBACK_MINUTE", "0"))
-    ASSISTANT_HOUR = int(os.getenv("ASSISTANT_HOUR", "12"))
-    ASSISTANT_MINUTE = int(os.getenv("ASSISTANT_MINUTE", "55"))
+    ASSISTANT_HOUR = int(os.getenv("ASSISTANT_HOUR", "13"))
+    ASSISTANT_MINUTE = int(os.getenv("ASSISTANT_MINUTE", "8"))
 except ValueError:
     raise ValueError("ADMIN_ID, REVIEWS_CHAT_ID, FEEDBACK_HOUR та FEEDBACK_MINUTE мають бути цілими числами!")
 
@@ -279,29 +279,15 @@ def generate_discount():
 # --- ФУНКЦІЇ ЕЛЕКТРОННОГО ПОМІЧНИКА (ПАРСИНГ ТА ШІ) ---
 
 async def fetch_tat_ua_data(country_slug: str):
-    c_name = country_slug.strip().lower()
+    # Використовуємо єдину сторінку, де зібрані всі гарячі тури
+    url = "https://turne.ua/ua/hottours/"
+    logging.info(f"🌐 [ПАРСЕР] Запуск реального браузера для спільної сторінки: {url}")
     
-    # Словник для точного пошуку. Забезпечує збіг, навіть якщо на сайті назва країни написана російською
-    country_variants = {
-        "туреччина": ["туреччина", "турция", "turkey"],
-        "єгипет": ["єгипет", "египет", "egypt"],
-        "греція": ["греція", "греция", "greece"],
-        "болгарія": ["болгарія", "болгария", "bulgaria"],
-        "чорногорія": ["чорногорія", "черногория", "montenegro"],
-        "іспанія": ["іспанія", "испания", "spain"],
-        "кіпр": ["кіпр", "кипр", "cyprus"],
-        "туніс": ["туніс", "тунис", "tunisia"],
-        "оае": ["оае", "эмираты", "uae", "дубай"]
-    }
-    
-    search_keywords = country_variants.get(c_name, [c_name])
-    url = "https://turne.ua/ua/hottours"
-    
-    logging.info(f"🌐 [ПАРСЕР TURNE.UA] Оптимізований запуск для: '{country_slug}'...")
-    filtered_tours = []
+    all_text = ""
     
     try:
         async with async_playwright() as p:
+            # Запуск з аргументами оптимізації RAM під Render
             browser = await p.chromium.launch(
                 headless=True,
                 args=[
@@ -316,85 +302,91 @@ async def fetch_tat_ua_data(country_slug: str):
                 ]
             )
             context = await browser.new_context(
-                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, Gecko) Chrome/122.0.0.0 Safari/537.36",
-                viewport={"width": 1400, "height": 900}
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                viewport={"width": 1920, "height": 1080}
             )
             page = await context.new_page()
             
-            # Жорстко блокуємо медіа та аналітику для миттєвого завантаження
+            # Блокування важких картинок, шрифтів та медіа (захист від вильотів пам'яті на Render)
             async def block_assets(route):
-                req_type = route.request.resource_type
-                req_url = route.request.url.lower()
-                if req_type in ["image", "media", "font"] or "analytics" in req_url or "google" in req_url or "facebook" in req_url:
+                if route.request.resource_type in ["image", "media", "font"]:
                     await route.abort()
                 else:
                     await route.continue_()
+            
             await page.route("**/*", block_assets)
             
             try:
-                # Зміна ПАРАМЕТРА: замість networkidle використовуємо domcontentloaded (не чекає зависання мережі)
-                await page.goto(url, wait_until="domcontentloaded", timeout=25000)
+                logging.info(f"🔎 Переходимо на сторінку пошуку...")
+                # Використовуємо commit або domcontentloaded для швидкого старту
+                await page.goto(url, wait_until="domcontentloaded", timeout=45000)
                 
-                # Даємо 3.5 секунди, щоб JavaScript просто відрендерив картки турів на екрані
-                await page.wait_for_timeout(3500)
+                logging.info(f"⏳ Очікуємо первинне завантаження структури...")
+                await page.wait_for_timeout(3000)
                 
-                # Зчитуємо HTML сторінки
+                logging.info(f"📜 Запуск інтелектуального прокручування до КІНЦЯ сторінки...")
+                
+                last_height = await page.evaluate("document.body.scrollHeight")
+                scroll_attempts = 0
+                max_attempts = 15  # Обмежуємо максимум 15 скролами, щоб вкластися в таймаут і не зациклитися
+                
+                while scroll_attempts < max_attempts:
+                    # Прокручуємо до поточного низу сторінки
+                    await page.evaluate("window.scrollTo(0, document.body.scrollHeight);")
+                    
+                    # Очікуємо 2 секунди, поки підвантажиться нова порція lazy-load турів
+                    await page.wait_for_timeout(2000)
+                    
+                    # Перевіряємо, чи змінилася висота сторінки
+                    new_height = await page.evaluate("document.body.scrollHeight")
+                    
+                    if new_height == last_height:
+                        # Якщо висота не змінилася, спробуємо крутанути трохи вгору-вниз (штовхнути скрол)
+                        await page.evaluate("window.scrollBy(0, -300);")
+                        await page.wait_for_timeout(500)
+                        await page.evaluate("window.scrollTo(0, document.body.scrollHeight);")
+                        await page.wait_for_timeout(1500)
+                        
+                        new_height = await page.evaluate("document.body.scrollHeight")
+                        if new_height == last_height:
+                            logging.info("🏁 Досягнуто фактичного кінця сторінки (нові тури більше не завантажуються).")
+                            break
+                            
+                    last_height = new_height
+                    scroll_attempts += 1
+                    logging.info(f" 단계 Скрол {scroll_attempts}/{max_attempts} виконано успішно...")
+                
+                # Забираємо згенерований контент після повного скролу
                 html_content = await page.content()
                 soup = BeautifulSoup(html_content, 'html.parser')
                 
-                # Аналізуємо всі div-контейнери на сторінці
-                all_divs = soup.find_all('div')
-                for div in all_divs:
-                    # Шукаємо конкретно блоки, які містять кнопку або посилання з текстом "подробнее"
-                    div_text = div.get_text(separator=" ", strip=True)
-                    clean_text = " ".join(div_text.split())
+                # Очищаємо код від сміттєвих тегів
+                for script in soup(["script", "style", "header", "footer", "nav", "aside"]):
+                    script.decompose()
                     
-                    # Валідація картки туру за довжиною та наявністю ціни
-                    if "грн" in clean_text and 80 < len(clean_text) < 550:
-                        text_lower = clean_text.lower()
-                        
-                        # 1. Перевірка країни за словником варіантів
-                        if any(keyword in text_lower for keyword in search_keywords):
-                            # 2. Суворий фільтр: якщо в картці затесалися 3 зірки — ігноруємо
-                            if any(bad_star in clean_text for bad_star in ["3*", "3★", "3 *", "3-зв"]):
-                                continue
-                            # 3. Дозволяємо виключно 4* та 5*
-                            if any(star in clean_text for star in ["4*", "5*", "4★", "5★", "4 *", "5 *", "4-зв", "5-зв"]):
-                                if clean_text not in filtered_tours:
-                                    filtered_tours.append(clean_text)
-                                    
+                main_text = soup.get_text(separator=" ", strip=True)
+                
+                # Прибираємо множинні пробіли, роблячи текст компактнішим для Gemini
+                clean_main_text = " ".join(main_text.split())
+                
+                all_text += f"\n\n--- АКТУАЛЬНІ ДАНІ ПОШУКУ КРАЇНИ ({url}) ---\n" + clean_main_text
+                
             finally:
+                # Надійне закриття ресурсів
                 await page.close()
                 await context.close()
                 await browser.close()
                 
     except Exception as e:
-        logging.error(f"❌ Помилка зчитування turne.ua: {e}")
+        logging.error(f"❌ Помилка динамічного сканування сторінки: {e}")
         return None
 
-    # Резервний загальний пошук (якщо попередня фільтрація виявилася занадто жорсткою)
-    if not filtered_tours and 'html_content' in locals():
-        for el in soup(["script", "style", "header", "footer", "nav", "aside"]):
-            el.decompose()
-        lines = soup.get_text(separator="\n", strip=True).split("\n")
-        temp_chunk = ""
-        for line in lines:
-            temp_chunk += " " + " ".join(line.split())
-            if "грн" in line or len(temp_chunk) > 250:
-                chunk_lower = temp_chunk.lower()
-                if any(k in chunk_lower for k in search_keywords):
-                    if not any(bs in temp_chunk for bs in ["3*", "3★", "3 *"]):
-                        if any(star in temp_chunk for star in ["4*", "5*", "4★", "5★"]):
-                            filtered_tours.append(temp_chunk.strip())
-                temp_chunk = ""
-
-    if not filtered_tours:
-        logging.warning(f"ℹ️ Для напрямку '{country_slug}' на сайті turne.ua зараз немає доступних турів 4*-5*")
+    if not all_text.strip() or len(all_text) < 200:
+        logging.warning("⚠️ Не вдалося зібрати текст зі сторінки.")
         return None
         
-    filtered_tours = list(set(filtered_tours))
-    logging.info(f"✅ [УСПІХ] Знайдено {len(filtered_tours)} турів 4*-5* для країни {country_slug}!")
-    return f"\n\n=== ГОРЯЧІ ТУРИ TURNE.UA ДЛЯ НАПРЯМКУ {country_slug.upper()} (4* ТА 5*) ===\n" + "\n---\n".join(filtered_tours[:10])
+    logging.info(f"✅ Успішно зібрано {len(all_text)} символів тексту для обробки ШІ Gemini!")
+    return all_text
 
 
 async def generate_and_send_ai_tour_post():
