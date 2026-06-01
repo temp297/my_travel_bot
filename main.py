@@ -40,7 +40,7 @@ try:
     FEEDBACK_HOUR = int(os.getenv("FEEDBACK_HOUR", "11"))
     FEEDBACK_MINUTE = int(os.getenv("FEEDBACK_MINUTE", "0"))
     ASSISTANT_HOUR = int(os.getenv("ASSISTANT_HOUR", "14"))
-    ASSISTANT_MINUTE = int(os.getenv("ASSISTANT_MINUTE", "4"))
+    ASSISTANT_MINUTE = int(os.getenv("ASSISTANT_MINUTE", "16"))
 except ValueError:
     raise ValueError("ADMIN_ID, REVIEWS_CHAT_ID, FEEDBACK_HOUR та FEEDBACK_MINUTE мають бути цілими числами!")
 
@@ -279,98 +279,58 @@ def generate_discount():
 # --- ФУНКЦІЇ ЕЛЕКТРОННОГО ПОМІЧНИКА (ПАРСИНГ ТА ШІ) ---
 
 async def fetch_tat_ua_data(country_slug: str):
+    # Пряма URL-адреса, з якої сайт Turne.ua завантажує картки турів
     url = "https://turne.ua/ua/hottours"
-    logging.info(f"🌐 [ПАРСЕР] Запуск збалансованого глибокого скролу для: {url}")
     
-    all_text = ""
+    # Заголовки, щоб сайт розпізнавав бота як звичайного користувача
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+        "Accept-Language": "uk-UA,uk;q=0.9,en-US;q=0.8,en;q=0.7"
+    }
+    
+    logging.info(f"🚀 [ПАРСЕР API] Блискавичний запуск без браузера для сторінки: {url}")
     
     try:
-        async with async_playwright() as p:
-            browser = await p.chromium.launch(
-                headless=True,
-                args=[
-                    "--no-sandbox",
-                    "--disable-setuid-sandbox",
-                    "--disable-dev-shm-usage",
-                    "--disable-accelerated-2d-canvas",
-                    "--disable-gpu",
-                    "--no-first-run",
-                    "--no-zygote",
-                    "--single-process"
-                ]
-            )
-            context = await browser.new_context(
-                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-                viewport={"width": 1280, "height": 1080}
-            )
-            page = await context.new_page()
-            
-            # Блокуємо картинки, шрифти та аналітику для економії RAM
-            async def block_assets(route):
-                req_type = route.request.resource_type
-                req_url = route.request.url.lower()
-                if req_type in ["image", "media", "font"] or "analytics" in req_url or "google" in req_url or "facebook" in req_url:
-                    await route.abort()
-                else:
-                    await route.continue_()
-            
-            await page.route("**/*", block_assets)
-            
-            try:
-                logging.info(f"🔎 Переходимо на сторінку...")
-                await page.goto(url, wait_until="commit", timeout=45000)
-                await page.wait_for_timeout(3000)
-                
-                # Оптимальна кількість кроків, щоб дістати дуже багато турів, але не впасти по пам'яті
-                total_scroll_steps = 11 
-                logging.info(f"📜 Виконуємо глибоке покрокове прокручування ({total_scroll_steps} кроків)...")
-                
-                for step in range(1, total_scroll_steps + 1):
-                    await page.evaluate("window.scrollBy(0, 1200);")
-                    await page.wait_for_timeout(1800) # Оптимальна пауза для рендерингу карток
-                    if step % 3 == 0:
-                        logging.info(f"🔄 Прокручено кроків: {step}/{total_scroll_steps}")
-                
-                # Забираємо HTML після завершення скролу
-                html_content = await page.content()
-                soup = BeautifulSoup(html_content, 'html.parser')
-                
-                # Вирізаємо непотрібні важкі теги
-                for script in soup(["script", "style", "header", "footer", "nav", "aside", "form"]):
-                    script.decompose()
-                
-                raw_text = soup.get_text(separator=" ", strip=True)
-                
-                # ОПТИМІЗАЦІЯ І СТИСНЕННЯ ТЕКСТУ:
-                # Прибираємо повторювані системні фрази сайту, які роздувають контекст для Gemini
-                words_to_clean = [
-                    "Цена за тур 2 взрослых", "ПОДРОБНЕЕ", "Цена за тур", 
-                    "Все типы отдыха", "Горящие туры", "Поиск туров", "Екскурсійні тури"
-                ]
-                
-                for word in words_to_clean:
-                    raw_text = raw_text.replace(word, "")
-                    raw_text = raw_text.replace(word.lower(), "")
-                
-                # Прибираємо зайві пробіли
-                clean_text = " ".join(raw_text.split())
-                all_text += f"\n\n--- ДАНІ ГЛИБОКОГО ПОШУКУ ТУРІВ ({url}) ---\n" + clean_text
-                
-            finally:
-                await page.close()
-                await context.close()
-                await browser.close()
-                
-    except Exception as e:
-        logging.error(f"❌ Помилка сканування сторінки: {e}")
-        return None
-
-    if not all_text.strip() or len(all_text) < 300:
-        logging.warning("⚠️ Текст не зібрано або він занадто короткий.")
-        return None
+        # Виконуємо миттєвий HTTP-запит безпосередньо до сервера сайту
+        response = requests.get(url, headers=headers, timeout=15)
         
-    logging.info(f"✅ Успішно підготовлено {len(all_text)} символів стисненого тексту для Gemini без вильоту RAM!")
-    return all_text
+        if response.status_code != 200:
+            logging.error(f"❌ Сервер turne.ua повернув помилку: {response.status_code}")
+            return None
+            
+        soup = BeautifulSoup(response.text, 'html.parser')
+        
+        # Вирізаємо весь непотрібний код
+        for script in soup(["script", "style", "header", "footer", "nav", "aside", "form"]):
+            script.decompose()
+            
+        # Отримуємо чистий суцільний текст сторінки, який так любить ваш Gemini
+        raw_text = soup.get_text(separator=" ", strip=True)
+        
+        # Прибираємо повторювані системні фрази для максимального стиснення контексту
+        words_to_clean = [
+            "Цена за tour 2 взрослых", "Цена за тур 2 взрослых", "ПОДРОБНЕЕ", 
+            "Цена за тур", "Все типы отдыха", "Горящие туры", "Поиск туров", "Екскурсійні тури"
+        ]
+        for word in words_to_clean:
+            raw_text = raw_text.replace(word, "")
+            raw_text = raw_text.replace(word.lower(), "")
+            
+        clean_text = " ".join(raw_text.split())
+        
+        # Додаткова валідація на довжину отриманих даних
+        if len(clean_text) < 200:
+            logging.warning("⚠️ Отриманий текст занадто короткий.")
+            return None
+            
+        all_text = f"\n\n--- АКТУАЛЬНІ ДАНІ ШВИДКОГО ПОШУКУ ТУРІВ ({url}) ---\n" + clean_text
+        logging.info(f"✅ [МИТТЄВИЙ УСПІХ] Зібрано {len(all_text)} символів без використання Playwright! RAM в безпеці.")
+        return all_text
+
+    except Exception as e:
+        logging.error(f"❌ Помилка швидкого API-сканування сторінки: {e}")
+        return None
 
 async def generate_and_send_ai_tour_post():
     if not ai_model or not AUTO_POST_CHAT_ID:
