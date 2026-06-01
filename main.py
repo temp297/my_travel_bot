@@ -20,6 +20,8 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder, ReplyKeyboardBuilder
 from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
 from aiogram_calendar import SimpleCalendar, SimpleCalendarCallback
 import google.generativeai as genai
+import httpx
+import re
 
 # Список команд для фільтрації
 BOT_COMMANDS = ["start", "cancel", "admin", "discount", "check_discounts", "use_discount", "users"]
@@ -38,7 +40,7 @@ try:
     FEEDBACK_HOUR = int(os.getenv("FEEDBACK_HOUR", "11"))
     FEEDBACK_MINUTE = int(os.getenv("FEEDBACK_MINUTE", "0"))
     ASSISTANT_HOUR = int(os.getenv("ASSISTANT_HOUR", "12"))
-    ASSISTANT_MINUTE = int(os.getenv("ASSISTANT_MINUTE", "3"))
+    ASSISTANT_MINUTE = int(os.getenv("ASSISTANT_MINUTE", "18"))
 except ValueError:
     raise ValueError("ADMIN_ID, REVIEWS_CHAT_ID, FEEDBACK_HOUR та FEEDBACK_MINUTE мають бути цілими числами!")
 
@@ -277,112 +279,97 @@ def generate_discount():
 # --- ФУНКЦІЇ ЕЛЕКТРОННОГО ПОМІЧНИКА (ПАРСИНГ ТА ШІ) ---
 
 async def fetch_tat_ua_data(country_slug: str):
-    # Тепер країна передається для того, щоб ми відфільтрували її назву з загального списку
-    country_name = country_slug.strip().capitalize()  # Наприклад: "Туреччина", "Єгипет"
+    # Приводимо назву країни до правильних форматів для пошуку в тексті
+    country_name = country_slug.strip().capitalize() # Наприклад: "Туреччина", "Єгипет", "Греція"
     
-    url = "https://turne.ua/ua/hottours/"
-    logging.info(f"🌐 [ПАРСЕР TURNE.UA] Збір даних для країни '{country_name}' зі спільної сторінки: {url}")
+    url = "https://turne.ua/ua/hottours"
+    logging.info(f"⚡ [ПАРСЕР TURNE.UA] Швидкий HTTP-запит для країни '{country_name}': {url}")
     
     filtered_tours = []
     
     try:
-        async with async_playwright() as p:
-            browser = await p.chromium.launch(
-                headless=True,
-                args=[
-                    "--no-sandbox",
-                    "--disable-setuid-sandbox",
-                    "--disable-dev-shm-usage",
-                    "--disable-accelerated-2d-canvas",
-                    "--disable-gpu",
-                    "--no-first-run",
-                    "--no-zygote",
-                    "--single-process"
-                ]
-            )
-            context = await browser.new_context(
-                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-                viewport={"width": 1920, "height": 1080}
-            )
-            page = await context.new_page()
-            
-            # Економимо RAM на Render: блокуємо картинки, шрифти та медіа
-            async def block_assets(route):
-                if route.request.resource_type in ["image", "media", "font"]:
-                    await route.abort()
-                else:
-                    await route.continue_()
-            await page.route("**/*", block_assets)
-            
-            try:
-                await page.goto(url, wait_until="domcontentloaded", timeout=60000)
-                await page.wait_for_timeout(4000)
+        # Робимо звичайний швидкий асинхронний запит замість запуску цілого браузера Playwright
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        }
+        
+        async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
+            response = await client.get(url, headers=headers)
+            if response.status_code != 200:
+                logging.error(f"❌ Сайт повернув код відповіді: {response.status_code}")
+                return None
                 
-                # Робимо більше скролів (6 разів), щоб підвантажити тури для всіх країн на одній сторінці
-                for _ in range(6):
-                    await page.evaluate("window.scrollBy(0, 1200);")
-                    await page.wait_for_timeout(1500)
-                
-                html_content = await page.content()
-                soup = BeautifulSoup(html_content, 'html.parser')
-                
-                # Шукаємо блоки турів
-                tour_cards = soup.find_all(class_=lambda x: x and ('card' in x or 'item' in x or 'tour' in x or 'product' in x))
-                
-                if not tour_cards:
-                    # Якщо специфічні класи карток не знайдено, беремо теги артикулів/елементів списку
-                    tour_cards = soup.find_all(['article', 'li', 'div'], class_=True)
+            html_content = response.text
 
-                for card in tour_cards:
-                    card_text = card.get_text(separator=" ", strip=True)
-                    clean_text = " ".join(card_text.split())
-                    
-                    # ПЕРЕВІРКА 1: Чи належить цей тур до потрібної нам країни (наприклад, "Туреччина")?
-                    # Перевіряємо регістронезалежно
-                    if country_name.lower() not in clean_text.lower():
-                        continue
-                    
-                    # ПЕРЕВІРКА 2: Примусово відсікаємо готелі 3*
-                    if "3*" in clean_text or "3★" in clean_text or "3 *" in clean_text:
-                        continue
-                    
-                    # ПЕРЕВІРКА 3: Беремо лише преміум 4* та 5*
-                    if any(star in clean_text for star in ["4*", "5*", "4★", "5★", "4 *", "5 *", "4-зв", "5-зв"]):
-                        if len(clean_text) > 60 and clean_text not in filtered_tours:
-                            filtered_tours.append(clean_text)
-                            
-            finally:
-                await page.close()
-                await context.close()
-                await browser.close()
-                
-    except Exception as e:
-        logging.error(f"❌ Помилка сканування сторінки Turne.ua: {e}")
-        return None
-
-    # Резервний текстовий пошук по всій сторінці, якщо блоки не розпарсилися за класами
-    if not filtered_tours and 'html_content' in locals():
-        logging.warning(f"⚠️ Картки не знайдені за структурою. Шукаємо згадки '{country_name}' у загальному тексті...")
         soup = BeautifulSoup(html_content, 'html.parser')
+        
+        # Видаляємо непотрібні важкі теги, які заважають аналізу
         for el in soup(["script", "style", "header", "footer", "nav", "aside"]):
             el.decompose()
-            
-        lines = soup.get_text(separator="\n", strip=True).split("\n")
-        for line in lines:
-            line_clean = " ".join(line.split())
-            if country_name.lower() in line_clean.lower():
-                if "3*" in line_clean or "3★" in line_clean:
-                    continue
-                if any(s in line_clean for s in ["4*", "5*", "4★", "5★"]):
-                    if line_clean not in filtered_tours:
-                        filtered_tours.append(line_clean)
 
+        # Спосіб 1: Шукаємо будь-які блочні елементи, що схожі на картки турів
+        # На Turne.ua блоки часто мають класи, що містейть 'tour', 'card', 'item', 'row', 'offer'
+        potential_cards = soup.find_all(['div', 'li', 'article', 'tr'])
+        
+        for card in potential_cards:
+            card_text = card.get_text(separator=" ", strip=True)
+            # Прибираємо зайві пробіли всередині рядка
+            clean_text = " ".join(card_text.split())
+            
+            # Якщо текст занадто короткий або задовгий — це не картка туру
+            if len(clean_text) < 60 or len(clean_text) > 600:
+                continue
+                
+            # Перевіряємо, чи є в цьому блоці наша країна
+            if country_name.lower() not in clean_text.lower():
+                continue
+                
+            # СУВОРЕ ПРАВИЛО: Якщо знайшли 3* — відсікаємо готель повністю
+            if any(bad_star in clean_text for bad_star in ["3*", "3★", "3 *"]):
+                continue
+                
+            # Перевіряємо наявність 4* або 5*
+            if any(star in clean_text for star in ["4*", "5*", "4★", "5★", "4 *", "5 *", "4-зв", "5-зв"]):
+                if clean_text not in filtered_tours:
+                    filtered_tours.append(clean_text)
+
+        # Спосіб 2 (Резервний): Якщо блоки за класами не розділилися, ріжемо весь текст сайту на речення/рядки
+        if not filtered_tours:
+            logging.warning("⚠️ Блочний аналіз не дав результатів. Застосовуємо Regex-аналіз рядків...")
+            # Розбиваємо весь текст сайту за роздільниками турів
+            raw_text = soup.get_text(separator="\n", strip=True)
+            lines = raw_text.split("\n")
+            
+            current_chunk = ""
+            for line in lines:
+                line_clean = " ".join(line.split())
+                if not line_clean:
+                    continue
+                    
+                current_chunk += " " + line_clean
+                
+                # Якщо назбирали достатньо тексту для одного туру або зустріли ознаку ціни (грн)
+                if "грн" in line_clean or len(current_chunk) > 200:
+                    if country_name.lower() in current_chunk.lower():
+                        if not any(bs in current_chunk for bs in ["3*", "3★", "3 *"]):
+                            if any(star in current_chunk for star in ["4*", "5*", "4★", "5★"]):
+                                filtered_tours.append(current_chunk.strip())
+                    current_chunk = "" # Очищуємо для наступного туру
+
+    except Exception as e:
+        logging.error(f"❌ Помилка швидкого сканування Turne.ua: {e}")
+        return None
+
+    # Остаточна перевірка результату
     if not filtered_tours:
-        logging.warning(f"ℹ️ Не знайдено актуальних турів 4* або 5* для країни '{country_name}' на сторінці.")
+        logging.warning(f"ℹ️ Не знайдено ЖОДНОГО туру 4* чи 5* для країни '{country_name}'")
         return None
         
-    logging.info(f"✅ Успішно відфільтровано {len(filtered_tours)} готелів 4* та 5* для напрямку: {country_name}")
-    return f"\n\n=== АКТУАЛЬНІ ГОРЯЧІ ТУРИ: {country_name.upper()} (4* ТА 5*) ===\n" + "\n---\n".join(filtered_tours[:15])
+    # Видаляємо дублікати, якщо вони проскочили
+    filtered_tours = list(set(filtered_tours))
+    
+    logging.info(f"✅ Парсер знайшов {len(filtered_tours)} релевантних фрагментів для країни: {country_name}")
+    return f"\n\n=== АКТУАЛЬНІ ДАНІ TURNE.UA ДЛЯ НАПРЯМКУ {country_name.upper()} (4* ТА 5*) ===\n" + "\n---\n".join(filtered_tours[:15])
 
 
 async def generate_and_send_ai_tour_post():
