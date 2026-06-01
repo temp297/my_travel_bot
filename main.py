@@ -42,7 +42,7 @@ try:
     FEEDBACK_HOUR = int(os.getenv("FEEDBACK_HOUR", "11"))
     FEEDBACK_MINUTE = int(os.getenv("FEEDBACK_MINUTE", "0"))
     ASSISTANT_HOUR = int(os.getenv("ASSISTANT_HOUR", "14"))
-    ASSISTANT_MINUTE = int(os.getenv("ASSISTANT_MINUTE", "40"))
+    ASSISTANT_MINUTE = int(os.getenv("ASSISTANT_MINUTE", "46"))
 except ValueError:
     raise ValueError("ADMIN_ID, REVIEWS_CHAT_ID, FEEDBACK_HOUR та FEEDBACK_MINUTE мають бути цілими числами!")
 
@@ -297,7 +297,7 @@ async def fetch_tat_ua_data(country_slug: str):
     
     # Кількість сторінок для збору. Оскільки на кожній сторінці багато турів, 
     # 5-6 сторінок охоплять абсолютно весь масив актуальних пропозицій для Gemini
-    max_pages = 6 
+    max_pages = 60 
     
     try:
         for page_num in range(1, max_pages + 1):
