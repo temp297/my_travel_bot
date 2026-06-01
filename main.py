@@ -38,7 +38,7 @@ try:
     FEEDBACK_HOUR = int(os.getenv("FEEDBACK_HOUR", "11"))
     FEEDBACK_MINUTE = int(os.getenv("FEEDBACK_MINUTE", "0"))
     ASSISTANT_HOUR = int(os.getenv("ASSISTANT_HOUR", "11"))
-    ASSISTANT_MINUTE = int(os.getenv("ASSISTANT_MINUTE", "12"))
+    ASSISTANT_MINUTE = int(os.getenv("ASSISTANT_MINUTE", "43"))
 except ValueError:
     raise ValueError("ADMIN_ID, REVIEWS_CHAT_ID, FEEDBACK_HOUR та FEEDBACK_MINUTE мають бути цілими числами!")
 
@@ -277,7 +277,7 @@ def generate_discount():
 # --- ФУНКЦІЇ ЕЛЕКТРОННОГО ПОМІЧНИКА (ПАРСИНГ ТА ШІ) ---
 
 async def fetch_tat_ua_data(country_slug: str):
-    base_url = "https://www.ittour.com.ua/"
+    base_url = "https://turne.ua/ua/hottours"
     url = f"{base_url}"
     logging.info(f"🌐 [ПАРСЕР] Запуск реального браузера для країни: {url}")
     
