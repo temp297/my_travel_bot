@@ -23,6 +23,7 @@ import google.generativeai as genai
 import aiohttp
 import re
 import json
+import time
 
 # Список команд для фільтрації
 BOT_COMMANDS = ["start", "cancel", "admin", "discount", "check_discounts", "use_discount", "users"]
@@ -41,7 +42,7 @@ try:
     FEEDBACK_HOUR = int(os.getenv("FEEDBACK_HOUR", "11"))
     FEEDBACK_MINUTE = int(os.getenv("FEEDBACK_MINUTE", "0"))
     ASSISTANT_HOUR = int(os.getenv("ASSISTANT_HOUR", "14"))
-    ASSISTANT_MINUTE = int(os.getenv("ASSISTANT_MINUTE", "30"))
+    ASSISTANT_MINUTE = int(os.getenv("ASSISTANT_MINUTE", "40"))
 except ValueError:
     raise ValueError("ADMIN_ID, REVIEWS_CHAT_ID, FEEDBACK_HOUR та FEEDBACK_MINUTE мають бути цілими числами!")
 
@@ -280,85 +281,69 @@ def generate_discount():
 # --- ФУНКЦІЇ ЕЛЕКТРОННОГО ПОМІЧНИКА (ПАРСИНГ ТА ШІ) ---
 
 async def fetch_tat_ua_data(country_slug: str):
+    # Базовий URL гарячих турів, до якого ми будемо підставляти сторінки пагінації
     base_url = "https://turne.ua/ua/hottours"
-    # Ендпоінт сайту, який відповідає за динамічне підвантаження наступних сторінок
-    ajax_url = "https://turne.ua/modules/hottours/ajax/hottours.aspx"
     
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "Accept": "*/*",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
         "Accept-Language": "uk-UA,uk;q=0.9,en-US;q=0.8,en;q=0.7",
-        "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
-        "X-Requested-With": "XMLHttpRequest",
-        "Origin": "https://turne.ua",
         "Referer": "https://turne.ua/ua/hottours"
     }
     
-    logging.info(f"🚀 [ПАРСЕР БАГАТОСТОРІНКОВИЙ] Збір ВСІХ турів через легкі API-запити...")
+    logging.info(f"🚀 [ПАРСЕР GET-ПАГІНАЦІЇ] Збір ВСІХ карток турів через безпечні GET-запити...")
     
     all_text_blocks = []
     
+    # Кількість сторінок для збору. Оскільки на кожній сторінці багато турів, 
+    # 5-6 сторінок охоплять абсолютно весь масив актуальних пропозицій для Gemini
+    max_pages = 6 
+    
     try:
-        # 1. Спочатку завантажуємо першу (базову) сторінку
-        response = requests.get(base_url, headers=headers, timeout=15)
-        if response.status_code == 200:
-            soup = BeautifulSoup(response.text, 'html.parser')
-            for script in soup(["script", "style", "header", "footer", "nav", "aside", "form"]):
-                script.decompose()
-            first_page_text = " ".join(soup.get_text(separator=" ", strip=True).split())
-            all_text_blocks.append(first_page_text)
-        
-        # 2. Цикл підвантаження наступних сторінок (гортаємо сайт углиб)
-        # 8 сторінок охоплять абсолютно весь масив наявних гарячих турів (~100-150 готелів)
-        max_pages = 8 
-        logging.info(f"📥 Починаємо збір додаткових сторінок (з 2 по {max_pages})...")
-        
-        for page_num in range(2, max_pages + 1):
-            # Формуємо payload-параметри, які сайт вимагає для видачі наступної порції турів
-            payload = {
-                "page": str(page_num),
-                "itemsPerPage": "12",  # Кількість карток на одну сторінку підвантаження
-                "culture": "uk"        # Запит українською мовою
-            }
+        for page_num in range(1, max_pages + 1):
+            # Якщо це перша сторінка — йдемо на корінь, якщо наступні — додаємо параметр ?page=X
+            url = base_url if page_num == 1 else f"{base_url}?page={page_num}"
+            
+            logging.info(f"📥 Скануємо сторінку {page_num}/{max_pages}: {url}")
             
             try:
-                # Надсилаємо легкий POST запит безпосередньо в систему пагінації сайту
-                ajax_response = requests.post(ajax_url, headers=headers, data=payload, timeout=10)
+                # Виконуємо легкий і швидкий HTTP GET запит
+                response = requests.get(url, headers=headers, timeout=15)
                 
-                if ajax_response.status_code == 200:
-                    # Сервер сайту повертає JSON, де в одному з ключів лежить чистий HTML-код нових карток
-                    try:
-                        data = ajax_response.json()
-                        html_chunk = data.get("html", "") or data.get("Content", "") or ajax_response.text
-                    except Exception:
-                        html_chunk = ajax_response.text
+                if response.status_code == 200:
+                    soup = BeautifulSoup(response.text, 'html.parser')
                     
-                    if html_chunk and len(html_chunk) > 200:
-                        ajax_soup = BeautifulSoup(html_chunk, 'html.parser')
-                        for script in ajax_soup(["script", "style"]):
-                            script.decompose()
+                    # Вирізаємо важкі та непотрібні блоки інтерфейсу для стиснення тексту
+                    for script in soup(["script", "style", "header", "footer", "nav", "aside", "form"]):
+                        script.decompose()
                         
-                        page_text = " ".join(ajax_soup.get_text(separator=" ", strip=True).split())
-                        # Перевіряємо, чи ми не зациклилися і чи прийшли нові готелі
-                        if page_text and page_text not in all_text_blocks:
-                            all_text_blocks.append(page_text)
-                            logging.info(f"  ↳ Сторінка {page_num} успішно додана в масив.")
-                        else:
-                            logging.info(f"  🏁 Нові тури закінчилися на сторінці {page_num}.")
-                            break
-                else:
-                    logging.warning(f"⚠️ Не вдалося отримати сторінку {page_num}, статус: {ajax_response.status_code}")
+                    # Отримуємо чистий текст поточної сторінки
+                    page_text = " ".join(soup.get_text(separator=" ", strip=True).split())
                     
-            except Exception as ajax_err:
-                logging.error(f"❌ Помилка запиту сторінки {page_num}: {ajax_err}")
+                    # Перевіряємо, чи сторінка містить корисний контент (наприклад, згадку валюти або ночей)
+                    if "грн" in page_text or "ноч" in page_text:
+                        all_text_blocks.append(page_text)
+                        logging.info(f"  ↳ Сторінка {page_num} успішно опрацьована.")
+                    else:
+                        logging.warning(f"  🏁 Сторінка {page_num} порожня або не містить турів. Зупиняємося.")
+                        break
+                else:
+                    logging.error(f"❌ Помилка завантаження сторінки {page_num}, статус: {response.status_code}")
+                    break
+                    
+                # Невелика мікропауза 0.5 сек, щоб імітувати поведінку людини і не навантажувати сайт
+                time.sleep(0.5)
+                
+            except Exception as page_err:
+                logging.error(f"❌ Помилка на кроці сторінки {page_num}: {page_err}")
                 continue
                 
-        # Об'єднуємо всі сторінки в один гігантський масив тексту
+        # Об'єднуємо отримані сторінки в єдину суцільну текстову базу
         full_raw_text = " \n ".join(all_text_blocks)
         
-        # Очищаємо текст від сміттєвих фраз, щоб полегшити читання для Gemini
+        # Очищаємо текст від повторюваних фраз-паразитів, які роздувають ліміти
         words_to_clean = [
-            "Цена за tour 2 взрослых", "Цена за тур 2 взрослых", "ПОДРОБНЕЕ", 
+            "Цена за tour 2 взрослых", "Цена за tour", "Цена за тур 2 взрослых", "ПОДРОБНЕЕ", 
             "Цена за тур", "Все типы отдыха", "Горящие туры", "Поиск туров", "Екскурсійні тури"
         ]
         for word in words_to_clean:
@@ -367,12 +352,16 @@ async def fetch_tat_ua_data(country_slug: str):
             
         final_clean_text = " ".join(full_raw_text.split())
         
-        all_text = f"\n\n--- АКТУАЛЬНІ ПОВНІ ДАНІ ПОШУКУ ВСІХ ТУРІВ ({base_url}) ---\n" + final_clean_text
-        logging.info(f"✅ [УСПІХ] Пул даних розширено! Зібрано {len(all_text)} символів (усі наявні картки сайту). RAM в нормі.")
+        if len(final_clean_text) < 300:
+            logging.warning("⚠️ Зібраний текст занадто короткий.")
+            return None
+            
+        all_text = f"\n\n--- АКТУАЛЬНІ ПОВНІ ДАНІ ГЛИБОКОГО ПОШУКУ ТУРІВ ({base_url}) ---\n" + final_clean_text
+        logging.info(f"✅ [МЕГА-УСПІХ] Пул розширено! Зібрано {len(all_text)} символів контенту. RAM в ідеальній безпеці!")
         return all_text
 
     except Exception as e:
-        logging.error(f"❌ Загальна помилка багатосторінкового парсингу: {e}")
+        logging.error(f"❌ Загальна помилка GET-пагiнацiї: {e}")
         return None
 
 async def generate_and_send_ai_tour_post():
