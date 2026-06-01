@@ -41,8 +41,8 @@ try:
     REVIEWS_CHAT_ID = int(os.getenv("REVIEWS_CHAT_ID"))
     FEEDBACK_HOUR = int(os.getenv("FEEDBACK_HOUR", "11"))
     FEEDBACK_MINUTE = int(os.getenv("FEEDBACK_MINUTE", "0"))
-    ASSISTANT_HOUR = int(os.getenv("ASSISTANT_HOUR", "14"))
-    ASSISTANT_MINUTE = int(os.getenv("ASSISTANT_MINUTE", "46"))
+    ASSISTANT_HOUR = int(os.getenv("ASSISTANT_HOUR", "18"))
+    ASSISTANT_MINUTE = int(os.getenv("ASSISTANT_MINUTE", "6"))
 except ValueError:
     raise ValueError("ADMIN_ID, REVIEWS_CHAT_ID, FEEDBACK_HOUR та FEEDBACK_MINUTE мають бути цілими числами!")
 
@@ -297,7 +297,7 @@ async def fetch_tat_ua_data(country_slug: str):
     
     # Кількість сторінок для збору. Оскільки на кожній сторінці багато турів, 
     # 5-6 сторінок охоплять абсолютно весь масив актуальних пропозицій для Gemini
-    max_pages = 60 
+    max_pages = 100 
     
     try:
         for page_num in range(1, max_pages + 1):
@@ -543,7 +543,7 @@ async def generate_and_send_ai_tour_post():
                 logging.info(f"⏩ Пропущено публікацію категорії '{cat['name']}', бо в згенерованому ШІ тексті відсутні картки готелів.")
                 continue
 
-            header_text = f"🧭 <b>Навігатор дня: {cat['name'].upper()} {cat['stars']} {cat['flag']} | {current_date_str}</b>\n\n"
+            header_text = f"🧭 <b>Навігатор дня: {cat['name'].upper()} {cat['flag']} | {current_date_str}</b>\n\n"
             full_message = f"{header_text}{post_text}\n\n{cta_text}"
             
             if index == len(categories) - 1:
