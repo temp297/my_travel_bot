@@ -40,7 +40,7 @@ try:
     FEEDBACK_HOUR = int(os.getenv("FEEDBACK_HOUR", "11"))
     FEEDBACK_MINUTE = int(os.getenv("FEEDBACK_MINUTE", "0"))
     ASSISTANT_HOUR = int(os.getenv("ASSISTANT_HOUR", "13"))
-    ASSISTANT_MINUTE = int(os.getenv("ASSISTANT_MINUTE", "8"))
+    ASSISTANT_MINUTE = int(os.getenv("ASSISTANT_MINUTE", "30"))
 except ValueError:
     raise ValueError("ADMIN_ID, REVIEWS_CHAT_ID, FEEDBACK_HOUR та FEEDBACK_MINUTE мають бути цілими числами!")
 
@@ -279,15 +279,15 @@ def generate_discount():
 # --- ФУНКЦІЇ ЕЛЕКТРОННОГО ПОМІЧНИКА (ПАРСИНГ ТА ШІ) ---
 
 async def fetch_tat_ua_data(country_slug: str):
-    # Використовуємо єдину сторінку, де зібрані всі гарячі тури
-    url = "https://turne.ua/ua/hottours/"
-    logging.info(f"🌐 [ПАРСЕР] Запуск реального браузера для спільної сторінки: {url}")
+    # Використовуємо загальну сторінку гарячих турів, де зібрані всі напрямки
+    url = "https://turne.ua/ua/hottours"
+    logging.info(f"🌐 [ПАРСЕР] Запуск повного прокручування сторінки: {url}")
     
     all_text = ""
     
     try:
         async with async_playwright() as p:
-            # Запуск з аргументами оптимізації RAM під Render
+            # Конфігурація запуску браузера для економії пам'яті на Render
             browser = await p.chromium.launch(
                 headless=True,
                 args=[
@@ -307,7 +307,7 @@ async def fetch_tat_ua_data(country_slug: str):
             )
             page = await context.new_page()
             
-            # Блокування важких картинок, шрифтів та медіа (захист від вильотів пам'яті на Render)
+            # Блокування зображень та важких шрифтів, щоб сторінка скролилася блискавично і Render не падав за лімітом RAM
             async def block_assets(route):
                 if route.request.resource_type in ["image", "media", "font"]:
                     await route.abort()
@@ -318,76 +318,78 @@ async def fetch_tat_ua_data(country_slug: str):
             
             try:
                 logging.info(f"🔎 Переходимо на сторінку пошуку...")
-                # Використовуємо commit або domcontentloaded для швидкого старту
-                await page.goto(url, wait_until="domcontentloaded", timeout=45000)
+                # Використовуємо commit для швидкої фіксації переходу без зависань
+                await page.goto(url, wait_until="commit", timeout=45000)
                 
                 logging.info(f"⏳ Очікуємо первинне завантаження структури...")
                 await page.wait_for_timeout(3000)
                 
-                logging.info(f"📜 Запуск інтелектуального прокручування до КІНЦЯ сторінки...")
+                logging.info(f"📜 ЗАПУСК ПРОКРУЧУВАННЯ ДО ПОВНОГО КІНЦЯ СТОРІНКИ...")
                 
+                # Початкова висота вікна сторінки
                 last_height = await page.evaluate("document.body.scrollHeight")
-                scroll_attempts = 0
-                max_attempts = 15  # Обмежуємо максимум 15 скролами, щоб вкластися в таймаут і не зациклитися
+                scroll_count = 0
+                max_scrolls = 30  # Захисний ліміт, щоб робот не крутив вічно, якщо сайт зациклиться
                 
-                while scroll_attempts < max_attempts:
-                    # Прокручуємо до поточного низу сторінки
+                while scroll_count < max_scrolls:
+                    # Робимо плавний скрол до поточного низу сторінки
                     await page.evaluate("window.scrollTo(0, document.body.scrollHeight);")
                     
-                    # Очікуємо 2 секунди, поки підвантажиться нова порція lazy-load турів
+                    # Чекаємо 2 секунди: це КРИТИЧНО важливо, щоб скрипти сайту встигли відрендерити нові тури
                     await page.wait_for_timeout(2000)
                     
-                    # Перевіряємо, чи змінилася висота сторінки
+                    # Вимірюємо нову висоту сторінки після підвантаження даних
                     new_height = await page.evaluate("document.body.scrollHeight")
                     
+                    # Якщо висота не змінилася — можливо, lazy-load застряг. Штовхаємо його мікро-рухом вгору
                     if new_height == last_height:
-                        # Якщо висота не змінилася, спробуємо крутанути трохи вгору-вниз (штовхнути скрол)
-                        await page.evaluate("window.scrollBy(0, -300);")
+                        await page.evaluate("window.scrollBy(0, -400);")
                         await page.wait_for_timeout(500)
                         await page.evaluate("window.scrollTo(0, document.body.scrollHeight);")
                         await page.wait_for_timeout(1500)
-                        
                         new_height = await page.evaluate("document.body.scrollHeight")
+                        
+                        # Якщо й після цього висота не змінилася, значить ми дійсно в самому низу сайту
                         if new_height == last_height:
-                            logging.info("🏁 Досягнуто фактичного кінця сторінки (нові тури більше не завантажуються).")
+                            logging.info(f"🏁 Скролінг завершено успішно. Досягнуто фіналу сторінки на {scroll_count}-му кроці.")
                             break
-                            
+                    
                     last_height = new_height
-                    scroll_attempts += 1
-                    logging.info(f" 단계 Скрол {scroll_attempts}/{max_attempts} виконано успішно...")
+                    scroll_count += 1
+                    if scroll_count % 5 == 0:
+                        logging.info(f"🔄 Прокручено вже {scroll_count} рівнів сайту...")
                 
-                # Забираємо згенерований контент після повного скролу
+                # Беремо фінальний згенерований HTML-код, де тепер містяться абсолютно всі тури
                 html_content = await page.content()
                 soup = BeautifulSoup(html_content, 'html.parser')
                 
-                # Очищаємо код від сміттєвих тегів
+                # Очищаємо від непотрібного коду, залишаючи сухий контент турів
                 for script in soup(["script", "style", "header", "footer", "nav", "aside"]):
                     script.decompose()
                     
                 main_text = soup.get_text(separator=" ", strip=True)
                 
-                # Прибираємо множинні пробіли, роблячи текст компактнішим для Gemini
-                clean_main_text = " ".join(main_text.split())
+                # Прибираємо зайві пробіли та переноси для компактності
+                clean_text = " ".join(main_text.split())
                 
-                all_text += f"\n\n--- АКТУАЛЬНІ ДАНІ ПОШУКУ КРАЇНИ ({url}) ---\n" + clean_main_text
+                all_text += f"\n\n--- АКТУАЛЬНІ ДАНІ ПОВНОГО ПОШУКУ САЙТУ ({url}) ---\n" + clean_text
                 
             finally:
-                # Надійне закриття ресурсів
+                # Надійне та послідовне закриття всіх процесів браузера всередині блоку
                 await page.close()
                 await context.close()
                 await browser.close()
                 
     except Exception as e:
-        logging.error(f"❌ Помилка динамічного сканування сторінки: {e}")
+        logging.error(f"❌ Помилка динамічного сканування сторінки {url}: {e}")
         return None
 
     if not all_text.strip() or len(all_text) < 200:
-        logging.warning("⚠️ Не вдалося зібрати текст зі сторінки.")
+        logging.warning("⚠️ Зібраний текст занадто короткий або порожній.")
         return None
         
-    logging.info(f"✅ Успішно зібрано {len(all_text)} символів тексту для обробки ШІ Gemini!")
+    logging.info(f"✅ Успішно зібрано повний масив контенту сайту: {len(all_text)} символів!")
     return all_text
-
 
 async def generate_and_send_ai_tour_post():
     if not ai_model or not AUTO_POST_CHAT_ID:
