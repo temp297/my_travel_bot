@@ -41,7 +41,7 @@ try:
     REVIEWS_CHAT_ID = int(os.getenv("REVIEWS_CHAT_ID"))
     FEEDBACK_HOUR = int(os.getenv("FEEDBACK_HOUR", "11"))
     FEEDBACK_MINUTE = int(os.getenv("FEEDBACK_MINUTE", "0"))
-    ASSISTANT_HOUR = int(os.getenv("ASSISTANT_HOUR", "10"))
+    ASSISTANT_HOUR = int(os.getenv("ASSISTANT_HOUR", "11"))
     ASSISTANT_MINUTE = int(os.getenv("ASSISTANT_MINUTE", "0"))
 except ValueError:
     raise ValueError("ADMIN_ID, REVIEWS_CHAT_ID, FEEDBACK_HOUR та FEEDBACK_MINUTE мають бути цілими числами!")
@@ -280,9 +280,16 @@ def generate_discount():
 
 # --- ФУНКЦІЇ ЕЛЕКТРОННОГО ПОМІЧНИКА (ПАРСИНГ ТА ШІ) ---
 
-async def fetch_tat_ua_data(country_slug: str):
-    # Базовий URL гарячих турів, до якого ми будемо підставляти сторінки пагінації
-    base_url = "https://turne.ua/ua/hottours"
+async def fetch_tat_ua_data():
+    # Словник країн та їхніх прямих URL-адрес на сайті
+    country_urls = {
+        "turkey": "https://turne.ua/ua/tour/turciya",
+        "egypt": "https://turne.ua/ua/tour/egipet",
+        "bulgaria": "https://turne.ua/ua/tour/bolgariya",
+        "greece": "https://turne.ua/ua/tour/greciya",
+        "cyprus": "https://turne.ua/ua/tour/kipr",
+        "spain": "https://turne.ua/ua/tour/ispaniya"
+    }
     
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -291,57 +298,54 @@ async def fetch_tat_ua_data(country_slug: str):
         "Referer": "https://turne.ua/ua/hottours"
     }
     
-    logging.info(f"🚀 [ПАРСЕР GET-ПАГІНАЦІЇ] Збір ВСІХ карток турів через безпечні GET-запити...")
-    
+    logging.info(f"🚀 [ПАРСЕР] Початок ОДНОРАЗОВОГО збору даних по всіх країнах одночасно...")
     all_text_blocks = []
     
-    # Кількість сторінок для збору. Оскільки на кожній сторінці багато турів, 
-    # 5-6 сторінок охоплять абсолютно весь масив актуальних пропозицій для Gemini
-    max_pages = 100 
-    
+    # Скільки сторінок парсити для КОЖНОЇ країни. 
+    # По 5-10 сторінок на країну цілком достатньо, щоб Gemini мав вибір і текст не переповнив токени.
+    max_pages_per_country = 10 
+
     try:
-        for page_num in range(1, max_pages + 1):
-            # Якщо це перша сторінка — йдемо на корінь, якщо наступні — додаємо параметр ?page=X
-            url = base_url if page_num == 1 else f"{base_url}?page={page_num}"
+        for country_slug, base_url in country_urls.items():
+            logging.info(f"🌍 Збираємо пропозиції для напрямку: {country_slug.upper()}")
             
-            logging.info(f"📥 Скануємо сторінку {page_num}/{max_pages}: {url}")
-            
-            try:
-                # Виконуємо легкий і швидкий HTTP GET запит
-                response = requests.get(url, headers=headers, timeout=15)
+            for page_num in range(1, max_pages_per_country + 1):
+                url = base_url if page_num == 1 else f"{base_url}?page={page_num}"
+                logging.info(f"📥 Сторінка {page_num}/{max_pages_per_country}: {url}")
                 
-                if response.status_code == 200:
-                    soup = BeautifulSoup(response.text, 'html.parser')
+                try:
+                    # Виконуємо легкий синхронний HTTP GET запит
+                    response = requests.get(url, headers=headers, timeout=15)
                     
-                    # Вирізаємо важкі та непотрібні блоки інтерфейсу для стиснення тексту
-                    for script in soup(["script", "style", "header", "footer", "nav", "aside", "form"]):
-                        script.decompose()
+                    if response.status_code == 200:
+                        soup = BeautifulSoup(response.text, 'html.parser')
                         
-                    # Отримуємо чистий текст поточної сторінки
-                    page_text = " ".join(soup.get_text(separator=" ", strip=True).split())
-                    
-                    # Перевіряємо, чи сторінка містить корисний контент (наприклад, згадку валюти або ночей)
-                    if "грн" in page_text or "ноч" in page_text:
-                        all_text_blocks.append(page_text)
-                        logging.info(f"  ↳ Сторінка {page_num} успішно опрацьована.")
+                        # Вирізаємо сміття (меню, скрипти, футери)
+                        for script in soup(["script", "style", "header", "footer", "nav", "aside", "form"]):
+                            script.decompose()
+                            
+                        page_text = " ".join(soup.get_text(separator=" ", strip=True).split())
+                        
+                        if "грн" in page_text or "ноч" in page_text:
+                            # Додаємо мітку країни в текст, щоб ШІ було легше орієнтуватися, де чий контент
+                            all_text_blocks.append(f"\n[ДАНІ КРАЇНИ: {country_slug.upper()}]\n {page_text}")
+                        else:
+                            logging.warning(f"  🏁 Сторінка {page_num} для {country_slug} порожня. Переходимо до наступної країни.")
+                            break
                     else:
-                        logging.warning(f"  🏁 Сторінка {page_num} порожня або не містить турів. Зупиняємося.")
+                        logging.error(f"❌ Статус-код {response.status_code} на сторінці {page_num} ({country_slug})")
                         break
-                else:
-                    logging.error(f"❌ Помилка завантаження сторінки {page_num}, статус: {response.status_code}")
-                    break
+                        
+                    time.sleep(0.4) # Мікропауза, щоб сайт не заблокував
                     
-                # Невелика мікропауза 0.5 сек, щоб імітувати поведінку людини і не навантажувати сайт
-                time.sleep(0.5)
-                
-            except Exception as page_err:
-                logging.error(f"❌ Помилка на кроці сторінки {page_num}: {page_err}")
-                continue
-                
-        # Об'єднуємо отримані сторінки в єдину суцільну текстову базу
+                except Exception as page_err:
+                    logging.error(f"❌ Помилка пагінації {page_num} для {country_slug}: {page_err}")
+                    continue
+
+        # Об'єднуємо всі країни в один великий масив контенту
         full_raw_text = " \n ".join(all_text_blocks)
         
-        # Очищаємо текст від повторюваних фраз-паразитів, які роздувають ліміти
+        # Глибоке очищення від сміттєвих фраз
         words_to_clean = [
             "Цена за tour 2 взрослых", "Цена за tour", "Цена за тур 2 взрослых", "ПОДРОБНЕЕ", 
             "Цена за тур", "Все типы отдыха", "Горящие туры", "Поиск туров", "Екскурсійні тури"
@@ -352,16 +356,15 @@ async def fetch_tat_ua_data(country_slug: str):
             
         final_clean_text = " ".join(full_raw_text.split())
         
-        if len(final_clean_text) < 300:
-            logging.warning("⚠️ Зібраний текст занадто короткий.")
+        if len(final_clean_text) < 500:
+            logging.warning("⚠️ Зібрана сумарна база даних занадто мала.")
             return None
             
-        all_text = f"\n\n--- АКТУАЛЬНІ ПОВНІ ДАНІ ГЛИБОКОГО ПОШУКУ ТУРІВ ({base_url}) ---\n" + final_clean_text
-        logging.info(f"✅ [МЕГА-УСПІХ] Пул розширено! Зібрано {len(all_text)} symbols контенту. RAM в ідеальній безпеці!")
-        return all_text
+        logging.info(f"✅ [МЕГА-УСПІХ] Базу з сайту повністю сформовано! Всього символів: {len(final_clean_text)}. Передаємо в ШІ.")
+        return final_clean_text
 
     except Exception as e:
-        logging.error(f"❌ Загальна помилка GET-пагiнацiї: {e}")
+        logging.error(f"❌ Загальна помилка під час збору даних: {e}")
         return None
 
 async def generate_and_send_ai_tour_post():
@@ -386,11 +389,10 @@ async def generate_and_send_ai_tour_post():
     bot_link2 = "https://t.me/NavigatorToursBot?start=discount"
     current_date_str = datetime.now().strftime("%d.%m.%Y")
 
-    # ТУТ ЗМІНЕНО: Обидва тексти тепер повністю об'єднані в один суцільний блок
     cta_text = (
         f"⚠️ <b>Зверніть увагу: всі ціни вказані за тур та є актуальними на сьогодні!</b>\n\n"
         f"✈️ Бажаєте забронювати або підібрати інший варіант?\n"
-        f"Наш електронний помічник допоможе вам швидко сформувати запит, а професійний менеджер особисто опрацює ваші побажання.\n"
+        f"Наш電子ний помічник допоможе вам швидко сформувати запит, а професійний менеджер особисто опрацює ваші побажання.\n"
         f"👉 <a href='{bot_link1}'>Залишити запит менеджеру</a>\n\n"
         f"🎁 <b>Приємний бонус:</b> кожен наш клієнт може отримати персональну знижку за програмую лояльності!\n"
         f"👉 <a href='{bot_link2}'>Отримати знижку</a>\n\n"
@@ -398,10 +400,9 @@ async def generate_and_send_ai_tour_post():
         f"Поширюйте канал серед знайомих мандрівників — разом шукати вигідні тури цікавіше!"
     )
 
-    # --- 1. ВИДАЛЕННЯ МИНУЛОНІЧНІХ ПОСТІВ З БАЗИ ДАНИХ (ПЕРЕД ЦИКЛОМ) ---
+    # --- 1. ВИДАЛЕННЯ ВЧОРАШНІХ ПОСТІВ З БАЗИ ДАНИХ ПЕРЕД ЗАПУСКОМ ---
     async with pool.acquire() as conn:
         old_rows = await conn.fetch("SELECT message_id FROM daily_posts")
-        
         if old_rows:
             logging.info(f"🧹 Знайдено вчорашні пости для видалення в БД. Кількість: {len(old_rows)}")
             for row in old_rows:
@@ -409,72 +410,29 @@ async def generate_and_send_ai_tour_post():
                     await bot.delete_message(chat_id=CURRENT_CHAT_ID, message_id=row['message_id'])
                 except Exception as del_err:
                     logging.warning(f"Не вдалося видалити старий post {row['message_id']}: {del_err}")
-            
             await conn.execute("DELETE FROM daily_posts")
             logging.info("✨ Таблиця вчорашніх постів в БД успішно очищена.")
 
+    # --- КРИТИЧНА ЗМІНА: ОДНОРАЗОВИЙ СКАНОР ВСЬОГО САЙТУ ПЕРЕД ЦИКЛОМ КРАЇН ---
+    global_raw_tour_data = await fetch_tat_ua_data()
+    if not global_raw_tour_data:
+        logging.error("🛑 Не вдалося отримати контент із сайту. Роботу ШІ зупинено.")
+        return
+
     categories = [
-        {
-            "name": "ТУРЕЧЧИНА", 
-            "slug": "turkey",
-            "flag": "🇹🇷", 
-            "stars": "5★, 4★, 3★", 
-            "prompt_part": "Уважно проскануй весь наданий текст. Твоє завдання — вибрати до 5 НАЙКРАЩИХ РІЗНИХ готелів СУТО в ТУРЕЧЧИНІ за суворим пріоритетом зірковості."
-        },
-        {
-            "name": "ЄГИПЕТ", 
-            "slug": "egypt",
-            "flag": "🇪🇬", 
-            "stars": "5★, 4★, 3★", 
-            "prompt_part": "Уважно проскануй весь наданий текст. Твоє завдання — вибрати до 5 НАЙКРАЩИХ РІЗНИХ готелів СУТО в ЄГИПТІ за суворим пріоритетом зірковості."
-        },
-        {
-            "name": "БОЛГАРІЯ", 
-            "slug": "bulgaria",
-            "flag": "🇧🇬", 
-            "stars": "5★, 4★, 3★", 
-            "prompt_part": "Уважно проскануй весь наданий текст. Твоє завдання — вибрати до 5 НАЙКРАЩИХ РІЗНИХ готелів СУТО в БОЛГАРІЇ за суворим пріоритетом зірковості."
-        },
-        {
-            "name": "ГРЕЦІЯ", 
-            "slug": "greece",
-            "flag": "🇬🇷", 
-            "stars": "5★, 4★, 3★", 
-            "prompt_part": "Уважно проскануй весь наданий текст. Твоє завдання — вибрати до 5 НАЙКРАЩИХ РІЗНИХ готелів СУТО в ГРЕЦІЇ за суворим пріоритетом зірковості."
-        },
-        {
-            "name": "ЧОРНОГОРІЯ", 
-            "slug": "montenegro",
-            "flag": "🇲🇪", 
-            "stars": "5★, 4★, 3★", 
-            "prompt_part": "Уважно проскануй весь наданий текст. Твоє завдання — вибрати до 5 НАЙКРАЩИХ РІЗНИХ готелів СУТО в ЧОРНОГОРІЇ за суворим пріоритетом зірковості."
-        },
-        {
-            "name": "ІСПАНІЯ", 
-            "slug": "spain",
-            "flag": "🇪🇸", 
-            "stars": "5★, 4★, 3★", 
-            "prompt_part": "Уважно проскануй весь наданий текст. Твоє завдання — вибрати до 5 НАЙКРАЩИХ РІЗНИХ готелів СУТО в ІСПАНІЇ за суворим пріоритетом зірковості."
-        },
-        {
-            "name": "УКРАЇНА", 
-            "slug": "ukraine",
-            "flag": "🇺🇦", 
-            "stars": "5★, 4★, 3★", 
-            "prompt_part": "Уважно проскануй весь наданий текст. Твоє завдання — вибрати до 5 НАЙКРАЩИХ РІЗНИХ пропозицій або готелів СУТО в УКРАЇНІ за суворим пріоритетом зірковості."
-        }
+        {"name": "ТУРЕЧЧИНА", "slug": "turkey", "flag": "🇹🇷", "stars": "5★, 4★, 3★", "prompt_part": "Уважно проскануй весь наданий текст. Твоє завдання — вибрати до 5 НАЙКРАЩИХ РІЗНИХ готелів СУТО в ТУРЕЧЧИНІ (шукай маркер [ДАНІ КРАЇНИ: TURKEY]) за суворим пріоритетом зірковості."},
+        {"name": "ЄГИПЕТ", "slug": "egypt", "flag": "🇪🇬", "stars": "5★, 4★, 3★", "prompt_part": "Уважно проскануй весь наданий текст. Твоє завдання — вибрати до 5 НАЙКРАЩИХ РІЗНИХ готелів СУТО в ЄГИПТІ (шукай маркер [ДАНІ КРАЇНИ: EGYPT]) за суворим пріоритетом зірковості."},
+        {"name": "БОЛГАРІЯ", "slug": "bulgaria", "flag": "🇧🇬", "stars": "5★, 4★, 3★", "prompt_part": "Уважно проскануй весь наданий текст. Твоє завдання — вибрати до 5 НАЙКРАЩИХ РІЗНИХ готелів СУТО в БОЛГАРІЇ (шукай маркер [ДАНІ КРАЇНИ: BULGARIA]) за суворим пріоритетом зірковості."},
+        {"name": "ГРЕЦІЯ", "slug": "greece", "flag": "🇬🇷", "stars": "5★, 4★, 3★", "prompt_part": "Уважно проскануй весь наданий текст. Твоє завдання — вибрати до 5 НАЙКРАЩИХ РІЗНИХ готелів СУТО в ГРЕЦІЇ (шукай маркер [ДАНІ КРАЇНИ: GREECE]) за суворим пріоритетом зірковості."},
+        {"name": "КІПР", "slug": "cyprus", "flag": "🇨🇾", "stars": "5★, 4★, 3★", "prompt_part": "Уважно проскануй весь наданий текст. Твоє завдання — вибрати до 5 НАЙКРАЩИХ РІЗНИХ готелів СУТО на КІПРІ (шукай маркер [ДАНІ КРАЇНИ: CYPRUS]) за суворим пріоритетом зірковості."},
+        {"name": "ІСПАНІЯ", "slug": "spain", "flag": "🇪🇸", "stars": "5★, 4★, 3★", "prompt_part": "Уважно проскануй весь наданий текст. Твоє завдання — вибрати до 5 НАЙКРАЩИХ РІЗНИХ готелів СУТО в ІСПАНІЇ (шукай маркер [ДАНІ КРАЇНИ: SPAIN]) за суворим пріоритетом зірковості."}
     ]
 
     for index, cat in enumerate(categories):
+        # Оскільки запитів до сайту більше немає, пауза потрібна суто для уникнення Flood Control від Telegram API
         if index > 0:
-            logging.info(f"⏳ Очікуємо 10 секунд перед аналізом наступної країни '{cat['name']}'...")
-            await asyncio.sleep(10)
-
-        raw_country_data = await fetch_tat_ua_data(cat["slug"])
-        
-        if not raw_country_data or len(raw_country_data.strip()) < 100:
-            logging.info(f"⏩ Пропущено блок '{cat['name']}', бо на сайті немає актуальних даних по цій країні.")
-            continue
+            logging.info(f"⏳ Очікуємо 3 секунди перед обробкою ШІ для напрямку '{cat['name']}'...")
+            await asyncio.sleep(3)
 
         prompt = (
             f"Ти — професійний travel-копірайтер компанії. На основі НАДАНИХ ТЕКСТОВИХ ДАНИХ склади один цікавий, "
@@ -489,7 +447,7 @@ async def generate_and_send_ai_tour_post():
             f"Порушення цього пріоритету заборонено! Якщо є вища зірковість — нижчу ігноруй.\n\n"
             
             f"⚠️ ХУДОЖНІЙ ПЕРЕХІД:\n"
-            f"У вступному абзаці обов'язково адаптуй фразу-перехід під фактично обрану зірковість готелів. Наприклад, якщо у списку опинилися лише 5★, напиши: 'Ось наша добірка найкращих преміум-готелів 5★...'. Якщо вийшов мікс 5★ та 4★, напиши: 'Ось добірка найкращих готелів 4★ та 5★...'.\n\n"
+            f"У вступному абзаці обов'язково адаптуй фразу-перехід под фактично обрану зірковість готелів. Наприклад, якщо у списку опинилися лише 5★, напиши: 'Ось наша добірка найкращих преміум-готелів 5★...'. Якщо вийшов мікс 5★ та 4★, напиши: 'Ось добірка найкращих готелів 4★ та 5★...'.\n\n"
             
             f"⚠️ ГОЛОВНИЙ КРИТЕРІЙ ВІДБОРУ — ПРІОРІТЕТ ТРАНСПОРТУ ТА ПОВНОГО ПАКЕТУ:\n"
             f"Проаналізуй тип транспорту для готелів та відбери варіанти за суворим каскадним пріоритетом:\n"
@@ -501,13 +459,13 @@ async def generate_and_send_ai_tour_post():
             f"Підсумок: Завжди зберігай пріоритет транспорту (Авіа -> Автобус), але ВСЕРЕДИНІ обраного транспорту вибирай ТІЛЬКИ ті тури, де чітко включено проїзд, страховку та трансфер!\n\n"
             
             f"⚠️ КРИТИЧНО ВАЖЛИВЕ ПРАВИЛО ДЛЯ НАЙНИЖЧОЇ ЦІНИ ТА СИНХРОНІЗАЦІЇ:\n"
-            f"- Коли алгоритм відібрав готелі за пріоритетом трансферу (наприклад, авіа), вибирай среди них варіанти за ЯКІСТЮ та НАЙВИГІДНІШОЮ ціною для конкретної кількості ночей. \n"
+            f"- Коли алгоритм відібрав готелі за пріоритетом трансферу (наприклад, авіа з повним пакетом), вибирай серед них варіанти за ЯКІСТЮ та НАЙВИГІДНІШОЮ ціною для конкретної кількості ночей. \n"
             f"- НІКОЛИ не зліплюй ціну від дешевого автобусного туру з описом авіатуру! Ціна, тип харчування, трансфер та кількість ночей у шаблоні мають бути СУВОРО СИНХРОНІЗОВАНІ між собою для обраного варіанту.\n"
             f"- Якщо для одного готелю є кілька цін (за 4, 5 чи 7 ночей), виводь ту, яка є найпривабливішою, чітко вказавши відповідну їй кількість ночей.\n"
             f"- Уникай 'оверпрайсу': не вибирай готелі з космічними цінами (наприклад, за 250-500 тис. грн), якщо в тексті є чудові варіанти за 60-100 тис. грн. Шукай 'золоту середину' ціни та сервісу.\n\n"
             
             f"⚠️ СУВОРЕ ПРАВИЛО ДЛЯ АНАЛІЗУ ТА ФОРМАТУ ДАТ (ТОЧНИЙ ПОВТОР З САЙТУ):\n"
-            f"1. Знайди в тексті конкретного туру дату вильоту/виїзду (день, месяц, рік), яка прописана поруч із обраною ціною. Заборонено вигадувати дані самостійно.\n"
+            f"1. Знайди в тексті конкретного туру дату вильоту/виїзду (день, місяць, рік), яка прописана поруч із обраною ціною. Заборонено вигадувати дані самостійно.\n"
             f"2. КРИТИЧНО ВАЖЛИВО: Переноси дату в шаблон СУВОРО в тому форматі, в якому вона написана в джерелі (на сайті). "
             f"Якщо на сайті вказано цифровий формат (наприклад, '15.06.2026'), пиши '15.06.2026'. "
             f"Якщо на сайті вказано словами (наприклад, '19 червня' або '5 липня'), ти зобов'язаний перенести саме так: '19 червня' або '5 липня'. "
@@ -542,7 +500,8 @@ async def generate_and_send_ai_tour_post():
             f"- Пиши прямо і професійно: НЕ 'Може бути завеликим' -> А 'Велика територія'; НЕ 'Може бути далеко від моря' -> А 'Друга лінія, 400 м до пляжу'; НЕ 'Можливо старі номери' -> А 'Класичний/традиційний номерний фонд'.\n"
             f"- Також повністю заборонені фрази типу: 'Не вказано конкретних матеріальних недоліків в наданому тексті', 'Інформація відсутня'. Якщо даних немає — напиши нейтральний художній нюанс, який підходить усім готелям, але НІКОЛИ не пиши технічні виправдання!.\n\n"
             
-            f"Ось текстові дані з усіма готелями суто для напрямку {cat['name']}: {raw_country_data}"
+            # Передаємо весь загальний великий текст — ШІ сам відфільтрує потрібну країну за маркерами
+            f"Ось текстові дані з усіма готелями для аналізу: {global_raw_tour_data}"
         )
 
         try:
@@ -550,7 +509,7 @@ async def generate_and_send_ai_tour_post():
             post_text = response.text
             
             if len(post_text.strip()) < 100 or "📍" not in post_text or "🏨" not in post_text:
-                logging.info(f"⏩ Пропущено публікацію категорії '{cat['name']}', бо в згенерованому ШІ тексті відсутні картки готелів.")
+                logging.info(f"⏩ Пропущено блок '{cat['name']}', бо в згенерованому ШІ тексті немає карток готелів (можливо, країна зараз відсутня у вивантаженні).")
                 continue
 
             header_text = f"🧭 <b>Навігатор дня: {cat['name'].upper()} {cat['flag']} | {current_date_str}</b>\n\n"
@@ -563,14 +522,28 @@ async def generate_and_send_ai_tour_post():
                 message_thread_id=NAVIGATOR_DAY_TOPIC_ID if NAVIGATOR_DAY_TOPIC_ID else None
             )
 
-            # --- 2. ЗБЕРЕЖЕННЯ СВІЖОГО ID В БАЗУ ДАНИХ (ОДРАЗУ ПІСЛЯ ВІДПРАВКИ) ---
             async with pool.acquire() as conn:
                 await conn.execute("INSERT INTO daily_posts (message_id) VALUES ($1)", msg.message_id)
                 
-            logging.info(f"✅ Пост для категорії '{cat['name']}' успішно опубліковано! ID {msg.message_id} збережено в БД.")
+            logging.info(f"✅ Пост для категорії '{cat['name']}' успішно опубліковано!")
             
         except Exception as ai_err:
             logging.error(f"❌ Помилка роботи ШІ Gemini для категорії {cat['name']}: {ai_err}")
+
+    # --- НАДСИЛАЄТЬСЯ ОБ'ЄДНАНИЙ ФІНАЛЬНИЙ БЛОК ---
+    try:
+        logging.info("⏳ Надсилання фінального загального повідомлення...")
+        final_msg = await bot.send_message(
+            chat_id=CURRENT_CHAT_ID,
+            text=cta_text,
+            parse_mode="HTML",
+            message_thread_id=NAVIGATOR_DAY_TOPIC_ID if NAVIGATOR_DAY_TOPIC_ID else None
+        )
+        async with pool.acquire() as conn:
+            await conn.execute("INSERT INTO daily_posts (message_id) VALUES ($1)", final_msg.message_id)
+        logging.info(f"✅ Фінальний CTA-пост успішно опубліковано!")
+    except Exception as final_err:
+        logging.error(f"❌ Помилка надсилання фінального повідомлення: {final_err}")
 
     # --- ТУТ НАДСИЛАЄТЬСЯ ОБ'ЄДНАНИЙ ФІНАЛЬНИЙ БЛОК ---
     try:
