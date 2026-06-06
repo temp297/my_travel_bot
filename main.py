@@ -41,8 +41,8 @@ try:
     REVIEWS_CHAT_ID = int(os.getenv("REVIEWS_CHAT_ID"))
     FEEDBACK_HOUR = int(os.getenv("FEEDBACK_HOUR", "11"))
     FEEDBACK_MINUTE = int(os.getenv("FEEDBACK_MINUTE", "0"))
-    ASSISTANT_HOUR = int(os.getenv("ASSISTANT_HOUR", "11"))
-    ASSISTANT_MINUTE = int(os.getenv("ASSISTANT_MINUTE", "0"))
+    ASSISTANT_HOUR = int(os.getenv("ASSISTANT_HOUR", "19"))
+    ASSISTANT_MINUTE = int(os.getenv("ASSISTANT_MINUTE", "15"))
 except ValueError:
     raise ValueError("ADMIN_ID, REVIEWS_CHAT_ID, FEEDBACK_HOUR та FEEDBACK_MINUTE мають бути цілими числами!")
 
@@ -282,12 +282,13 @@ def generate_discount():
 
 async def fetch_tat_ua_data():
     country_urls = {
-        "turkey": "https://turne.ua/ua/tour/turciya",
-        "egypt": "https://turne.ua/ua/tour/egipet",
-        "bulgaria": "https://turne.ua/ua/tour/bolgariya",
-        "greece": "https://turne.ua/ua/tour/greciya",
-        "cyprus": "https://turne.ua/ua/tour/kipr",
-        "spain": "https://turne.ua/ua/tour/ispaniya"
+        "turkey": "https://tat.ua/search/turkey/",
+        "egypt": "https://tat.ua/search/egypt/",
+        "bulgaria": "https://tat.ua/search/bulgaria/",
+        "greece": "https://tat.ua/search/greece/",
+        "cyprus": "https://tat.ua/search/cyprus/",
+        "spain": "https://tat.ua/search/spain/",
+        "ukraine": "https://tat.ua/search/ukraine/"
     }
     
     headers = {
@@ -408,9 +409,10 @@ async def generate_and_send_ai_tour_post():
         {"name": "БОЛГАРІЯ", "slug": "bulgaria", "flag": "🇧🇬", "stars": "5★, 4★, 3★", "prompt_part": "Уважно проскануй весь наданий текст. Твоє завдання — вибрати до 5 НАЙКРАЩИХ РІЗНИХ готелів СУТО в БОЛГАРІЇ (шукай маркер [ДАНІ КРАЇНИ: BULGARIA]) за суворим пріоритетом зірковості."},
         {"name": "ГРЕЦІЯ", "slug": "greece", "flag": "🇬🇷", "stars": "5★, 4★, 3★", "prompt_part": "Уважно проскануй весь наданий текст. Твоє завдання — вибрати до 5 НАЙКРАЩИХ РІЗНИХ готелів СУТО в ГРЕЦІЇ (шукай маркер [ДАНІ КРАЇНИ: GREECE]) за суворим пріоритетом зірковості."},
         {"name": "КІПР", "slug": "cyprus", "flag": "🇨🇾", "stars": "5★, 4★, 3★", "prompt_part": "Уважно проскануй весь наданий текст. Твоє завдання — вибрати до 5 НАЙКРАЩИХ РІЗНИХ готелів СУТО на КІПРІ (шукай маркер [ДАНІ КРАЇНИ: CYPRUS]) за суворим пріоритетом зірковості."},
-        {"name": "ІСПАНІЯ", "slug": "spain", "flag": "🇪🇸", "stars": "5★, 4★, 3★", "prompt_part": "Уважно проскануй весь наданий текст. Твоє завдання — вибрати до 5 НАЙКРАЩИХ РІЗНИХ готелів СУТО в ІСПАНІЇ (шукай маркер [ДАНІ КРАЇНИ: SPAIN]) за суворим пріоритетом зірковості."}
+        {"name": "ІСПАНІЯ", "slug": "spain", "flag": "🇪🇸", "stars": "5★, 4★, 3★", "prompt_part": "Уважно проскануй весь наданий текст. Твоє завдання — вибрати до 5 НАЙКРАЩИХ РІЗНИХ готелів СУТО в ІСПАНІЇ (шукай маркер [ДАНІ КРАЇНИ: SPAIN]) за суворим пріоритетом зірковості."},
+        {"name": "УКРАЇНА", "slug": "ukraine", "flag": "🇺🇦", "stars": "5★, 4★, 3★", "prompt_part": "Уважно проскануй весь наданий текст. Твоє завдання — вибрати до 5 НАЙКРАЩИХ РІЗНИХ готелів СУТО в УКРАЇНІ (шукай маркер [ДАНІ КРАЇНИ: UKRAINE]) за суворим пріоритетом зірковості."}
     ]
-
+    
     for index, cat in enumerate(categories):
         # Оскільки запитів до сайту більше немає, пауза потрібна суто для уникнення Flood Control від Telegram API
         if index > 0:
