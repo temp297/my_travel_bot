@@ -41,8 +41,8 @@ try:
     REVIEWS_CHAT_ID = int(os.getenv("REVIEWS_CHAT_ID"))
     FEEDBACK_HOUR = int(os.getenv("FEEDBACK_HOUR", "11"))
     FEEDBACK_MINUTE = int(os.getenv("FEEDBACK_MINUTE", "0"))
-    ASSISTANT_HOUR = int(os.getenv("ASSISTANT_HOUR", "19"))
-    ASSISTANT_MINUTE = int(os.getenv("ASSISTANT_MINUTE", "35"))
+    ASSISTANT_HOUR = int(os.getenv("ASSISTANT_HOUR", "10"))
+    ASSISTANT_MINUTE = int(os.getenv("ASSISTANT_MINUTE", "0"))
 except ValueError:
     raise ValueError("ADMIN_ID, REVIEWS_CHAT_ID, FEEDBACK_HOUR та FEEDBACK_MINUTE мають бути цілими числами!")
 
@@ -540,26 +540,6 @@ async def generate_and_send_ai_tour_post():
         logging.info(f"✅ Фінальний CTA-пост успішно опубліковано!")
     except Exception as final_err:
         logging.error(f"❌ Помилка надсилання фінального повідомлення: {final_err}")
-
-    # --- ТУТ НАДСИЛАЄТЬСЯ ОБ'ЄДНАНИЙ ФІНАЛЬНИЙ БЛОК ---
-    try:
-        logging.info("⏳ Надсилання фінального загального повідомлення з CTA, бонусами та поширенням...")
-        
-        final_msg = await bot.send_message(
-            chat_id=CURRENT_CHAT_ID,
-            text=cta_text,
-            parse_mode="HTML",
-            message_thread_id=NAVIGATOR_DAY_TOPIC_ID if NAVIGATOR_DAY_TOPIC_ID else None
-        )
-        
-        # Зберігаємо ID повідомлення в БД для нічного очищення
-        async with pool.acquire() as conn:
-            await conn.execute("INSERT INTO daily_posts (message_id) VALUES ($1)", final_msg.message_id)
-            
-        logging.info(f"✅ Фінальний об'єднаний CTA-пост успішно опубліковано! ID {final_msg.message_id} збережено в БД.")
-        
-    except Exception as final_err:
-        logging.error(f"❌ Помилка надсилання фінального об'єднаного CTA-повідомлення: {final_err}")
             
 # --- ОБРОБНИКИ КОМАНД (ВЕРХНІЙ ПРІОРИТЕТ) ---
 
