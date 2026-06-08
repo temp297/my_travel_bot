@@ -42,7 +42,7 @@ try:
     FEEDBACK_HOUR = int(os.getenv("FEEDBACK_HOUR", "11"))
     FEEDBACK_MINUTE = int(os.getenv("FEEDBACK_MINUTE", "0"))
     ASSISTANT_HOUR = int(os.getenv("ASSISTANT_HOUR", "10"))
-    ASSISTANT_MINUTE = int(os.getenv("ASSISTANT_MINUTE", "0"))
+    ASSISTANT_MINUTE = int(os.getenv("ASSISTANT_MINUTE", "40"))
 except ValueError:
     raise ValueError("ADMIN_ID, REVIEWS_CHAT_ID, FEEDBACK_HOUR та FEEDBACK_MINUTE мають бути цілими числами!")
 
@@ -335,17 +335,27 @@ async def fetch_tat_ua_data():
                     logging.error(f"❌ Помилка пагінації {page_num} для {country_slug}: {page_err}")
                     continue
 
-        full_raw_text = " \n ".join(all_text_blocks)
+        # Створюємо словник, де для кожної країни буде свій окремий текст
+        cleaned_country_data = {}
         words_to_clean = [
             "Цена за tour 2 взрослых", "Цена за tour", "Цена за tour 2 взрослых", "ПОДРОБНЕЕ", 
             "Цена за тур", "Все типы отдыха", "Горящие туры", "Поиск туров", "Екскурсійні тури"
         ]
-        for word in words_to_clean:
-            full_raw_text = full_raw_text.replace(word, "")
-            full_raw_text = full_raw_text.replace(word.lower(), "")
-            
-        final_clean_text = " ".join(full_raw_text.split())
-        return final_clean_text if len(final_clean_text) > 500 else None
+        
+        # Розподіляємо текст по країнах завдяки вашим маркерам
+        for block in all_text_blocks:
+            for country_slug in country_urls.keys():
+                if f"БЛОКУ КРАЇНИ: {country_slug.upper()}" in block:
+                    text_chunk = block
+                    for word in words_to_clean:
+                        text_chunk = text_chunk.replace(word, "").replace(word.lower(), "")
+                    
+                    final_chunk = " ".join(text_chunk.split())
+                    if len(final_chunk) > 200:
+                        cleaned_country_data[country_slug] = final_chunk
+                    break
+                    
+        return cleaned_country_data if cleaned_country_data else None
 
     except Exception as e:
         logging.error(f"❌ Загальна помилка під час збору даних: {e}")
@@ -414,10 +424,15 @@ async def generate_and_send_ai_tour_post():
     ]
     
     for index, cat in enumerate(categories):
-        # Оскільки запитів до сайту більше немає, пауза потрібна суто для уникнення Flood Control від Telegram API
         if index > 0:
-            logging.info(f"⏳ Очікуємо 3 секунди перед обробкою ШІ для напрямку '{cat['name']}'...")
-            await asyncio.sleep(3)
+            logging.info(f"⏳ Очікуємо 10 секунд перед обробкою ШІ для напрямку '{cat['name']}'...")
+            await asyncio.sleep(10)
+
+        # Беремо дані суто для поточної країни з нашого оновленого словника
+        country_data = global_raw_tour_data.get(cat['slug'], "") if global_raw_tour_data else ""
+        if not country_data:
+            logging.info(f"⏩ Пропущено блок '{cat['name']}', бо в парсері немає даних для цієї країни.")
+            continue
 
         prompt = (
             f"Ти — професійний travel-копірайтер компанії. На основі НАДАНИХ ТЕКСТОВИХ ДАНИХ склади один цікавий, "
@@ -497,7 +512,7 @@ async def generate_and_send_ai_tour_post():
             f"- Також повністю заборонені фрази типу: 'Не вказано конкретних матеріальних недоліків в наданому тексті', 'Інформація відсутня'. Якщо даних немає — напиши нейтральний художній нюанс, який підходить усім готелям, але НІКОЛИ не пиши технічні виправдання!.\n\n"
             
             # Передаємо весь загальний великий текст — ШІ сам відфільтрує потрібну країну за маркерами
-            f"Ось текстові дані з усіма готелями для аналізу: {global_raw_tour_data}"
+            f"Ось текстові дані з готелями СУТО ДЛЯ ЦІЄЇ КРАЇНИ: {country_data}"
         )
 
         try:
