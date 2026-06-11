@@ -12,3 +12,4 @@ pyrogram
 tgcrypto
 requests
 playwright
+httpx
