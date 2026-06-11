@@ -42,7 +42,7 @@ try:
     FEEDBACK_HOUR = int(os.getenv("FEEDBACK_HOUR", "11"))
     FEEDBACK_MINUTE = int(os.getenv("FEEDBACK_MINUTE", "0"))
     ASSISTANT_HOUR = int(os.getenv("ASSISTANT_HOUR", "17"))
-    ASSISTANT_MINUTE = int(os.getenv("ASSISTANT_MINUTE", "20"))
+    ASSISTANT_MINUTE = int(os.getenv("ASSISTANT_MINUTE", "50"))
 except ValueError:
     raise ValueError("ADMIN_ID, REVIEWS_CHAT_ID, FEEDBACK_HOUR та FEEDBACK_MINUTE мають бути цілими числами!")
 
@@ -291,7 +291,7 @@ async def fetch_tat_ua_data():
         "ukraine": "https://tat.ua/search/ukraine/"
     }
     
-    logging.info(f"🚀 [ПАРСЕР] Початок ОДНОРАЗОВОГО збору даних через Playwright (захищений від глічів RAM/DOM)...")
+    logging.info(f"🚀 [ПАРСЕР] Початок ОДНОРАЗОВОГО збору даних через Playwright (фінальна стабільна версія)...")
     cleaned_country_data = {}
     
     words_to_clean = [
@@ -322,16 +322,20 @@ async def fetch_tat_ua_data():
                 page = await context.new_page()
                 
                 try:
-                    # Блокуємо важкі медіа для економії оперативної пам'яті
+                    # Блокуємо важкі медіа для економії RAM (дозволяє триматися в межах 512MB)
                     await page.route("**/*", lambda route: route.abort() if route.request.resource_type in ["image", "stylesheet", "font", "media"] else route.continue_())
                     
                     # Швидкий перехід до моменту старту рендерингу
                     await page.goto(url, timeout=60000, wait_until="commit")
                     
-                    # Даємо 3 секунди, щоб базовий DOM гарантовано з'явився в пам'яті
-                    await asyncio.sleep(3)
-                    
-                    # Безпечний скрол з перевіркою наявності document.body
+                    # МАГІЯ: Чекаємо появи контенту туру на сторінці (наприклад, по тексту "грн" або будь-якому блоку туру)
+                    # Якщо контент прилетить за 1-2 секунди — бот рушить далі миттєво. Максимум очікування — 15 сек.
+                    try:
+                        await page.wait_for_selector("text=грн", timeout=15000)
+                    except Exception:
+                        logging.warning(f"⏳ Контент для {country_slug.upper()} підвантажується повільно, пробуємо скролити...")
+
+                    # Безпечний скрол з перевіркою наявності document.body для Lazy Load карт готелів
                     for scroll_step in range(3):
                         await page.evaluate("""
                             if (document.body) {
