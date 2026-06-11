@@ -41,8 +41,8 @@ try:
     REVIEWS_CHAT_ID = int(os.getenv("REVIEWS_CHAT_ID"))
     FEEDBACK_HOUR = int(os.getenv("FEEDBACK_HOUR", "11"))
     FEEDBACK_MINUTE = int(os.getenv("FEEDBACK_MINUTE", "0"))
-    ASSISTANT_HOUR = int(os.getenv("ASSISTANT_HOUR", "17"))
-    ASSISTANT_MINUTE = int(os.getenv("ASSISTANT_MINUTE", "50"))
+    ASSISTANT_HOUR = int(os.getenv("ASSISTANT_HOUR", "19"))
+    ASSISTANT_MINUTE = int(os.getenv("ASSISTANT_MINUTE", "0"))
 except ValueError:
     raise ValueError("ADMIN_ID, REVIEWS_CHAT_ID, FEEDBACK_HOUR та FEEDBACK_MINUTE мають бути цілими числами!")
 
@@ -396,23 +396,50 @@ async def fetch_tat_ua_data():
         return None
         
 async def generate_and_send_ai_tour_post():
-    if not ai_model or not AUTO_POST_CHAT_ID:
-        logging.info("🤖 Помічник пропущений: немає моделі ШІ або AUTO_POST_CHAT_ID.")
+    """
+    Повноцінний сервіс генерації та публікації щоденних постів.
+    Збирає дані, обробляє їх через асинхронний ШІ Gemini та надсилає в Telegram.
+    Режим тестування (якщо немає топіка) направляє пости ADMIN_ID.
+    """
+    
+    logging.info("📝 [ГЕНЕРАЦІЯ] Початок роботи сервісу щоденних публікацій ШІ...")
+
+    # Безпечне отримання критичних змінних оточення (додайте їх на Render!)
+    # GEMINI_API_KEY = os.getenv("GEMINI_API_KEY") # Припускаємо, що це зроблено при ініціалізації ai_model
+
+    if not ai_model:
+        logging.error("🤖 [КРИТИЧНА] Об'єкт ai_model не ініціалізовано. Генерація неможлива. Перевірте GEMINI_API_KEY.")
         return
 
-    # --- БЕЗПЕЧНА ПЕРЕВІРКА ТА ПЕРЕНАПРАВЛЕННЯ ---
+    if not AUTO_POST_CHAT_ID:
+        logging.error("🤖 [КРИТИЧНА] Не задано змінну AUTO_POST_CHAT_ID. Скасування.")
+        return
+
+    # --- БЕЗПЕЧНА ПЕРЕВІРКА ТА ПЕРЕНАПРАВЛЕННЯ (ВАША ТЕСТОВА ЛОГІКА) ---
     raw_topic_id = os.getenv("NAVIGATOR_DAY_TOPIC_ID")
+    
+    # Визначаємо цільовий ID для відправки
     if raw_topic_id and raw_topic_id.strip() != "None":
         try:
             NAVIGATOR_DAY_TOPIC_ID = int(raw_topic_id)
             CURRENT_CHAT_ID = AUTO_POST_CHAT_ID
+            logging.info(f"📂 [ЛОГІКА] Ціль: КАНАЛ/ГРУПА (ID: {CURRENT_CHAT_ID}, Topic ID: {NAVIGATOR_DAY_TOPIC_ID})")
         except ValueError:
+            logging.warning(f"⚠️ Некоректний формат NAVIGATOR_DAY_TOPIC_ID: '{raw_topic_id}'.")
             NAVIGATOR_DAY_TOPIC_ID = None
-            CURRENT_CHAT_ID = ADMIN_ID
+            # Страховка для тестів:
+            CURRENT_CHAT_ID = ADMIN_ID if ADMIN_ID else AUTO_POST_CHAT_ID
     else:
         NAVIGATOR_DAY_TOPIC_ID = None
-        CURRENT_CHAT_ID = ADMIN_ID
+        # Жорстке тестове перенаправлення адміну (як ви вказали)
+        CURRENT_CHAT_ID = ADMIN_ID 
+        logging.info(f"👨‍💻 [ЛОГІКА] Режим ТЕСТУВАННЯ: Пости йдуть АДМІНУ особисто (ID: {CURRENT_CHAT_ID})")
 
+    if not CURRENT_CHAT_ID:
+        logging.error("❌ [ЛОГІКА] Скасування: Не вдалося визначити CURRENT_CHAT_ID для відправки.")
+        return
+
+    # Підготовка статичних даних та дати
     bot_link1 = "https://t.me/NavigatorToursBot?start=welcome"
     bot_link2 = "https://t.me/NavigatorToursBot?start=discount"
     current_date_str = datetime.now().strftime("%d.%m.%Y")
@@ -428,25 +455,39 @@ async def generate_and_send_ai_tour_post():
         f"Поширюйте канал серед знайомих мандрівників — разом шукати вигідні тури цікавіше!"
     )
 
-    # --- 1. ВИДАЛЕННЯ ВЧОРАШНІХ ПОСТІВ З БАЗИ ДАНИХ ПЕРЕД ЗАПУСКОМ ---
-    async with pool.acquire() as conn:
-        old_rows = await conn.fetch("SELECT message_id FROM daily_posts")
-        if old_rows:
-            logging.info(f"🧹 Знайдено вчорашні пости для видалення в БД. Кількість: {len(old_rows)}")
-            for row in old_rows:
-                try:
-                    await bot.delete_message(chat_id=CURRENT_CHAT_ID, message_id=row['message_id'])
-                except Exception as del_err:
-                    logging.warning(f"Не вдалося видалити старий post {row['message_id']}: {del_err}")
-            await conn.execute("DELETE FROM daily_posts")
-            logging.info("✨ Таблиця вчорашніхポストів в БД успішно очищена.")
+    # --- 1. АСИНХРОННЕ ВИДАЛЕННЯ ВЧОРАШНІХ ПОСТІВ З БД (З ЛОГУВАННЯМ) ---
+    try:
+        logging.info("🧹 [БД] Спроба очищення вчорашніх постів...")
+        async with pool.acquire() as conn:
+            old_rows = await conn.fetch("SELECT message_id FROM daily_posts")
+            if old_rows:
+                logging.info(f"🧹 [БД] Знайдено {len(old_rows)} постів для видалення.")
+                for row in old_rows:
+                    try:
+                        # Спробуємо видалити повідомлення з Telegram
+                        await bot.delete_message(chat_id=CURRENT_CHAT_ID, message_id=row['message_id'])
+                    except Exception as del_err:
+                        logging.warning(f"Не вдалося видалити старий post {row['message_id']} в Telegram: {del_err}")
+                # Очищаємо таблицю daily_posts в БД
+                await conn.execute("DELETE FROM daily_posts")
+                logging.info("✨ [БД] Таблиця daily_posts в БД успішно очищена.")
+            else:
+                logging.info("✨ [БД] Таблиця порожня, нічого видаляти.")
+    except Exception as db_err:
+        logging.error(f"❌ [БД] Критична помилка роботи з БД при очищенні: {db_err}", exc_info=True)
+        # Навіть якщо БД впала, ми продовжуємо, щоб не зупиняти деплой на Render
 
-    # --- ОДНОРАЗОВИЙ СКАНОР ВСЬОГО САЙТУ ЧЕРЕЗ КЛАСИЧНИЙ БРАУЗЕР ---
+    # --- 2. АСИНХРОННИЙ СКАНЕР ВСЬОГО САЙТУ ЧЕРЕЗ PLAYWRIGHT ---
+    logging.info("🌐 [ПАРСЕР] Запуск асинхронного парсера Playwright (це займе деякий час)...")
     global_raw_tour_data = await fetch_tat_ua_data()
+    
     if not global_raw_tour_data:
-        logging.error("🛑 Не вдалося отримати контент із сайту. Роботу ШІ зупинено.")
+        logging.error("🛑 [ПОСТ-СЕРВІС] Парсер повернув None або порожні дані! Жодна країна не зібрана. Скасування генерації.")
         return
 
+    logging.info(f"📊 [ПОСТ-СЕРВІС] Успішно отримано дані для країн: {list(global_raw_tour_data.keys())}")
+
+    # --- 3. ПОСЛІДОВНА АСИНХРОННА ОБРОБКА ШІ ТА НАДСИЛАННЯ В TELEGRAM ---
     categories = [
         {"name": "ТУРЕЧЧИНА", "slug": "turkey", "flag": "🇹🇷", "stars": "5★, 4★, 3★", "prompt_part": "Уважно проскануй весь наданий текст. Твоє завдання — вибрати до 5 НАЙКРАЩИХ РІЗНИХ готелів СУТО в ТУРЕЧЧИНІ (шукай маркер [ПОЧАТОК БЛОКУ КРАЇНИ: TURKEY]) за суворим пріоритетом зірковості."},
         {"name": "ЄГИПЕТ", "slug": "egypt", "flag": "🇪🇬", "stars": "5★, 4★, 3★", "prompt_part": "Уважно проскануй весь наданий текст. Твоє завдання — вибрати до 5 НАЙКРАЩИХ РІЗНИХ готелів СУТО в ЄГИПТІ (шукай маркер [ПОЧАТОК БЛОКУ КРАЇНИ: EGYPT]) за суворим пріоритетом зірковості."},
@@ -458,16 +499,18 @@ async def generate_and_send_ai_tour_post():
     ]
     
     for index, cat in enumerate(categories):
+        # Навіть в асинхроні робимо невеличку паузу між країнами, щоб Telegram API та Gemini API не вважали нас спамерами
         if index > 0:
-            logging.info(f"⏳ Очікуємо 10 секунд перед обробкою ШІ для напрямку '{cat['name']}'...")
+            logging.info(f"⏳ Очікуємо 10 секунд перед Gemini для напрямку '{cat['name']}'...")
             await asyncio.sleep(10)
 
-        # Беремо дані суто для поточної країни з нашого оновленого словника
-        country_data = global_raw_tour_data.get(cat['slug'], "") if global_raw_tour_data else ""
+        # Беремо дані суто для поточної країни з оновленого словника парсера
+        country_data = global_raw_tour_data.get(cat['slug'], "")
         if not country_data:
-            logging.info(f"⏩ Пропущено блок '{cat['name']}', бо в парсері немає даних для цієї країни.")
+            logging.info(f"⏩ Пропущено '{cat['name']}', бо в парсері немає даних для цієї країни.")
             continue
 
+        # Побудова промпту для ШІ (Ваші правила конструювання промпту)
         prompt = (
             f"Ти — професійний travel-копірайтер компанії. На основі НАДАНИХ ТЕКСТОВИХ ДАНИХ склади один цікавий, "
             f"структурований і залучаючий пост для Telegram-каналу українською мовою.\n\n"
@@ -498,9 +541,9 @@ async def generate_and_send_ai_tour_post():
             f"⚠️ ГОЛОВНИЙ КРИТЕРІЙ ВІДБОРУ — ПРІОРІТЕТ ТРАНСПОРТУ ТА ПОВНОГО ПАКЕТУ:\n"
             f"Проаналізуй тип транспорту для готелів та відбери варіанти за суворим каскадним пріоритетом:\n"
             f"1. ПРІОРІТЕТ №1 — АВІАТУРИ: Шукай у тексті готелі, де вказано авіапереліт (літак/авіа з Кишинева, Сучави, Жешува, Варшави тощо).\n"
-            f"   🔥 КРИТИЧНА ВИМОГА ДЛЯ АВІА: Серед усіх знайдених авіатурів ти зобов'язаний ПЕРШОЧЕРГОВО вибирати варіанти, які є ПОВНИМ ПАКЕТОМ (куди одночасно включено: Проїзд, Страховка та Трансфер до готелю). Формуй добірку з них. Якщо авіатурів у тексті є хоча б 3-5 штук, повністю ігноруй автобуси та власний транспорт!\n"
+            f"    🔥 КРИТИЧНА ВИМОГА ДЛЯ АВІА: Серед усіх знайдених авіатурів ти зобов'язаний ПЕРШОЧЕРГОВО вибирати варіанти, які є ПОВНИМ ПАКЕТОМ (куди одночасно включено: Проїзд, Страховка та ТРАНСФЕР до готелю). Формуй добірку з них. Якщо авіатурів у тексті є хоча б 3-5 штук, повністю ігноруй автобуси та власний транспорт!\n"
             f"2. АВТОБУСНІ ТУРИ: Включай автобусні тури у пост ТІЛЬКИ у випадку, якщо в наданих даних взагалі немає авіатурів по цій країні.\n"
-            f"   🔥 КРИТИЧНА ВИМОГА ДЛЯ АВТОБУСІВ: Аналогічно, серед автобусних турів вибирай насамперед ті, куди включено повний пакет (Проїзд + Страховка + Трансфер).\n"
+            f"    🔥 КРИТИЧНА ВИМОГА ДЛЯ АВТОБУСІВ: Аналогічно, серед автобусних турів вибирай насамперед ті, куди включено повний пакет (Проїзд + Страховка + Трансфер).\n"
             f"3. БЕЗ ТРАНСФЕРУ: Варіанти 'Власний транспорт / Без трансферу' дозволено брати лише в крайньому разі, якщо немає ні авіа, ні автобусів.\n"
             f"Підсумок: Завжди зберігай пріоритет транспорту (Авіа -> Автобус), але ВСЕРЕДИНІ обраного транспорту вибирай ТІЛЬКИ ті тури, де чітко включено проїзд, страховку та трансфер!\n\n"
             
@@ -530,12 +573,12 @@ async def generate_and_send_ai_tour_post():
             f"🍽 <b>Харчування:</b> [Вкажи тип харчування, що відповідає обраній ціні, наприклад: 'Все включено (AI)' або 'Без харчування (RO)']\n"
             f"📅 <b>Виліт/Дата:</b> [Вкажи точну дату туру з тексту СУВОРО в оригінальному форматі сайту: ДД.ММ.РРРР або ДД місяця], [Вкажи кількість ночей саме для цієї ціни]\n"
             f"💰 <b>Ціна:</b> [Вкажи саме вартість для обраного типу трансферу] грн. за 2-х дорослих\n"
-            f"<i>[Тут напиши короткий художній опис саме цього готелю. Коротко вкажи реальні матеріальні переваги самого готелю: інфраструктура, перша лінія, басейни, спа, свіжий ремонт, зелена територія, аквапарк тощо]</i>\n"
+            f"<i>[Тут напиши короткий художній опис саме цього готелю. Коротко вкажи реальні матеріальні переваги самого готелю: інфраструктура, перша лінія, басейни, спа, свіжий ремонт, зелена територія, аквапарк тощо]</i>\n\n"
             
             f"⚠️ ДОДАТКОВІ ОБМЕЖЕННЯ ДЛЯ ОФОРМЛЕННЯ ГОТЕЛІВ:\n"
             f"- СУВОРЕ ПРАВИЛО ДЛЯ ДАТИ: Заборонено примусово міняти формат дати. Відображай символ в символ, як у тексті джерела. Без самодіяльності та зайвих знаків.\n"
             f"- СУВОРЕ ПРАВИЛО ДЛЯ НАЗВИ ГОТЕЛЮ: Виводь назву готелю в оригіналі так, як вона вказана в тексті джерела (латиницею).\n"
-            f"- СУВОРЕ ПРАВИЛО ДЛЯ КОРОТКОГО ХУДОЖНЬОГО ОПИСУ ГОТЕЛЮ: Заборони собі писати сюди кількість відгуків (наприклад, 'понад 1300 відгуків') або бали рейтингу (наприклад, '6.1 з 8 оцінок'). Пиши ТІЛЬКИ про матеріальні якості самого готелю, готельного сервісу, території чи пляжу.\n"
+            f"- СУВОРЕ ПРАВИЛО ДЛЯ КОРОТКОГО ХУДОЖНЬОГО ОПИСУ ГОТЕЛЮ: Заборони собі писати сюди кількість відгуків (наприклад, 'понад 1300 відгуків') або бали рейтингу (наприклад, '6.1 з 8 оцінок'). Пиши ТІЛЬКИ про матеріальні якості самого готелю, готельного сервісу, території чи пляжу.\n\n"
             
             f"⚠️ ОБМЕЖЕННЯ: Описуй каждый готель ємно. Твій підсумковий текст має бути не більше за 3000 символів. Використовуй тільки HTML-теги <b> та <i>.\n\n"
             
@@ -543,48 +586,44 @@ async def generate_and_send_ai_tour_post():
         )
 
         try:
-            response = ai_model.generate_content(
+            # === ЗМІНЕНО: АСИНХРОННИЙ ВИКЛИК ШІ (Щоб Event Loop на Render не блокувався) ===
+            logging.info(f"🤖 [ШІ] Відправка АСИНХРОННОГО запиту до Gemini для напрямку: {cat['name']}")
+            response = await ai_model.generate_content_async(
                 prompt,
                 generation_config={"temperature": 0.7}
             )
             post_text = response.text
             
-            if len(post_text.strip()) < 100 or "📍" not in post_text or "🏨" not in post_text:
-                logging.info(f"⏩ Пропущено блок '{cat['name']}', бо в згенерованому ШІ тексті немає карток готелів.")
+            # Базова перевірка результату генерації
+            if not post_text or len(post_text.strip()) < 100 or "📍" not in post_text or "🏨" not in post_text:
+                logging.warning(f"⏩ Пропущено блок '{cat['name']}', бо ШІ ШІ не згенерував картки готелів або текст занадто короткий.")
                 continue
 
+            # Додаємо заголовки та CTA в кінець
             header_text = f"🧭 <b>Навігатор дня: {cat['name'].upper()} {cat['flag']} | {current_date_str}</b>\n\n"
-            full_message = f"{header_text}{post_text}"
+            # 
+            full_message = f"{header_text}{post_text}\n\n{cta_text}"
             
+            # === НАДСИЛАННЯ В TELEGRAM (З ПІДТРИМКОЮ TOPIC ID ТА ВІДКЛЮЧЕННЯМ ПРЕВ'Ю) ===
+            logging.info(f"📤 [TELEGRAM] Відправка готового поста у {CURRENT_CHAT_ID} (Topic: {NAVIGATOR_DAY_TOPIC_ID})")
             msg = await bot.send_message(
                 chat_id=CURRENT_CHAT_ID, 
                 text=full_message, 
                 parse_mode="HTML",
-                message_thread_id=NAVIGATOR_DAY_TOPIC_ID if NAVIGATOR_DAY_TOPIC_ID else None
+                message_thread_id=NAVIGATOR_DAY_TOPIC_ID,
+                disable_web_page_preview=True # Змінено для стабільності на Render
             )
 
+            # === ЗАПИСMessage ID В БД ДЛЯ ЩОДЕННОГО ВИДАЛЕННЯ ===
             async with pool.acquire() as conn:
                 await conn.execute("INSERT INTO daily_posts (message_id) VALUES ($1)", msg.message_id)
                 
-            logging.info(f"✅ Пост для категорії '{cat['name']}' успішно опубліковано!")
+            logging.info(f"✅ [ОК] Пост для категорії '{cat['name']}' успішно опубліковано!")
             
         except Exception as ai_err:
-            logging.error(f"❌ Помилка роботи ШІ Gemini для категорії {cat['name']}: {ai_err}")
-
-    # --- НАДСИЛАЄТЬСЯ ОБ'ЄДНАНИЙ ФІНАЛЬНИЙ БЛОК ---
-    try:
-        logging.info("⏳ Надсилання фінального загального повідомлення...")
-        final_msg = await bot.send_message(
-            chat_id=CURRENT_CHAT_ID,
-            text=cta_text,
-            parse_mode="HTML",
-            message_thread_id=NAVIGATOR_DAY_TOPIC_ID if NAVIGATOR_DAY_TOPIC_ID else None
-        )
-        async with pool.acquire() as conn:
-            await conn.execute("INSERT INTO daily_posts (message_id) VALUES ($1)", final_msg.message_id)
-        logging.info(f"✅ Фінальний CTA-пост успішно опубліковано!")
-    except Exception as final_err:
-        logging.error(f"❌ Помилка надсилання фінального повідомлення: {final_err}")
+            # Логуємо помилку для конкретної країни, щоб не зупиняти обробку інших країн
+            logging.error(f"❌ [КРИТИЧНА] Помилка на стадії ШІ Gemini або відправки у Telegram для категорії {cat['name']}: {ai_err}", exc_info=True)
+            continue
             
 # --- ОБРОБНИКИ КОМАНД (ВЕРХНІЙ ПРІОРИТЕТ) ---
 
