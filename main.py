@@ -300,7 +300,6 @@ async def fetch_tat_ua_data():
     ]
 
     try:
-        # Запускаємо сучасний безголовий браузер Chromium з жорсткими обмеженнями для Render
         async with async_playwright() as p:
             browser = await p.chromium.launch(
                 headless=True,
@@ -309,7 +308,7 @@ async def fetch_tat_ua_data():
                     "--no-sandbox", 
                     "--disable-setuid-sandbox", 
                     "--disable-dev-shm-usage",
-                    "--single-process"  # Змушує Chromium працювати в один потік для економії RAM
+                    "--single-process"
                 ]
             )
             
@@ -323,22 +322,23 @@ async def fetch_tat_ua_data():
                 page = await context.new_page()
                 
                 try:
-                    # ОПТИМІЗАЦІЯ: Блокуємо завантаження важких медіа-файлів, картинок та шрифтів
+                    # Блокуємо медіа для економії RAM
                     await page.route("**/*", lambda route: route.abort() if route.request.resource_type in ["image", "stylesheet", "font", "media"] else route.continue_())
                     
-                    # Переходимо на сайт і чекаємо 30 секунд (або завантаження DOM-структури без важкої графіки)
-                    await page.goto(url, timeout=30000, wait_until="domcontentloaded")
+                    # Змінено на wait_until="commit" та збільшено таймаут до 60 секунд
+                    await page.goto(url, timeout=60000, wait_until="commit")
                     
-                    # Імітуємо скрол вниз 3 рази для підвантаження Lazy Load готелів 4* та 5*
+                    # Невеличка пауза, щоб HTML структура стабілізувалася після commit
+                    await asyncio.sleep(3)
+                    
+                    # Імітуємо скрол вниз 3 рази
                     for scroll_step in range(3):
                         await page.evaluate("window.scrollTo(0, document.body.scrollHeight);")
-                        await asyncio.sleep(1.5)  # Пауза, щоб сервіс встиг віддати нові готелі
+                        await asyncio.sleep(1.5)
                     
-                    # Отримуємо фінальний HTML, де вже є десятки реальних готелів
                     content = await page.content()
                     soup = BeautifulSoup(content, 'html.parser')
                     
-                    # Видаляємо сміття
                     for script in soup(["script", "style", "header", "footer", "nav", "aside", "form"]):
                         script.decompose()
                         
@@ -376,10 +376,8 @@ async def fetch_tat_ua_data():
                 except Exception as page_err:
                     logging.error(f"❌ Помилка завантаження сторінки через браузер для {country_slug}: {page_err}")
                 finally:
-                    # ГАРАНТОВАНЕ закриття сторінки після кожної країни для миттєвого звільнення RAM
                     await page.close()
                     
-            # Закриваємо контекст та сам браузер
             await context.close()
             await browser.close()
             
