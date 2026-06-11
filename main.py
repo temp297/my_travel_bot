@@ -41,8 +41,8 @@ try:
     REVIEWS_CHAT_ID = int(os.getenv("REVIEWS_CHAT_ID"))
     FEEDBACK_HOUR = int(os.getenv("FEEDBACK_HOUR", "11"))
     FEEDBACK_MINUTE = int(os.getenv("FEEDBACK_MINUTE", "0"))
-    ASSISTANT_HOUR = int(os.getenv("ASSISTANT_HOUR", "22"))
-    ASSISTANT_MINUTE = int(os.getenv("ASSISTANT_MINUTE", "45"))
+    ASSISTANT_HOUR = int(os.getenv("ASSISTANT_HOUR", "23"))
+    ASSISTANT_MINUTE = int(os.getenv("ASSISTANT_MINUTE", "5"))
 except ValueError:
     raise ValueError("ADMIN_ID, REVIEWS_CHAT_ID, FEEDBACK_HOUR та FEEDBACK_MINUTE мають бути цілими числами!")
 
@@ -302,11 +302,6 @@ async def fetch_tat_ua_data():
     cleaned_country_data = {}
     max_pages_per_country = 1 
     
-    words_to_clean = [
-        "Цена за tour 2 взрослых", "Цена за tour", "Цена за tour 2 взрослых", "ПОДРОБНЕЕ", 
-        "Цена за tour", "Цена за тур", "Все типы отдыха", "Горящие туры", "Поиск туров", "Екскурсійні тури"
-    ]
-
     try:
         for country_slug, base_url in country_urls.items():
             logging.info(f"🌍 Збираємо пропозиції для напрямку: {country_slug.upper()}")
@@ -320,6 +315,7 @@ async def fetch_tat_ua_data():
                     if response.status_code == 200:
                         soup = BeautifulSoup(response.text, 'html.parser')
                         
+                        # Видаляємо зайві елементи, що засмічують пам'ять
                         for script in soup(["script", "style", "header", "footer", "nav", "aside", "form"]):
                             script.decompose()
                             
@@ -336,7 +332,10 @@ async def fetch_tat_ua_data():
                             break
                     else:
                         break
-                    time.sleep(0.4)
+                    
+                    # ВИПРАВЛЕНО: Замінено time.sleep на асинхронний sleep, щоб бот не зависав
+                    await asyncio.sleep(0.4)
+                    
                 except Exception as page_err:
                     logging.error(f"❌ Помилка пагінації {page_num} для {country_slug}: {page_err}")
                     continue
@@ -367,10 +366,7 @@ async def fetch_tat_ua_data():
                 selected_blocks = sorted_blocks[:35]
                 country_text_combined = " | ".join(selected_blocks)
                 
-                # Очищення від сміттєвих слів
-                for word in words_to_clean:
-                    country_text_combined = country_text_combined.replace(word, "").replace(word.lower(), "")
-                
+                # Забираємо зайві пробіли
                 final_chunk = " ".join(country_text_combined.split())
                 
                 if len(final_chunk) > 200:
@@ -415,9 +411,9 @@ async def generate_and_send_ai_tour_post():
     cta_text = (
         f"⚠️ <b>Зверніть увагу: всі ціни вказані за тур та є актуальними на сьогодні!</b>\n\n"
         f"✈️ Бажаєте забронювати або підібрати інший варіант?\n"
-        f"Наш electronic помічник допоможе вам швидко сформувати запит, а професійний менеджер особисто опрацює ваші побажання.\n"
+        f"Наш електронний помічник допоможе вам швидко сформувати запит, а професійний менеджер особисто опрацює ваші побажання.\n"
         f"👉 <a href='{bot_link1}'>Залишити запит менеджеру</a>\n\n"
-        f"🎁 <b>Приємний бонус:</b> кожен наш клієнт може отримати персональну знижку за програмую лояльності!\n"
+        f"🎁 <b>Приємний бонус:</b> кожен наш клієнт може отримати персональну знижку за програмою лояльності!\n"
         f"👉 <a href='{bot_link2}'>Отримати знижку</a>\n\n"
         f"🗣 <b>Сподобалася добірка?</b>\n"
         f"Поширюйте канал серед знайомих мандрівників — разом шукати вигідні тури цікавіше!"
@@ -461,7 +457,7 @@ async def generate_and_send_ai_tour_post():
 
         country_data = global_raw_tour_data.get(cat['slug'], "") if global_raw_tour_data else ""
         if not country_data:
-            logging.info(f"⏩ Пропущено блок '{cat['name']}', бо в парсері немає даних для цієї країни.")
+            logging.info(f"⏩ Пропущено block '{cat['name']}', бо в парсері немає даних для цієї країни.")
             continue
 
         prompt = (
@@ -526,11 +522,11 @@ async def generate_and_send_ai_tour_post():
             f"🍽 <b>Харчування:</b> [Вкажи тип харчування, що відповідає обраній ціні, наприклад: 'Все включено (AI)' або 'Без харчування (RO)']\n"
             f"📅 <b>Виліт/Дата:</b> [Вкажи точну дату туру з тексту СУВОРО в оригінальному форматі сайту: ДД.ММ.РРРР або ДД місяця], [Вкажи кількість ночей саме для цієї ціни]\n"
             f"💰 <b>Ціна:</b> [Вкажи саме вартість для обраного типу трансферу] грн. за 2-х дорослих\n"
-            f"<i>[Тут напиши короткий художній опис саме цього готелю. Коротко вкажи реальні матеріальні переваги самого готелю: інфраструктура, перша лінія, басейни, спа, свіжий ремонт, зелена територія, аквапарк тощо]</i>\n"
+            f"<i>[Тут напиши короткий художній опис саме цього готелю. Коротко вкажи реальні матеріальні переваги самого готелю: інфраструктура, перша лінія, басейни, спа, свіжий ремонт, зелена територія, аквапарк тощо]</i>\n\n"
             
             f"⚠️ ДОДАТКОВІ ОБМЕЖЕННЯ ДЛЯ ОФОРМЛЕННЯ ГОТЕЛІВ:\n"
             f"- СУВОРЕ ПРАВИЛО ДЛЯ ДАТИ: Заборонено примусово міняти формат дати. Відображай символ в символ, як у тексті джерела. Без самодіяльності та зайвих знаків.\n"
-            f"- СУВОРЕ ПРАВИЛО ДЛЯ НАЗВИ ГОТЕЛЮ: Виводь назву готелю в оригіналі так, як вона вказана в тексті джерела (латиницею).\n"
+            f"- СУВОРЕ ПРАВИЛО ДЛЯ НАЗВИ ГОТЕЛЮ: Виводь назву готелю в оригіналі так, як вона вказана в тексті джерела (латиницею).\n\n"
             
             f"⚠️ ОБМЕЖЕННЯ: Описуй каждый готель ємно. Твій підсумковий текст має бути не більше за 3000 символів. Використовуй тільки HTML-теги <b> та <i>.\n\n"
             
