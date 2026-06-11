@@ -43,7 +43,7 @@ try:
     FEEDBACK_HOUR = int(os.getenv("FEEDBACK_HOUR", "11"))
     FEEDBACK_MINUTE = int(os.getenv("FEEDBACK_MINUTE", "0"))
     ASSISTANT_HOUR = int(os.getenv("ASSISTANT_HOUR", "0"))
-    ASSISTANT_MINUTE = int(os.getenv("ASSISTANT_MINUTE", "30"))
+    ASSISTANT_MINUTE = int(os.getenv("ASSISTANT_MINUTE", "52"))
 except ValueError:
     raise ValueError("ADMIN_ID, REVIEWS_CHAT_ID, FEEDBACK_HOUR та FEEDBACK_MINUTE мають бути цілими числами!")
 
@@ -151,6 +151,21 @@ async def show_admin_base(message: types.Message, state: FSMContext):
     current_msgs = data.get("admin_msgs_to_clean", [])
     current_msgs.append(new_msg.message_id)
     await state.update_data(admin_msgs_to_clean=current_msgs)
+
+# --- ВЕБ-СЕРВЕР ДЛЯ ОБХОДУ ПЕРЕЗАПУСКІВ RENDER (ЖИТТЄВО НЕОБХІДНО) ---
+async def handle_ping(request):
+    """Відповідає Render '200 OK', підтверджуючи, що бот працює"""
+    return web.Response(text="Bot is live and running!")
+
+def start_webhook_fake():
+    """Створює додаток веб-сервера на порту, який вимагає Render"""
+    app = web.Application()
+    app.router.add_get('/', handle_ping)
+    
+    # Render автоматично передає порт у змінну оточення PORT (за замовчуванням 10000)
+    port = int(os.environ.get("PORT", 10000))
+    runner = web.AppRunner(app)
+    return runner, port
 
 pool = None
 
@@ -1166,17 +1181,30 @@ async def on_shutdown(app: web.Application):
     logging.info("Планувальник зупинено.")
 
 async def main():
-    logging.info("--- БОТ ЗАПУСКАЄТЬСЯ ---")
-    await bot.delete_webhook(drop_pending_updates=True)
+    logging.info("--- БОТ ЗАПУСКАЄТЬСЯ (РЕЖИМ WEBHOOK) ---")
+    
+    # 1. Ініціалізація бази даних
     await init_db()
+    logging.info("💾 База даних успішно підключена та перевірена.")
+    
+    # Очищуємо старі завислі оновлення, щоб бот не спамив після перезапуску
+    await bot.delete_webhook(drop_pending_updates=True)
     
     WEBHOOK_URL = os.getenv("WEBHOOK_URL")
     WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "super_secret_key")
+    
+    if not WEBHOOK_URL:
+        logging.error("🛑 КРИТИЧНА ПОМИЛКА: Змінна WEBHOOK_URL не задана в налаштуваннях Render!")
+        return
+
+    # Встановлюємо актуальний вебхук
     await bot.set_webhook(
         url=f"{WEBHOOK_URL}/webhook",
         secret_token=WEBHOOK_SECRET
     )
+    logging.info(f"🌐 Webhook успішно встановлено на: {WEBHOOK_URL}/webhook")
     
+    # 2. Налаштування веб-додатка aiohttp
     app = web.Application()
     webhook_requests_handler = SimpleRequestHandler(
         dispatcher=dp,
@@ -1187,6 +1215,10 @@ async def main():
     setup_application(app, dp, bot=bot)
     app.on_shutdown.append(on_shutdown)
 
+    # Головна сторінка для перевірки сервісу Render (Health Check)
+    app.router.add_get("/", lambda request: web.Response(text="Bot is running smoothly under Webhook mode!"))
+
+    # 3. Налаштування команд меню
     user_commands = [
         types.BotCommand(command="start", description="🚀 Почати підбір туру"), 
         types.BotCommand(command="discount", description="🎁 Моя знижка")
@@ -1194,29 +1226,34 @@ async def main():
 
     admin_commands = user_commands + [
         types.BotCommand(command="admin", description="🛠 Запит на відгук"),
-      #  types.BotCommand(command="check_discounts", description="📊 Активні знижки"),
         types.BotCommand(command="use_discount", description="✅ Використати знижку"),
         types.BotCommand(command="users", description="👥 Список туристів")
     ]
    
     await bot.set_my_commands(user_commands, scope=types.BotCommandScopeDefault())
     await bot.set_my_commands(admin_commands, scope=types.BotCommandScopeChat(chat_id=ADMIN_ID))
+    logging.info("📜 Команди меню для користувачів та адміна оновлено.")
  
+    # 4. Налаштування та старт планувальника завдань (APScheduler)
     scheduler.add_job(check_returns, 'cron', hour=FEEDBACK_HOUR, minute=FEEDBACK_MINUTE)
-    
     scheduler.add_job(generate_and_send_ai_tour_post, 'cron', hour=ASSISTANT_HOUR, minute=ASSISTANT_MINUTE)
-    
     scheduler.start()
+    logging.info(f"⏰ Планувальник запущено. Відгуки: {FEEDBACK_HOUR}:{FEEDBACK_MINUTE}, ШІ-пости: {ASSISTANT_HOUR}:{ASSISTANT_MINUTE}")
     
-    app.router.add_get("/", lambda request: web.Response(text="Bot is running!"))
+    # 5. Запуск сервера на правильному порті (Змінено 8000 на 10000 за замовчуванням для Render)
     runner = web.AppRunner(app)
     await runner.setup()
     
-    port = int(os.environ.get("PORT", 8000))
+    port = int(os.environ.get("PORT", 10000))  # <--- ТУТ ТЕПЕР СУВОРО ПОРТ 10000 ДЛЯ RENDER
     site = web.TCPSite(runner, '0.0.0.0', port)
     await site.start()
+    logging.info(f"🚀 Сервер успішно слухає порт {port}. Очікування запитів...")
 
+    # Утримуємо асинхронний процес активним
     await asyncio.Event().wait()
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except (KeyboardInterrupt, SystemExit):
+        logging.info("--- БОТ ЗУПИНЕНИЙ КОРЕКТНО ---")
