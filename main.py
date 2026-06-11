@@ -41,8 +41,8 @@ try:
     REVIEWS_CHAT_ID = int(os.getenv("REVIEWS_CHAT_ID"))
     FEEDBACK_HOUR = int(os.getenv("FEEDBACK_HOUR", "11"))
     FEEDBACK_MINUTE = int(os.getenv("FEEDBACK_MINUTE", "0"))
-    ASSISTANT_HOUR = int(os.getenv("ASSISTANT_HOUR", "15"))
-    ASSISTANT_MINUTE = int(os.getenv("ASSISTANT_MINUTE", "45"))
+    ASSISTANT_HOUR = int(os.getenv("ASSISTANT_HOUR", "16"))
+    ASSISTANT_MINUTE = int(os.getenv("ASSISTANT_MINUTE", "15"))
 except ValueError:
     raise ValueError("ADMIN_ID, REVIEWS_CHAT_ID, FEEDBACK_HOUR та FEEDBACK_MINUTE мають бути цілими числами!")
 
@@ -291,7 +291,7 @@ async def fetch_tat_ua_data():
         "ukraine": "https://tat.ua/search/ukraine/"
     }
     
-    logging.info(f"🚀 [ПАРСЕР] Початок ОДНОРАЗОВОГО збору даних через Playwright (імітація браузера)...")
+    logging.info(f"🚀 [ПАРСЕР] Початок ОДНОРАЗОВОГО збору даних через Playwright (оптимізований під 512MB RAM)...")
     cleaned_country_data = {}
     
     words_to_clean = [
@@ -300,9 +300,19 @@ async def fetch_tat_ua_data():
     ]
 
     try:
-        # Запускаємо сучасний безголовий браузер Chromium
+        # Запускаємо сучасний безголовий браузер Chromium з жорсткими обмеженнями для Render
         async with async_playwright() as p:
-            browser = await p.chromium.launch(headless=True)
+            browser = await p.chromium.launch(
+                headless=True,
+                args=[
+                    "--disable-gpu", 
+                    "--no-sandbox", 
+                    "--disable-setuid-sandbox", 
+                    "--disable-dev-shm-usage",
+                    "--single-process"  # Змушує Chromium працювати в один потік для економії RAM
+                ]
+            )
+            
             context = await browser.new_context(
                 user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
                 viewport={"width": 1280, "height": 800}
@@ -313,12 +323,15 @@ async def fetch_tat_ua_data():
                 page = await context.new_page()
                 
                 try:
-                    # Переходимо на сайт і чекаємо, поки вщухнуть мережеві запити
-                    await page.goto(url, timeout=30000, wait_until="networkidle")
+                    # ОПТИМІЗАЦІЯ: Блокуємо завантаження важких медіа-файлів, картинок та шрифтів
+                    await page.route("**/*", lambda route: route.abort() if route.request.resource_type in ["image", "stylesheet", "font", "media"] else route.continue_())
+                    
+                    # Переходимо на сайт і чекаємо 30 секунд (або завантаження DOM-структури без важкої графіки)
+                    await page.goto(url, timeout=30000, wait_until="domcontentloaded")
                     
                     # Імітуємо скрол вниз 3 рази для підвантаження Lazy Load готелів 4* та 5*
                     for scroll_step in range(3):
-                        await page.mouse.wheel(0, 3500)
+                        await page.evaluate("window.scrollTo(0, document.body.scrollHeight);")
                         await asyncio.sleep(1.5)  # Пауза, щоб сервіс встиг віддати нові готелі
                     
                     # Отримуємо фінальний HTML, де вже є десятки реальних готелів
@@ -332,25 +345,19 @@ async def fetch_tat_ua_data():
                     page_text = " ".join(soup.get_text(separator=" ", strip=True).split())
                     
                     # --- ЛОГІКА РОЗБИВКИ НА КАРТКИ ТА РАНДОМІЗАЦІЇ ---
-                    # Розрізаємо суцільний текст сторінки на окремі блоки готелів по слову "грн"
                     raw_hotel_blocks = page_text.split("грн")
                     hotel_blocks = []
                     
                     for b in raw_hotel_blocks:
                         cleaned_block = b.strip()
-                        # Фільтруємо технічні шматки тексту, залишаємо лише реальні картки готелів
                         if len(cleaned_block) > 100 and ("ноч" in cleaned_block or "*" in cleaned_block or "★" in cleaned_block):
                             hotel_blocks.append(cleaned_block + " грн")
                     
                     if hotel_blocks:
-                        # Перемішуємо всю колоду готелів (4*, 5*, 3*), що прилетять з усього скролу сторінки
                         random.shuffle(hotel_blocks)
-                        
-                        # Зрізаємо перші 15 абсолютно випадкових для поточної доби готелів
                         selected_blocks = hotel_blocks[:15]
                         country_text_combined = " | ".join(selected_blocks)
                         
-                        # Очищення від стоп-слів
                         for word in words_to_clean:
                             country_text_combined = country_text_combined.replace(word, "").replace(word.lower(), "")
                         
@@ -369,8 +376,11 @@ async def fetch_tat_ua_data():
                 except Exception as page_err:
                     logging.error(f"❌ Помилка завантаження сторінки через браузер для {country_slug}: {page_err}")
                 finally:
+                    # ГАРАНТОВАНЕ закриття сторінки після кожної країни для миттєвого звільнення RAM
                     await page.close()
                     
+            # Закриваємо контекст та сам браузер
+            await context.close()
             await browser.close()
             
         return cleaned_country_data if cleaned_country_data else None
@@ -378,8 +388,7 @@ async def fetch_tat_ua_data():
     except Exception as e:
         logging.error(f"❌ Загальна критична помилка Playwright: {e}")
         return None
-
-
+        
 async def generate_and_send_ai_tour_post():
     if not ai_model or not AUTO_POST_CHAT_ID:
         logging.info("🤖 Помічник пропущений: немає моделі ШІ або AUTO_POST_CHAT_ID.")
