@@ -42,8 +42,8 @@ try:
     REVIEWS_CHAT_ID = int(os.getenv("REVIEWS_CHAT_ID"))
     FEEDBACK_HOUR = int(os.getenv("FEEDBACK_HOUR", "11"))
     FEEDBACK_MINUTE = int(os.getenv("FEEDBACK_MINUTE", "0"))
-    ASSISTANT_HOUR = int(os.getenv("ASSISTANT_HOUR", "10"))
-    ASSISTANT_MINUTE = int(os.getenv("ASSISTANT_MINUTE", "0"))
+    ASSISTANT_HOUR = int(os.getenv("ASSISTANT_HOUR", "0"))
+    ASSISTANT_MINUTE = int(os.getenv("ASSISTANT_MINUTE", "30"))
 except ValueError:
     raise ValueError("ADMIN_ID, REVIEWS_CHAT_ID, FEEDBACK_HOUR та FEEDBACK_MINUTE мають бути цілими числами!")
 
@@ -292,6 +292,7 @@ async def fetch_tat_ua_data():
         "ukraine": "https://tat.ua/search/ukraine/"
     }
     
+    # Ротуємо заголовки для повної імітації реального браузера (захист від блокувань)
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
@@ -306,7 +307,7 @@ async def fetch_tat_ua_data():
     max_pages_per_country = 1 
     
     try:
-        # Створюємо єдину асинхронну сесію для швидкого виконання запитів
+        # Відкриваємо асинхронну сесію клієнта
         async with httpx.AsyncClient(headers=headers, timeout=20.0, follow_redirects=True) as client:
             for country_slug, base_url in country_urls.items():
                 logging.info(f"🌍 Збираємо пропозиції для напрямку: {country_slug.upper()}")
@@ -316,18 +317,19 @@ async def fetch_tat_ua_data():
                     url = base_url if page_num == 1 else f"{base_url}?page={page_num}"
                     
                     try:
-                        # Асинхронний HTTP-запит без блокування Event Loop
+                        # Асинхронний безпечний HTTP-запит (не блокує Event Loop бота)
                         response = await client.get(url)
                         if response.status_code == 200:
                             soup = BeautifulSoup(response.text, 'html.parser')
                             
-                            # Очищаємо дерево від важких елементів для економії оперативної пам'яті
+                            # Видаляємо важкі елементи коду (скрипти, стилі, іконки svg) для економії пам'яті
                             for element in soup(["script", "style", "header", "footer", "nav", "aside", "form", "svg"]):
                                 element.decompose()
                                 
                             page_text = " ".join(soup.get_text(separator=" ", strip=True).split())
                             
                             if "грн" in page_text or "ноч" in page_text:
+                                # Розбиваємо сирий текст сторінки за маркером валюти на окремі сутності
                                 raw_hotel_blocks = page_text.split("грн")
                                 for b in raw_hotel_blocks:
                                     cleaned_block = b.strip()
@@ -339,7 +341,7 @@ async def fetch_tat_ua_data():
                             logging.warning(f"⚠️ Статус-код {response.status_code} для сторінки {page_num} ({country_slug})")
                             break
                         
-                        # Правильний асинхронний sleep (не блокує інші процеси бота)
+                        # Коректна неблокуюча пауза між запитами
                         await asyncio.sleep(0.5)
                         
                     except Exception as page_err:
@@ -353,26 +355,29 @@ async def fetch_tat_ua_data():
                     hotels_3_stars = []
                     
                     for block in country_raw_blocks:
-                        # Перевіряємо обидва типи маркування, щоб уникнути помилок сортування
-                        if "5*" in block or "5★" in block:
+                        b_low = block.lower()
+                        # «Всеїдний» пошук за всіма можливими текстовими варіаціями зірок на сайті
+                        if "5*" in b_low or "5★" in b_low or "5 *" in b_low or "5 зірок" in b_low:
                             hotels_5_stars.append(block)
-                        elif "4*" in block or "4★" in block:
+                        elif "4*" in b_low or "4★" in b_low or "4 *" in b_low or "4 зірок" in b_low:
                             hotels_4_stars.append(block)
                         else:
                             hotels_3_stars.append(block)
                     
-                    # Перемішуємо для унікальності щоденних добірок
+                    # Перемішуємо кожну категорію окремо, щоб пости щодня були різноманітними
                     random.shuffle(hotels_5_stars)
                     random.shuffle(hotels_4_stars)
                     random.shuffle(hotels_3_stars)
                     
-                    # Об'єднуємо з пріоритетом 5★ на початку списку
+                    # Збираємо масив назад (5★ гарантовано та суворо стають на самий початок списку)
                     sorted_blocks = hotels_5_stars + hotels_4_stars + hotels_3_stars
+                    
+                    # Беремо оптимальну вибірку з 35 готелів для аналізу ШІ
                     selected_blocks = sorted_blocks[:35]
                     
-                    # Рахуємо, скільки РЕАЛЬНО зірок кожного типу потрапило у вибірку для передачі в ШІ
-                    final_5_count = sum(1 for b in selected_blocks if "5*" in b or "5★" in b)
-                    final_4_count = sum(1 for b in selected_blocks if "4*" in b or "4★" in b)
+                    # Точний перерахунок зірок, які РЕАЛЬНО потрапили у фінальну вибірку для передачі в Gemini
+                    final_5_count = sum(1 for b in selected_blocks if any(x in b.lower() for x in ["5*", "5★", "5 *", "5 зірок"]))
+                    final_4_count = sum(1 for b in selected_blocks if any(x in b.lower() for x in ["4*", "4★", "4 *", "4 зірок"]))
                     
                     country_text_combined = " | ".join(selected_blocks)
                     final_chunk = " ".join(country_text_combined.split())
@@ -383,7 +388,7 @@ async def fetch_tat_ua_data():
                             f"{final_chunk}"
                             f"\n=== КІНЕЦЬ БЛОКУ КРАЇНИ: {country_slug.upper()} ===\n"
                         )
-                        # Точний вивід у логи реальної кількості готелів
+                        # Тепер логи відображатимуть реальні та чесні цифри знайдених готелів
                         logging.info(f"🎯 Сортування завершено ({country_slug.upper()}): Передано ШІ {final_5_count}шт 5★ та {final_4_count}шт 4★. (Всього у вибірці: {len(selected_blocks)} готелів).")
                 else:
                     logging.warning(f"⚠️ Не вдалося виділити готелі для напрямку {country_slug.upper()}")
