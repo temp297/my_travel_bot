@@ -6,6 +6,7 @@ import pytz
 import asyncpg
 import aiogram
 import requests
+import httpx
 from bs4 import BeautifulSoup
 from playwright.async_api import async_playwright
 from datetime import datetime
@@ -42,7 +43,7 @@ try:
     FEEDBACK_HOUR = int(os.getenv("FEEDBACK_HOUR", "11"))
     FEEDBACK_MINUTE = int(os.getenv("FEEDBACK_MINUTE", "0"))
     ASSISTANT_HOUR = int(os.getenv("ASSISTANT_HOUR", "23"))
-    ASSISTANT_MINUTE = int(os.getenv("ASSISTANT_MINUTE", "30"))
+    ASSISTANT_MINUTE = int(os.getenv("ASSISTANT_MINUTE", "48"))
 except ValueError:
     raise ValueError("ADMIN_ID, REVIEWS_CHAT_ID, FEEDBACK_HOUR та FEEDBACK_MINUTE мають бути цілими числами!")
 
@@ -292,99 +293,106 @@ async def fetch_tat_ua_data():
     }
     
     headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
         "Accept-Language": "uk-UA,uk;q=0.9,en-US;q=0.8,en;q=0.7",
-        "Referer": "https://turne.ua/ua/hottours"
+        "Referer": "https://turne.ua/ua/hottours",
+        "Cache-Control": "no-cache",
+        "Connection": "keep-alive"
     }
     
-    logging.info(f"🚀 [ПАРСЕР] Початок ОДНОРАЗОВОГО швидкого збору даних з сортуванням зірковості...")
+    logging.info(f"🚀 [ПАРСЕР] Початок ОДНОРАЗОВОГО швидкого збору даних з сортуванням зірковості через HTTPX...")
     cleaned_country_data = {}
     max_pages_per_country = 1 
     
     try:
-        for country_slug, base_url in country_urls.items():
-            logging.info(f"🌍 Збираємо пропозиції для напрямку: {country_slug.upper()}")
-            country_raw_blocks = []
-            
-            for page_num in range(1, max_pages_per_country + 1):
-                url = base_url if page_num == 1 else f"{base_url}?page={page_num}"
+        # Створюємо єдину асинхронну сесію для швидкого виконання запитів
+        async with httpx.AsyncClient(headers=headers, timeout=20.0, follow_redirects=True) as client:
+            for country_slug, base_url in country_urls.items():
+                logging.info(f"🌍 Збираємо пропозиції для напрямку: {country_slug.upper()}")
+                country_raw_blocks = []
                 
-                try:
-                    response = requests.get(url, headers=headers, timeout=15)
-                    if response.status_code == 200:
-                        soup = BeautifulSoup(response.text, 'html.parser')
-                        
-                        # Видаляємо зайві елементи, що засмічують пам'ять
-                        for script in soup(["script", "style", "header", "footer", "nav", "aside", "form"]):
-                            script.decompose()
+                for page_num in range(1, max_pages_per_country + 1):
+                    url = base_url if page_num == 1 else f"{base_url}?page={page_num}"
+                    
+                    try:
+                        # Асинхронний HTTP-запит без блокування Event Loop
+                        response = await client.get(url)
+                        if response.status_code == 200:
+                            soup = BeautifulSoup(response.text, 'html.parser')
                             
-                        page_text = " ".join(soup.get_text(separator=" ", strip=True).split())
-                        
-                        if "грн" in page_text or "ноч" in page_text:
-                            # Розбиваємо суцільний текст сторінки на окремі картки готелів
-                            raw_hotel_blocks = page_text.split("грн")
-                            for b in raw_hotel_blocks:
-                                cleaned_block = b.strip()
-                                if len(cleaned_block) > 100 and ("ноч" in cleaned_block or "*" in cleaned_block or "★" in cleaned_block):
-                                    country_raw_blocks.append(cleaned_block + " грн")
+                            # Очищаємо дерево від важких елементів для економії оперативної пам'яті
+                            for element in soup(["script", "style", "header", "footer", "nav", "aside", "form", "svg"]):
+                                element.decompose()
+                                
+                            page_text = " ".join(soup.get_text(separator=" ", strip=True).split())
+                            
+                            if "грн" in page_text or "ноч" in page_text:
+                                raw_hotel_blocks = page_text.split("грн")
+                                for b in raw_hotel_blocks:
+                                    cleaned_block = b.strip()
+                                    if len(cleaned_block) > 100 and ("ноч" in cleaned_block or "*" in cleaned_block or "★" in cleaned_block):
+                                        country_raw_blocks.append(cleaned_block + " грн")
+                            else:
+                                break
                         else:
+                            logging.warning(f"⚠️ Статус-код {response.status_code} для сторінки {page_num} ({country_slug})")
                             break
-                    else:
-                        break
-                    
-                    # ВИПРАВЛЕНО: Замінено time.sleep на асинхронний sleep, щоб бот не зависав
-                    await asyncio.sleep(0.4)
-                    
-                except Exception as page_err:
-                    logging.error(f"❌ Помилка пагінації {page_num} для {country_slug}: {page_err}")
-                    continue
+                        
+                        # Правильний асинхронний sleep (не блокує інші процеси бота)
+                        await asyncio.sleep(0.5)
+                        
+                    except Exception as page_err:
+                        logging.error(f"❌ Помилка пагінації {page_num} для {country_slug}: {page_err}")
+                        continue
 
-            # --- РОЗУМНЕ СОРТУВАННЯ ТА ПЕРЕМІШУВАННЯ ДЛЯ УНІКАЛЬНОСТІ ЩОДНЯ ---
-            if country_raw_blocks:
-                hotels_5_stars = []
-                hotels_4_stars = []
-                hotels_3_stars = []
-                
-                for block in country_raw_blocks:
-                    if "5*" in block or "5★" in block:
-                        hotels_5_stars.append(block)
-                    elif "4*" in block or "4★" in block:
-                        hotels_4_stars.append(block)
-                    else:
-                        hotels_3_stars.append(block)
-                
-                # Перемішуємо категорії незалежно одна від одної
-                random.shuffle(hotels_5_stars)
-                random.shuffle(hotels_4_stars)
-                random.shuffle(hotels_3_stars)
-                
-                # Об'єднуємо назад (5★ гарантовано стають на самий початок списку)
-                sorted_blocks = hotels_5_stars + hotels_4_stars + hotels_3_stars
-                
-                # Беремо велику вибірку з 35 готелів, щоб у ШІ був простір для вибору якісних турів
-                selected_blocks = sorted_blocks[:35]
-                country_text_combined = " | ".join(selected_blocks)
-                
-                # Забираємо зайві пробіли
-                final_chunk = " ".join(country_text_combined.split())
-                
-                if len(final_chunk) > 200:
-                    cleaned_country_data[country_slug] = (
-                        f"\n=== ПОЧАТОК БЛОКУ КРАЇНИ: {country_slug.upper()} ===\n"
-                        f"{final_chunk}"
-                        f"\n=== КІНЕЦЬ БЛОКУ КРАЇНИ: {country_slug.upper()} ===\n"
-                    )
-                    logging.info(f"🎯 Сортування завершено ({country_slug.upper()}): {len(hotels_5_stars)}шт 5★, {len(hotels_4_stars)}шт 4★. Всього передано ШІ: {len(selected_blocks)} готелів.")
-            else:
-                logging.warning(f"⚠️ Не вдалося виділити готелі для напрямку {country_slug.upper()}")
-                
-        return cleaned_country_data if cleaned_country_data else None
+                # --- РОЗУМНЕ СОРТУВАННЯ ТА ПЕРЕМІШУВАННЯ ---
+                if country_raw_blocks:
+                    hotels_5_stars = []
+                    hotels_4_stars = []
+                    hotels_3_stars = []
+                    
+                    for block in country_raw_blocks:
+                        # Перевіряємо обидва типи маркування, щоб уникнути помилок сортування
+                        if "5*" in block or "5★" in block:
+                            hotels_5_stars.append(block)
+                        elif "4*" in block or "4★" in block:
+                            hotels_4_stars.append(block)
+                        else:
+                            hotels_3_stars.append(block)
+                    
+                    # Перемішуємо для унікальності щоденних добірок
+                    random.shuffle(hotels_5_stars)
+                    random.shuffle(hotels_4_stars)
+                    random.shuffle(hotels_3_stars)
+                    
+                    # Об'єднуємо з пріоритетом 5★ на початку списку
+                    sorted_blocks = hotels_5_stars + hotels_4_stars + hotels_3_stars
+                    selected_blocks = sorted_blocks[:35]
+                    
+                    # Рахуємо, скільки РЕАЛЬНО зірок кожного типу потрапило у вибірку для передачі в ШІ
+                    final_5_count = sum(1 for b in selected_blocks if "5*" in b or "5★" in b)
+                    final_4_count = sum(1 for b in selected_blocks if "4*" in b or "4★" in b)
+                    
+                    country_text_combined = " | ".join(selected_blocks)
+                    final_chunk = " ".join(country_text_combined.split())
+                    
+                    if len(final_chunk) > 200:
+                        cleaned_country_data[country_slug] = (
+                            f"\n=== ПОЧАТОК БЛОКУ КРАЇНИ: {country_slug.upper()} ===\n"
+                            f"{final_chunk}"
+                            f"\n=== КІНЕЦЬ БЛОКУ КРАЇНИ: {country_slug.upper()} ===\n"
+                        )
+                        # Точний вивід у логи реальної кількості готелів
+                        logging.info(f"🎯 Сортування завершено ({country_slug.upper()}): Передано ШІ {final_5_count}шт 5★ та {final_4_count}шт 4★. (Всього у вибірці: {len(selected_blocks)} готелів).")
+                else:
+                    logging.warning(f"⚠️ Не вдалося виділити готелі для напрямку {country_slug.upper()}")
+                    
+            return cleaned_country_data if cleaned_country_data else None
 
     except Exception as e:
         logging.error(f"❌ Загальна помилка під час збору даних: {e}")
         return None
-
 
 async def generate_and_send_ai_tour_post():
     if not ai_model or not AUTO_POST_CHAT_ID:
