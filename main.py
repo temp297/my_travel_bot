@@ -43,7 +43,7 @@ try:
     FEEDBACK_HOUR = int(os.getenv("FEEDBACK_HOUR", "11"))
     FEEDBACK_MINUTE = int(os.getenv("FEEDBACK_MINUTE", "0"))
     ASSISTANT_HOUR = int(os.getenv("ASSISTANT_HOUR", "0"))
-    ASSISTANT_MINUTE = int(os.getenv("ASSISTANT_MINUTE", "52"))
+    ASSISTANT_MINUTE = int(os.getenv("ASSISTANT_MINUTE", "55"))
 except ValueError:
     raise ValueError("ADMIN_ID, REVIEWS_CHAT_ID, FEEDBACK_HOUR та FEEDBACK_MINUTE мають бути цілими числами!")
 
@@ -151,21 +151,6 @@ async def show_admin_base(message: types.Message, state: FSMContext):
     current_msgs = data.get("admin_msgs_to_clean", [])
     current_msgs.append(new_msg.message_id)
     await state.update_data(admin_msgs_to_clean=current_msgs)
-
-# --- ВЕБ-СЕРВЕР ДЛЯ ОБХОДУ ПЕРЕЗАПУСКІВ RENDER (ЖИТТЄВО НЕОБХІДНО) ---
-async def handle_ping(request):
-    """Відповідає Render '200 OK', підтверджуючи, що бот працює"""
-    return web.Response(text="Bot is live and running!")
-
-def start_webhook_fake():
-    """Створює додаток веб-сервера на порту, який вимагає Render"""
-    app = web.Application()
-    app.router.add_get('/', handle_ping)
-    
-    # Render автоматично передає порт у змінну оточення PORT (за замовчуванням 10000)
-    port = int(os.environ.get("PORT", 10000))
-    runner = web.AppRunner(app)
-    return runner, port
 
 pool = None
 
