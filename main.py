@@ -41,8 +41,8 @@ try:
     REVIEWS_CHAT_ID = int(os.getenv("REVIEWS_CHAT_ID"))
     FEEDBACK_HOUR = int(os.getenv("FEEDBACK_HOUR", "11"))
     FEEDBACK_MINUTE = int(os.getenv("FEEDBACK_MINUTE", "0"))
-    ASSISTANT_HOUR = int(os.getenv("ASSISTANT_HOUR", "16"))
-    ASSISTANT_MINUTE = int(os.getenv("ASSISTANT_MINUTE", "30"))
+    ASSISTANT_HOUR = int(os.getenv("ASSISTANT_HOUR", "17"))
+    ASSISTANT_MINUTE = int(os.getenv("ASSISTANT_MINUTE", "20"))
 except ValueError:
     raise ValueError("ADMIN_ID, REVIEWS_CHAT_ID, FEEDBACK_HOUR та FEEDBACK_MINUTE мають бути цілими числами!")
 
@@ -291,7 +291,7 @@ async def fetch_tat_ua_data():
         "ukraine": "https://tat.ua/search/ukraine/"
     }
     
-    logging.info(f"🚀 [ПАРСЕР] Початок ОДНОРАЗОВОГО збору даних через Playwright (оптимізований під 512MB RAM)...")
+    logging.info(f"🚀 [ПАРСЕР] Початок ОДНОРАЗОВОГО збору даних через Playwright (захищений від глічів RAM/DOM)...")
     cleaned_country_data = {}
     
     words_to_clean = [
@@ -322,18 +322,22 @@ async def fetch_tat_ua_data():
                 page = await context.new_page()
                 
                 try:
-                    # Блокуємо медіа для економії RAM
+                    # Блокуємо важкі медіа для економії оперативної пам'яті
                     await page.route("**/*", lambda route: route.abort() if route.request.resource_type in ["image", "stylesheet", "font", "media"] else route.continue_())
                     
-                    # Змінено на wait_until="commit" та збільшено таймаут до 60 секунд
+                    # Швидкий перехід до моменту старту рендерингу
                     await page.goto(url, timeout=60000, wait_until="commit")
                     
-                    # Невеличка пауза, щоб HTML структура стабілізувалася після commit
+                    # Даємо 3 секунди, щоб базовий DOM гарантовано з'явився в пам'яті
                     await asyncio.sleep(3)
                     
-                    # Імітуємо скрол вниз 3 рази
+                    # Безпечний скрол з перевіркою наявності document.body
                     for scroll_step in range(3):
-                        await page.evaluate("window.scrollTo(0, document.body.scrollHeight);")
+                        await page.evaluate("""
+                            if (document.body) {
+                                window.scrollTo(0, document.body.scrollHeight);
+                            }
+                        """)
                         await asyncio.sleep(1.5)
                     
                     content = await page.content()
