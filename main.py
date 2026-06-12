@@ -483,8 +483,16 @@ async def generate_and_send_ai_tour_post():
         )
 
         try:
-            response = ai_model.generate_content(prompt)
-            post_text = response.text
+            if ai_client:
+                # Новий коректний метод генерації тексту відповідно до бібліотеки google-genai
+                response = ai_client.models.generate_content(
+                    model=ai_model,
+                    contents=prompt,
+                )
+                post_text = response.text
+            else:
+                logging.error("❌ ШІ клієнт не ініціалізований. Пропуск генерації.")
+                continue
             
             if len(post_text.strip()) < 100 or "📍" not in post_text or "🏨" not in post_text:
                 logging.info(f"⏩ Пропущено блок '{cat['name']}', бо в згенерованому ШІ тексті немає карток готелів (можливо, країна зараз відсутня у вивантаженні).")
