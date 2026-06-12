@@ -29,6 +29,44 @@ import time
 # Список команд для фільтрації
 BOT_COMMANDS = ["start", "cancel", "admin", "discount", "check_discounts", "use_discount", "users"]
 
+DIAL_COUNTRIES = {
+    "region_europe": {
+        "title": "🇪🇺 Європа",
+        "items": {
+            "болгарія": "Болгарія", 
+            "греція": "Греція", 
+            "чорногорія": "Чорногорія", 
+            "хорватія": "Хорватія",
+            "іспанія": "Іспанія", 
+            "італія": "Італія",
+            "кіпр": "Кіпр",
+            "албанія": "Албанія",
+            "португалія": "Португалія",
+            "франція": "Франція"
+        }
+    },
+    "region_east": {
+        "title": "🕌 Близький Схід & Африка",
+        "items": {
+            "турція": "Туреччина", 
+            "египет": "Єгипет", 
+            "оае": "ОАЕ", 
+            "туніс": "Туніс"
+        }
+    },
+    "region_exotic": {
+        "title": "🏝 Екзотика",
+        "items": {
+            "мальдіви": "Мальдіви", 
+            "таїланд": "Таїланд", 
+            "домінікана": "Домінікана", 
+            "занзібар": "Занзібар", 
+            "балі": "Балі (Індонезія)",
+            "шрі ланка": "Шрі-Ланка"
+        }
+    }
+}
+
 # НАЛАШТУВАННЯ
 API_TOKEN = os.getenv("API_TOKEN")
 DATABASE_URL = os.getenv("DATABASE_URL")
@@ -42,8 +80,8 @@ try:
     REVIEWS_CHAT_ID = int(os.getenv("REVIEWS_CHAT_ID"))
     FEEDBACK_HOUR = int(os.getenv("FEEDBACK_HOUR", "11"))
     FEEDBACK_MINUTE = int(os.getenv("FEEDBACK_MINUTE", "0"))
-    ASSISTANT_HOUR = int(os.getenv("ASSISTANT_HOUR", "15"))
-    ASSISTANT_MINUTE = int(os.getenv("ASSISTANT_MINUTE", "30"))
+    ASSISTANT_HOUR = int(os.getenv("ASSISTANT_HOUR", "10"))
+    ASSISTANT_MINUTE = int(os.getenv("ASSISTANT_MINUTE", "0"))
 except ValueError:
     raise ValueError("ADMIN_ID, REVIEWS_CHAT_ID, FEEDBACK_HOUR та FEEDBACK_MINUTE мають бути цілими числами!")
 
@@ -771,6 +809,41 @@ async def start_use_discount(message: types.Message, state: FSMContext):
     
     await show_admin_base(message, state)
     
+# --- ДОПОМІЖНІ ФУНКЦІЇ ДЛЯ КЛАВІАТУР КРАЇН ---
+def get_regions_kb(opened_region: str = None):
+    builder = InlineKeyboardBuilder()
+    
+    # 1. Європа
+    eu_label = "🔽 🇪🇺 Європа" if opened_region == "region_europe" else "▶️ 🇪🇺 Європа"
+    builder.row(types.InlineKeyboardButton(text=eu_label, callback_data="toggle_region_europe"))
+    if opened_region == "region_europe":
+        for slug, name in DIAL_COUNTRIES["region_europe"]["items"].items():
+            builder.row(types.InlineKeyboardButton(text=f"   📍 {name}", callback_data=f"select_country_{slug}"))
+            
+    # 2. Близький Схід & Африка
+    east_label = "🔽 🕌 Близький Схід & Африка" if opened_region == "region_east" else "▶️ 🕌 Близький Схід & Африка"
+    builder.row(types.InlineKeyboardButton(text=east_label, callback_data="toggle_region_east"))
+    if opened_region == "region_east":
+        for slug, name in DIAL_COUNTRIES.get("region_east", {}).get("items", {}).items():
+            builder.row(types.InlineKeyboardButton(text=f"   📍 {name}", callback_data=f"select_country_{slug}"))
+            
+    # 3. Екзотика
+    exotic_label = "🔽 🌴 Екзотика" if opened_region == "region_exotic" else "▶️ 🌴 Екзотика"
+    builder.row(types.InlineKeyboardButton(text=exotic_label, callback_data="toggle_region_exotic"))
+    if opened_region == "region_exotic" and "region_exotic" in DIAL_COUNTRIES:
+        for slug, name in DIAL_COUNTRIES["region_exotic"]["items"].items():
+            builder.row(types.InlineKeyboardButton(text=f"   📍 {name}", callback_data=f"select_country_{slug}"))
+
+    # 4. Ручне введення
+    builder.row(types.InlineKeyboardButton(text="🌍 Інша країна (ввести вручну)", callback_data="manual_country"))
+    return builder.as_markup()
+
+def get_back_kb(callback_data: str):
+    builder = InlineKeyboardBuilder()
+    builder.row(types.InlineKeyboardButton(text="🔙 Назад", callback_data=callback_data))
+    return builder.as_markup()
+
+
 # --- ОБРОБНИКИ СТАНІВ (З ФІЛЬТРАЦІЄЮ КОМАНД) ---
 
 @dp.message(TourRequest.start_confirmed, ~CommandFilter(commands=BOT_COMMANDS))
@@ -783,43 +856,110 @@ async def check_start_input(message: types.Message, state: FSMContext):
 async def process_start_callback(callback_query: types.CallbackQuery, state: FSMContext):
     await state.clear() 
     await callback_query.message.edit_reply_markup(reply_markup=None)
-    msg = await callback_query.message.answer("🌍 Вкажіть пріоритетну країну та назву готелю (якщо визначилися)", reply_markup=types.ReplyKeyboardRemove())
+    
+    text = (
+        "🌍 <b>Оберіть напрямок для відпочинку.</b>\n\n"
+        "Натисніть на регіон, щоб розкрити список країн, або оберіть ручне введення, "
+        "якщо бажаної країни немає у списку:"
+    )
+    msg = await callback_query.message.answer(text, reply_markup=get_regions_kb(), parse_mode="HTML")
     await save_msg(msg, state)
     await state.set_state(TourRequest.destination)
 
+# Обробник перемикання (відкриття/закриття) регіонів країн
+@dp.callback_query(F.data.startswith("toggle_"), TourRequest.destination)
+async def toggle_region(callback_query: types.CallbackQuery, state: FSMContext):
+    region_id = callback_query.data.replace("toggle_", "")
+    data = await state.get_data()
+    current_open = data.get("opened_region")
+    
+    new_open = None if current_open == region_id else region_id
+    await state.update_data(opened_region=new_open)
+    
+    try:
+        await callback_query.message.edit_reply_markup(reply_markup=get_regions_kb(new_open))
+    except aiogram.exceptions.TelegramBadRequest:
+        await callback_query.answer()
+
+# Обробник вибору ручного введення країни
+@dp.callback_query(F.data == "manual_country", TourRequest.destination)
+async def manual_country_selected(callback_query: types.CallbackQuery, state: FSMContext):
+    await callback_query.message.edit_reply_markup(reply_markup=None)
+    msg = await callback_query.message.answer(
+        "✍️ Будь ласка, введіть назву країни (та міста/готелю за бажанням) текстовим повідомленням:",
+        reply_markup=get_back_kb("back_to_regions")
+    )
+    await save_msg(msg, state)
+
+# Обробник кнопки НАЗАД до вибору регіонів з текстового введення
+@dp.callback_query(F.data == "back_to_regions", TourRequest.destination)
+async def back_to_regions(callback_query: types.CallbackQuery, state: FSMContext):
+    await callback_query.message.delete()
+    text = (
+        "🌍 <b>Оберіть напрямок для відпочинку.</b>\n\n"
+        "Натисніть на регіон, щоб розкрити список країн, або оберіть ручне введення:"
+    )
+    msg = await callback_query.message.answer(text, reply_markup=get_regions_kb(), parse_mode="HTML")
+    await save_msg(msg, state)
+
+# Обробник текстового введення країни (ручний режим) — БЕЗ REPLACEMENTS
 @dp.message(TourRequest.destination, ~CommandFilter(commands=BOT_COMMANDS))
-async def process_dest(message: types.Message, state: FSMContext):
+async def process_dest_text(message: types.Message, state: FSMContext):
     await save_msg(message, state)
-    text = message.text.strip().lower()
+    text = message.text.strip()
     if text.isdigit() or len(text) < 2:
         msg = await message.answer("⚠️ Введіть назву країни літерами.")
         await save_msg(msg, state)
         return
-    replacements = {
-        "турция": "Туреччина", "туреччина": "Туреччина", "турція": "Туреччина", "анталія": "Туреччина (Анталія)", "анталия": "Туреччина (Анталія)", "кемер": "Туреччина (Кемер)", "аланія": "Туреччина (Аланія)", "белек": "Туреччина (Белек)",
-        "египет": "Єгипет", "єгипет": "Єгипет", "егіпет": "Єгипет", "єгіпет": "Єгипет", "египт": "Єгипет", "єгіпєт": "Єгипет", "егіпєт": "Єгипет", "шарм": "Єгипет (Шарм-ель-Шейх)", "хургада": "Єгипет (Хургада)", "марса": "Єгипет (Марса-Алам)",
-        "болгарія": "Болгарія", "болгария": "Болгарія", "греція": "Греція", "греция": "Греція", "крит": "Греція (Крит)",
-        "чорногорія": "Чорногорія", "черногория": "Чорногорія", "хорватія": "Хорватія", "хорватия": "Хорватія",
-        "іспанія": "Іспанія", "испания": "Іспанія", "італія": "Італія", "италия": "Італія", "кіпр": "Кіпр", "кипр": "Кіпр",
-        "албанія": "Албанія", "албания": "Албанія", "португалія": "Португалія", "португалия": "Португалія", "франція": "Франція", "франция": "Франція",
-        "оае": "ОАЕ", "оаэ": "ОАЕ", "емираты": "ОАЕ", "емірати": "ОАЕ", "дубай": "ОАЕ (Дубай)", "дубаи": "ОАЕ (Дубай)",
-        "таїланд": "Таїланд", "thailand": "Таїланд", "тайланд": "Таїланд", "тай": "Таїланд", "пхукет": "Таїланд (Пхукет)",
-        "мальдіви": "Мальдіви", "мальдивы": "Мальдіви", "мальдиви": "Мальдіви", "домінікана": "Домінікана", "доминикана": "Домінікана",
-        "занзібар": "Занзібар", "занзибар": "Занзібар", "шрі ланка": "Шрі-Ланка", "шри ланка": "Шрі-Ланка", "балі": "Балі (Індонезія)", "бали": "Балі (Індонезія)"
-    }
 
-    user_text = message.text.strip().lower()
-    final_destination = replacements.get(user_text, message.text.strip().capitalize())
-    await state.update_data(destination=final_destination)
+    final_destination = text.capitalize()
+    await proceed_to_adults(message, final_destination, state)
+
+# Обробник кліку по кнопці конкретної країни з випадаючого списку
+@dp.callback_query(F.data.startswith("select_country_"), TourRequest.destination)
+async def process_dest_callback(callback_query: types.CallbackQuery, state: FSMContext):
+    await callback_query.message.edit_reply_markup(reply_markup=None)
+    slug = callback_query.data.replace("select_country_", "")
+    
+    final_destination = None
+    for region in DIAL_COUNTRIES.values():
+        if slug in region.get("items", {}):
+            final_destination = region["items"][slug]
+            break
+    if not final_destination:
+        final_destination = slug.capitalize()
+        
+    await proceed_to_adults(callback_query.message, final_destination, state)
+
+# Спільна функція переходу до кроку вибору кількості дорослих
+async def proceed_to_adults(target_message: types.Message, destination: str, state: FSMContext):
+    await state.update_data(destination=destination)
+    
     builder = InlineKeyboardBuilder()
-    builder.add(types.InlineKeyboardButton(text="1", callback_data="adults_1"),
+    builder.add(
+        types.InlineKeyboardButton(text="1", callback_data="adults_1"),
         types.InlineKeyboardButton(text="2", callback_data="adults_2"),
-        types.InlineKeyboardButton(text="3+", callback_data="adults_3+"))
-    msg1 = await message.answer(f"✅ Напрямок: {final_destination}")
-    msg2 = await message.answer(f"👤 Оберіть кількість дорослих:", reply_markup=builder.as_markup())
+        types.InlineKeyboardButton(text="3+", callback_data="adults_3+")
+    )
+    builder.row(types.InlineKeyboardButton(text="🔙 Назад", callback_data="back_to_dest"))
+    
+    msg1 = await target_message.answer(f"✅ Напрямок: {destination}")
+    msg2 = await target_message.answer(f"👤 Оберіть кількість дорослих:", reply_markup=builder.as_markup())
     await save_msg(msg1, state)
     await save_msg(msg2, state)
     await state.set_state(TourRequest.adults_count)
+
+# Кнопка НАЗАД: Від дорослих до вибору країни
+@dp.callback_query(F.data == "back_to_dest", TourRequest.adults_count)
+async def back_to_dest(callback_query: types.CallbackQuery, state: FSMContext):
+    await callback_query.message.delete()
+    text = (
+        "🌍 <b>Оберіть напрямок для відпочинку.</b>\n\n"
+        "Натисніть на регіон, щоб розкрити список країн, або оберіть ручне введення:"
+    )
+    msg = await callback_query.message.answer(text, reply_markup=get_regions_kb(), parse_mode="HTML")
+    await save_msg(msg, state)
+    await state.set_state(TourRequest.destination)
 
 @dp.message(TourRequest.adults_count, ~CommandFilter(commands=BOT_COMMANDS))
 async def check_adults_input(message: types.Message, state: FSMContext):
@@ -832,17 +972,40 @@ async def process_adults(callback_query: types.CallbackQuery, state: FSMContext)
     await callback_query.message.edit_reply_markup(reply_markup=None)
     count = callback_query.data.split("_")[1]
     await state.update_data(adults=count)
+    
     builder = InlineKeyboardBuilder()
     builder.add(types.InlineKeyboardButton(text="Без дітей (0)", callback_data="child_0"))
-    builder.add(types.InlineKeyboardButton(text="1", callback_data="child_1"),
+    builder.add(
+        types.InlineKeyboardButton(text="1", callback_data="child_1"),
         types.InlineKeyboardButton(text="2", callback_data="child_2"),
-        types.InlineKeyboardButton(text="3+", callback_data="child_3"))
+        types.InlineKeyboardButton(text="3+", callback_data="child_3")
+    )
     builder.adjust(1, 3)
+    builder.row(types.InlineKeyboardButton(text="🔙 Назад", callback_data="back_to_adults"))
+    
     msg1 = await callback_query.message.answer(f"👤 Дорослих: {count}")
     msg2 = await callback_query.message.answer(f"👶 Скільки буде дітей?", reply_markup=builder.as_markup())
     await save_msg(msg1, state)
     await save_msg(msg2, state)
     await state.set_state(TourRequest.children_count)
+
+# Кнопка НАЗАД: Від дітей до дорослих
+@dp.callback_query(F.data == "back_to_adults", TourRequest.children_count)
+async def back_to_adults(callback_query: types.CallbackQuery, state: FSMContext):
+    await callback_query.message.delete()
+    data = await state.get_data()
+    destination = data.get("destination")
+    
+    builder = InlineKeyboardBuilder()
+    builder.add(
+        types.InlineKeyboardButton(text="1", callback_data="adults_1"),
+        types.InlineKeyboardButton(text="2", callback_data="adults_2"),
+        types.InlineKeyboardButton(text="3+", callback_data="adults_3+")
+    )
+    builder.row(types.InlineKeyboardButton(text="🔙 Назад", callback_data="back_to_dest"))
+    msg = await callback_query.message.answer(f"👤 Оберіть кількість дорослих для напрямку {destination}:", reply_markup=builder.as_markup())
+    await save_msg(msg, state)
+    await state.set_state(TourRequest.adults_count)
 
 @dp.message(TourRequest.children_count, ~CommandFilter(commands=BOT_COMMANDS))
 async def check_children_input(message: types.Message, state: FSMContext):
@@ -855,14 +1018,41 @@ async def process_children(callback_query: types.CallbackQuery, state: FSMContex
     await callback_query.message.edit_reply_markup(reply_markup=None)
     count = callback_query.data.split("_")[1]
     await state.update_data(children=count)
+    
     msg1 = await callback_query.message.answer(f"👶 Дітей: {count}")
+    
+    calendar_kb = await SimpleCalendar().start_calendar()
+    inline_kb = InlineKeyboardBuilder.from_markup(calendar_kb)
+    inline_kb.row(types.InlineKeyboardButton(text="🔙 Назад", callback_data="back_to_children"))
+    
     msg2 = await callback_query.message.answer(
         f"📅 Оберіть дату, з якої можна планувати виліт (З):", 
-        reply_markup=await SimpleCalendar().start_calendar()
+        reply_markup=inline_kb.as_markup()
     )
     await save_msg(msg1, state)
     await save_msg(msg2, state)
     await state.set_state(TourRequest.date_from) 
+
+# Кнопка НАЗАД: Від дати (З) до дітей
+@dp.callback_query(F.data == "back_to_children", TourRequest.date_from)
+async def back_to_children(callback_query: types.CallbackQuery, state: FSMContext):
+    await callback_query.message.delete()
+    data = await state.get_data()
+    adults = data.get("adults")
+    
+    builder = InlineKeyboardBuilder()
+    builder.add(types.InlineKeyboardButton(text="Без дітей (0)", callback_data="child_0"))
+    builder.add(
+        types.InlineKeyboardButton(text="1", callback_data="child_1"),
+        types.InlineKeyboardButton(text="2", callback_data="child_2"),
+        types.InlineKeyboardButton(text="3+", callback_data="child_3")
+    )
+    builder.adjust(1, 3)
+    builder.row(types.InlineKeyboardButton(text="🔙 Назад", callback_data="back_to_adults"))
+    
+    msg = await callback_query.message.answer(f"👶 Скільки буде дітей (ви вказали дорослих: {adults})?", reply_markup=builder.as_markup())
+    await save_msg(msg, state)
+    await state.set_state(TourRequest.children_count)
 
 @dp.message(TourRequest.date_from, ~CommandFilter(commands=BOT_COMMANDS))
 async def check_date_from_input(message: types.Message, state: FSMContext):
@@ -877,13 +1067,34 @@ async def process_date_from(callback_query: types.CallbackQuery, callback_data: 
         formatted = date.strftime("%d.%m.%Y")
         await state.update_data(date_from=formatted)
         msg1 = await callback_query.message.answer(f"📅 Дата вильоту (З): {formatted}")
+        
+        calendar_kb = await SimpleCalendar().start_calendar()
+        inline_kb = InlineKeyboardBuilder.from_markup(calendar_kb)
+        inline_kb.row(types.InlineKeyboardButton(text="🔙 Назад", callback_data="back_to_date_from"))
+        
         msg2 = await callback_query.message.answer(
             f"📅 Оберіть дату, до якої можна планувати виліт (ПО):", 
-            reply_markup=await SimpleCalendar().start_calendar()
+            reply_markup=inline_kb.as_markup()
         )
         await save_msg(msg1, state)
         await save_msg(msg2, state)
         await state.set_state(TourRequest.date_to)
+
+# Кнопка НАЗАД: Від дати (ПО) до дати (З)
+@dp.callback_query(F.data == "back_to_date_from", TourRequest.date_to)
+async def back_to_date_from(callback_query: types.CallbackQuery, state: FSMContext):
+    await callback_query.message.delete()
+    
+    calendar_kb = await SimpleCalendar().start_calendar()
+    inline_kb = InlineKeyboardBuilder.from_markup(calendar_kb)
+    inline_kb.row(types.InlineKeyboardButton(text="🔙 Назад", callback_data="back_to_children"))
+    
+    msg = await callback_query.message.answer(
+        f"📅 Оберіть дату, з якої можна планувати виліт (З):", 
+        reply_markup=inline_kb.as_markup()
+    )
+    await save_msg(msg, state)
+    await state.set_state(TourRequest.date_from)
 
 @dp.message(TourRequest.date_to, ~CommandFilter(commands=BOT_COMMANDS))
 async def check_date_to_input(message: types.Message, state: FSMContext):
@@ -898,26 +1109,59 @@ async def process_date_to(callback_query: types.CallbackQuery, callback_data: Si
         formatted = date.strftime("%d.%m.%Y")
         await state.update_data(date_to=formatted)
         msg1 = await callback_query.message.answer(f"✅ Дата вильоту (ПО): {formatted}")
-        msg2 = await callback_query.message.answer(f"🌙 На скільки ночей плануєте відпочинок?")
+        msg2 = await callback_query.message.answer(
+            f"🌙 На скільки ночей плануєте відпочинок?",
+            reply_markup=get_back_kb("back_to_date_to")
+        )
         await save_msg(msg1, state)
         await save_msg(msg2, state)
         await state.set_state(TourRequest.nights_count)
+
+# Кнопка НАЗАД: Від введення ночей до дати (ПО)
+@dp.callback_query(F.data == "back_to_date_to", TourRequest.nights_count)
+async def back_to_date_to(callback_query: types.CallbackQuery, state: FSMContext):
+    await callback_query.message.delete()
+    
+    calendar_kb = await SimpleCalendar().start_calendar()
+    inline_kb = InlineKeyboardBuilder.from_markup(calendar_kb)
+    inline_kb.row(types.InlineKeyboardButton(text="🔙 Назад", callback_data="back_to_date_from"))
+    
+    msg = await callback_query.message.answer(
+        f"📅 Оберіть дату, до якої можна планувати виліт (ПО):", 
+        reply_markup=inline_kb.as_markup()
+    )
+    await save_msg(msg, state)
+    await state.set_state(TourRequest.date_to)
 
 @dp.message(TourRequest.nights_count, ~CommandFilter(commands=BOT_COMMANDS))
 async def process_nights(message: types.Message, state: FSMContext):
     await save_msg(message, state)
     nights_input = message.text.strip()
     
-    # Перевірка, чи є введений текст числом
     if not nights_input.isdigit():
         msg = await message.answer("⚠️ Будь ласка, введіть кількість ночей тільки цифрами (наприклад: 7):")
         await save_msg(msg, state)
         return
 
     await state.update_data(nights=nights_input)
-    msg = await message.answer("⭐ Оберіть категорію готелю", reply_markup=stars_kb())
+    
+    stars_builder = InlineKeyboardBuilder.from_markup(stars_kb())
+    stars_builder.row(types.InlineKeyboardButton(text="🔙 Назад", callback_data="back_to_nights"))
+    
+    msg = await message.answer("⭐ Оберіть категорію готелю", reply_markup=stars_builder.as_markup())
     await save_msg(msg, state)
     await state.set_state(TourRequest.hotel_stars)
+
+# Кнопка НАЗАД: Від категорії готелю до введення кількості ночей
+@dp.callback_query(F.data == "back_to_nights", TourRequest.hotel_stars)
+async def back_to_nights(callback_query: types.CallbackQuery, state: FSMContext):
+    await callback_query.message.delete()
+    msg = await callback_query.message.answer(
+        f"🌙 На скільки ночей плануєте відпочинок?",
+        reply_markup=get_back_kb("back_to_date_to")
+    )
+    await save_msg(msg, state)
+    await state.set_state(TourRequest.nights_count)
     
 @dp.message(TourRequest.hotel_stars, ~CommandFilter(commands=BOT_COMMANDS))
 async def check_stars_input(message: types.Message, state: FSMContext):
@@ -932,10 +1176,24 @@ async def process_stars(callback_query: types.CallbackQuery, state: FSMContext):
     label = "Будь-яка" if star == "any" else f"{star}*"
     await state.update_data(stars=label)
     msg1 = await callback_query.message.answer(f"⭐ Готель: {label}")
-    msg2 = await callback_query.message.answer(f"🍴 Яке харчування Вам підходить:", reply_markup=meals_kb())
+    
+    meals_builder = InlineKeyboardBuilder.from_markup(meals_kb())
+    meals_builder.row(types.InlineKeyboardButton(text="🔙 Назад", callback_data="back_to_stars"))
+    
+    msg2 = await callback_query.message.answer(f"🍴 Яке харчування Вам підходить:", reply_markup=meals_builder.as_markup())
     await save_msg(msg1, state)
     await save_msg(msg2, state)
     await state.set_state(TourRequest.meal_type)
+
+# Кнопка НАЗАД: Від типу харчування до зірок готелю
+@dp.callback_query(F.data == "back_to_stars", TourRequest.meal_type)
+async def back_to_stars(callback_query: types.CallbackQuery, state: FSMContext):
+    await callback_query.message.delete()
+    stars_builder = InlineKeyboardBuilder.from_markup(stars_kb())
+    stars_builder.row(types.InlineKeyboardButton(text="🔙 Назад", callback_data="back_to_nights"))
+    msg = await callback_query.message.answer("⭐ Оберіть категорію готелю", reply_markup=stars_builder.as_markup())
+    await save_msg(msg, state)
+    await state.set_state(TourRequest.hotel_stars)
 
 @dp.message(TourRequest.meal_type, ~CommandFilter(commands=BOT_COMMANDS))
 async def check_meals_input(message: types.Message, state: FSMContext):
@@ -950,10 +1208,23 @@ async def process_meals(callback_query: types.CallbackQuery, state: FSMContext):
     meal_text = meal_map.get(callback_query.data.split("_")[1], "Будь-яке")
     await state.update_data(meals=meal_text)
     msg1 = await callback_query.message.answer(f"🍴 Харчування: {meal_text}")
-    msg2 = await callback_query.message.answer(f"💰 Який Ви плануєте витратити бюджет у гривнях (цифрами):")
+    msg2 = await callback_query.message.answer(
+        f"💰 Який Ви плануєте витратити бюджет у гривнях (цифрами):",
+        reply_markup=get_back_kb("back_to_meals")
+    )
     await save_msg(msg1, state)
     await save_msg(msg2, state)
     await state.set_state(TourRequest.budget)
+
+# Кнопка НАЗАД: Від введення бюджету до типу харчування
+@dp.callback_query(F.data == "back_to_meals", TourRequest.budget)
+async def back_to_meals(callback_query: types.CallbackQuery, state: FSMContext):
+    await callback_query.message.delete()
+    meals_builder = InlineKeyboardBuilder.from_markup(meals_kb())
+    meals_builder.row(types.InlineKeyboardButton(text="🔙 Назад", callback_data="back_to_stars"))
+    msg = await callback_query.message.answer(f"🍴 Яке харчування Вам підходить:", reply_markup=meals_builder.as_markup())
+    await save_msg(msg, state)
+    await state.set_state(TourRequest.meal_type)
 
 @dp.message(TourRequest.budget, ~CommandFilter(commands=BOT_COMMANDS))
 async def process_budget(message: types.Message, state: FSMContext):
@@ -966,20 +1237,31 @@ async def process_budget(message: types.Message, state: FSMContext):
 
     await save_msg(message, state)
     await state.update_data(budget=budget_raw)
-    msg = await message.answer("📞 Ваш номер телефону або нікнейм для зв'язку:")
+    msg = await message.answer(
+        "📞 Ваш номер телефону або нікнейм для зв'язку:",
+        reply_markup=get_back_kb("back_to_budget")
+    )
     await save_msg(msg, state)
     await state.set_state(TourRequest.contact)
+
+# Кнопка НАЗАД: Від контактів до введення бюджету
+@dp.callback_query(F.data == "back_to_budget", TourRequest.contact)
+async def back_to_budget(callback_query: types.CallbackQuery, state: FSMContext):
+    await callback_query.message.delete()
+    msg = await callback_query.message.answer(
+        f"💰 Який Ви плануєте витратити бюджет у гривнях (цифрами):",
+        reply_markup=get_back_kb("back_to_meals")
+    )
+    await save_msg(msg, state)
+    await state.set_state(TourRequest.budget)
 
 @dp.message(TourRequest.contact, ~CommandFilter(commands=BOT_COMMANDS))
 async def process_contact(message: types.Message, state: FSMContext):
     await save_msg(message, state)
     data = await state.get_data()
     user = message.from_user
-    async with pool.acquire() as conn:
-        discount_row = await conn.fetchrow(
-        "SELECT discount_value FROM discounts WHERE user_id = $1 AND is_used = FALSE", 
-        user.id
-        )
+    
+    discount_row = await get_user_discount(user.id)
     discount_status = f"{discount_row['discount_value']}%" if discount_row else "Немає"
     info_table = (
 f"🌍 <b>Напрямок:</b> {data.get('destination')}\n"
@@ -1007,8 +1289,10 @@ f"━━━━━━━━━━━━━━━"
     tasks = [bot.delete_message(chat_id=message.chat.id, message_id=m_id) for m_id in msgs_to_delete]
     if tasks:
         await asyncio.gather(*tasks, return_exceptions=True)
+        
     re_builder = ReplyKeyboardBuilder()
     re_builder.add(types.KeyboardButton(text="🔄 СТВОРИТИ НОВУ ЗАЯВКУ"))
+
     await message.answer(
 f"✅ Дякуємо! Заявку успішно відправлено!\nМи зв'яжемося з Вами найближчим часом 😊\n\n"
 f"<b>ДЕТАЛІ ВАШОЇ ЗАЯВКИ:</b>\n"
