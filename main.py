@@ -844,6 +844,12 @@ async def process_start_callback(callback_query: types.CallbackQuery, state: FSM
     await state.clear() 
     await callback_query.message.edit_reply_markup(reply_markup=None)
     
+    # Видаляємо повідомлення старту, щоб почати з чистого аркуша
+    try:
+        await callback_query.message.delete()
+    except Exception:
+        pass
+        
     text = (
         "🌍 <b>Оберіть напрямок для відпочинку.</b>\n\n"
         "Натисніть на регіон, щоб розкрити список країн, або оберіть ручне введення:"
@@ -869,7 +875,12 @@ async def toggle_region_close(callback_query: types.CallbackQuery):
 
 @dp.callback_query(F.data == "select_country_other", TourRequest.destination)
 async def manual_country_selected(callback_query: types.CallbackQuery, state: FSMContext):
-    await callback_query.message.edit_reply_markup(reply_markup=None)
+    # Видаляємо попередній список країн
+    try:
+        await callback_query.message.delete()
+    except Exception:
+        pass
+        
     builder = InlineKeyboardBuilder()
     add_back_button(builder, "back_to_regions")
     msg = await callback_query.message.answer(
@@ -890,7 +901,12 @@ async def back_to_regions(callback_query: types.CallbackQuery, state: FSMContext
 
 @dp.callback_query(F.data.startswith("select_country_"), TourRequest.destination)
 async def process_dest_callback(callback_query: types.CallbackQuery, state: FSMContext):
-    await callback_query.message.edit_reply_markup(reply_markup=None)
+    # Прибираємо кнопки старого кроку перед надсиланням нового повідомлення
+    try:
+        await callback_query.message.delete()
+    except Exception:
+        await callback_query.message.edit_reply_markup(reply_markup=None)
+        
     item_cmd = callback_query.data.replace("select_country_", "")
     
     final_destination = None
@@ -912,6 +928,16 @@ async def process_dest_text(message: types.Message, state: FSMContext):
         msg = await message.answer("⚠️ Введіть назву країни літерами.")
         await save_msg(msg, state)
         return
+        
+    # Спробуємо зачистити форму ручного введення, щоб вона не залишалася в чаті
+    data = await state.get_data()
+    msgs_to_delete = data.get("msgs_to_delete", [])
+    tasks = [bot.delete_message(chat_id=message.chat.id, message_id=m_id) for m_id in msgs_to_delete]
+    if tasks:
+        await asyncio.gather(*tasks, return_exceptions=True)
+        # Очищаємо список у стані після фактичного видалення з чату
+        await state.update_data(msgs_to_delete=[])
+        
     await proceed_to_adults(message, text.capitalize(), state)
 
 async def proceed_to_adults(target_message: types.Message, destination: str, state: FSMContext):
@@ -933,7 +959,20 @@ async def proceed_to_adults(target_message: types.Message, destination: str, sta
 
 @dp.callback_query(F.data == "back_to_dest", TourRequest.adults_count)
 async def back_to_dest(callback_query: types.CallbackQuery, state: FSMContext):
-    await callback_query.message.delete()
+    # Очищаємо екран від повідомлень вибору кількості дорослих
+    try:
+        await callback_query.message.delete()
+    except Exception:
+        pass
+    
+    # Видаляємо також текстовий рядок "Напрямок: ..."
+    data = await state.get_data()
+    msgs_to_delete = data.get("msgs_to_delete", [])
+    tasks = [bot.delete_message(chat_id=callback_query.message.chat.id, message_id=m_id) for m_id in msgs_to_delete]
+    if tasks:
+        await asyncio.gather(*tasks, return_exceptions=True)
+    await state.update_data(msgs_to_delete=[])
+
     text = (
         "🌍 <b>Оберіть напрямок для відпочинку.</b>\n\n"
         "Натисніть на регіон, щоб розкрити список країн, або оберіть ручне введення:"
@@ -950,7 +989,12 @@ async def check_adults_input(message: types.Message, state: FSMContext):
 
 @dp.callback_query(F.data.startswith("adults_"), TourRequest.adults_count)
 async def process_adults(callback_query: types.CallbackQuery, state: FSMContext):
-    await callback_query.message.edit_reply_markup(reply_markup=None)
+    # Видаляємо кнопки попереднього кроку, щоб не захаращувати екран
+    try:
+        await callback_query.message.delete()
+    except Exception:
+        await callback_query.message.edit_reply_markup(reply_markup=None)
+        
     count = callback_query.data.split("_")[1]
     await state.update_data(adults=count)
     
@@ -972,8 +1016,19 @@ async def process_adults(callback_query: types.CallbackQuery, state: FSMContext)
 
 @dp.callback_query(F.data == "back_to_adults", TourRequest.children_count)
 async def back_to_adults(callback_query: types.CallbackQuery, state: FSMContext):
-    await callback_query.message.delete()
+    try:
+        await callback_query.message.delete()
+    except Exception:
+        pass
+        
+    # Очищаємо накопичені проміжні повідомлення ("Дорослих: ...")
     data = await state.get_data()
+    msgs_to_delete = data.get("msgs_to_delete", [])
+    tasks = [bot.delete_message(chat_id=callback_query.message.chat.id, message_id=m_id) for m_id in msgs_to_delete]
+    if tasks:
+        await asyncio.gather(*tasks, return_exceptions=True)
+    await state.update_data(msgs_to_delete=[])
+
     destination = data.get("destination")
     builder = InlineKeyboardBuilder()
     builder.add(
@@ -983,8 +1038,11 @@ async def back_to_adults(callback_query: types.CallbackQuery, state: FSMContext)
     )
     builder.adjust(3)
     add_back_button(builder, "back_to_dest")
-    msg = await callback_query.message.answer(f"👤 Оберіть кількість дорослих для напрямку {destination}:", reply_markup=builder.as_markup())
-    await save_msg(msg, state)
+    
+    msg1 = await callback_query.message.answer(f"✅ Напрямок: {destination}")
+    msg2 = await callback_query.message.answer(f"👤 Оберіть кількість дорослих для напрямку {destination}:", reply_markup=builder.as_markup())
+    await save_msg(msg1, state)
+    await save_msg(msg2, state)
     await state.set_state(TourRequest.adults_count)
 
 @dp.message(TourRequest.children_count, ~Command(commands=BOT_COMMANDS))
@@ -995,7 +1053,11 @@ async def check_children_input(message: types.Message, state: FSMContext):
 
 @dp.callback_query(F.data.startswith("child_"), TourRequest.children_count)
 async def process_children(callback_query: types.CallbackQuery, state: FSMContext):
-    await callback_query.message.edit_reply_markup(reply_markup=None)
+    try:
+        await callback_query.message.delete()
+    except Exception:
+        await callback_query.message.edit_reply_markup(reply_markup=None)
+        
     count = callback_query.data.split("_")[1]
     await state.update_data(children=count)
     
@@ -1011,8 +1073,18 @@ async def process_children(callback_query: types.CallbackQuery, state: FSMContex
 
 @dp.callback_query(F.data == "back_to_children", TourRequest.date_from)
 async def back_to_children(callback_query: types.CallbackQuery, state: FSMContext):
-    await callback_query.message.delete()
+    try:
+        await callback_query.message.delete()
+    except Exception:
+        pass
+        
     data = await state.get_data()
+    msgs_to_delete = data.get("msgs_to_delete", [])
+    tasks = [bot.delete_message(chat_id=callback_query.message.chat.id, message_id=m_id) for m_id in msgs_to_delete]
+    if tasks:
+        await asyncio.gather(*tasks, return_exceptions=True)
+    await state.update_data(msgs_to_delete=[])
+
     adults = data.get("adults")
     builder = InlineKeyboardBuilder()
     builder.add(types.InlineKeyboardButton(text="Без дітей (0)", callback_data="child_0"))
@@ -1023,8 +1095,11 @@ async def back_to_children(callback_query: types.CallbackQuery, state: FSMContex
     )
     builder.adjust(1, 3)
     add_back_button(builder, "back_to_adults")
-    msg = await callback_query.message.answer(f"👶 Скільки буде дітей (ви вказали дорослих: {adults})?", reply_markup=builder.as_markup())
-    await save_msg(msg, state)
+    
+    msg1 = await callback_query.message.answer(f"👤 Дорослих: {adults}")
+    msg2 = await callback_query.message.answer(f"👶 Скільки буде дітей (ви вказали дорослих: {adults})?", reply_markup=builder.as_markup())
+    await save_msg(msg1, state)
+    await save_msg(msg2, state)
     await state.set_state(TourRequest.children_count)
 
 @dp.message(TourRequest.date_from, ~Command(commands=BOT_COMMANDS))
@@ -1037,6 +1112,11 @@ async def check_date_from_input(message: types.Message, state: FSMContext):
 async def process_date_from(callback_query: types.CallbackQuery, callback_data: SimpleCalendarCallback, state: FSMContext):
     selected, date = await SimpleCalendar().process_selection(callback_query, callback_data)
     if selected:
+        try:
+            await callback_query.message.delete()
+        except Exception:
+            pass
+            
         formatted = date.strftime("%d.%m.%Y")
         await state.update_data(date_from=formatted)
         msg1 = await callback_query.message.answer(f"📅 Дата вильоту (З): {formatted}")
@@ -1052,12 +1132,26 @@ async def process_date_from(callback_query: types.CallbackQuery, callback_data: 
 
 @dp.callback_query(F.data == "back_to_date_from", TourRequest.date_to)
 async def back_to_date_from(callback_query: types.CallbackQuery, state: FSMContext):
-    await callback_query.message.delete()
+    try:
+        await callback_query.message.delete()
+    except Exception:
+        pass
+        
+    data = await state.get_data()
+    msgs_to_delete = data.get("msgs_to_delete", [])
+    tasks = [bot.delete_message(chat_id=callback_query.message.chat.id, message_id=m_id) for m_id in msgs_to_delete]
+    if tasks:
+        await asyncio.gather(*tasks, return_exceptions=True)
+    await state.update_data(msgs_to_delete=[])
+
     calendar_kb = await SimpleCalendar().start_calendar()
     inline_kb = InlineKeyboardBuilder.from_markup(calendar_kb)
     add_back_button(inline_kb, "back_to_children")
-    msg = await callback_query.message.answer("📅 Оберіть дату, з якої можна планувати виліт (З):", reply_markup=inline_kb.as_markup())
-    await save_msg(msg, state)
+    
+    msg1 = await callback_query.message.answer(f"👶 Дітей: {data.get('children')}")
+    msg2 = await callback_query.message.answer("📅 Оберіть дату, з якої можна планувати виліт (З):", reply_markup=inline_kb.as_markup())
+    await save_msg(msg1, state)
+    await save_msg(msg2, state)
     await state.set_state(TourRequest.date_from)
 
 @dp.message(TourRequest.date_to, ~Command(commands=BOT_COMMANDS))
@@ -1070,6 +1164,11 @@ async def check_date_to_input(message: types.Message, state: FSMContext):
 async def process_date_to(callback_query: types.CallbackQuery, callback_data: SimpleCalendarCallback, state: FSMContext):
     selected, date = await SimpleCalendar().process_selection(callback_query, callback_data)
     if selected:
+        try:
+            await callback_query.message.delete()
+        except Exception:
+            pass
+            
         formatted = date.strftime("%d.%m.%Y")
         await state.update_data(date_to=formatted)
         msg1 = await callback_query.message.answer(f"✅ Дата вильоту (ПО): {formatted}")
@@ -1083,12 +1182,26 @@ async def process_date_to(callback_query: types.CallbackQuery, callback_data: Si
 
 @dp.callback_query(F.data == "back_to_date_to", TourRequest.nights_count)
 async def back_to_date_to(callback_query: types.CallbackQuery, state: FSMContext):
-    await callback_query.message.delete()
+    try:
+        await callback_query.message.delete()
+    except Exception:
+        pass
+        
+    data = await state.get_data()
+    msgs_to_delete = data.get("msgs_to_delete", [])
+    tasks = [bot.delete_message(chat_id=callback_query.message.chat.id, message_id=m_id) for m_id in msgs_to_delete]
+    if tasks:
+        await asyncio.gather(*tasks, return_exceptions=True)
+    await state.update_data(msgs_to_delete=[])
+
     calendar_kb = await SimpleCalendar().start_calendar()
     inline_kb = InlineKeyboardBuilder.from_markup(calendar_kb)
     add_back_button(inline_kb, "back_to_date_from")
-    msg = await callback_query.message.answer("📅 Оберіть дату, до якої можна планувати виліт (ПО):", reply_markup=inline_kb.as_markup())
-    await save_msg(msg, state)
+    
+    msg1 = await callback_query.message.answer(f"📅 Дата вильоту (З): {data.get('date_from')}")
+    msg2 = await callback_query.message.answer("📅 Оберіть дату, до якої можна планувати виліт (ПО):", reply_markup=inline_kb.as_markup())
+    await save_msg(msg1, state)
+    await save_msg(msg2, state)
     await state.set_state(TourRequest.date_to)
 
 @dp.message(TourRequest.nights_count, ~Command(commands=BOT_COMMANDS))
@@ -1104,19 +1217,45 @@ async def process_nights(message: types.Message, state: FSMContext):
         return
 
     await state.update_data(nights=nights_input)
+    
+    # Видаляємо введену користувачем цифру та старе питання про ночі
+    data = await state.get_data()
+    msgs_to_delete = data.get("msgs_to_delete", [])
+    tasks = [bot.delete_message(chat_id=message.chat.id, message_id=m_id) for m_id in msgs_to_delete]
+    if tasks:
+        await asyncio.gather(*tasks, return_exceptions=True)
+    await state.update_data(msgs_to_delete=[])
+
     stars_builder = InlineKeyboardBuilder.from_markup(stars_kb())
     add_back_button(stars_builder, "back_to_nights")
-    msg = await message.answer("⭐ Оберіть категорію готелю", reply_markup=stars_builder.as_markup())
-    await save_msg(msg, state)
+    
+    msg1 = await message.answer(f"🌙 Ночей: {nights_input}")
+    msg2 = await message.answer("⭐ Оберіть категорію готелю", reply_markup=stars_builder.as_markup())
+    await save_msg(msg1, state)
+    await save_msg(msg2, state)
     await state.set_state(TourRequest.hotel_stars)
 
 @dp.callback_query(F.data == "back_to_nights", TourRequest.hotel_stars)
 async def back_to_nights(callback_query: types.CallbackQuery, state: FSMContext):
-    await callback_query.message.delete()
+    try:
+        await callback_query.message.delete()
+    except Exception:
+        pass
+        
+    data = await state.get_data()
+    msgs_to_delete = data.get("msgs_to_delete", [])
+    tasks = [bot.delete_message(chat_id=callback_query.message.chat.id, message_id=m_id) for m_id in msgs_to_delete]
+    if tasks:
+        await asyncio.gather(*tasks, return_exceptions=True)
+    await state.update_data(msgs_to_delete=[])
+
     builder = InlineKeyboardBuilder()
     add_back_button(builder, "back_to_date_to")
-    msg = await callback_query.message.answer("🌙 На скільки ночей плануєте відпочинок?", reply_markup=builder.as_markup())
-    await save_msg(msg, state)
+    
+    msg1 = await callback_query.message.answer(f"✅ Дата вильоту (ПО): {data.get('date_to')}")
+    msg2 = await callback_query.message.answer("🌙 На скільки ночей плануєте відпочинок?", reply_markup=builder.as_markup())
+    await save_msg(msg1, state)
+    await save_msg(msg2, state)
     await state.set_state(TourRequest.nights_count)
     
 @dp.message(TourRequest.hotel_stars, ~Command(commands=BOT_COMMANDS))
@@ -1127,10 +1266,15 @@ async def check_stars_input(message: types.Message, state: FSMContext):
 
 @dp.callback_query(F.data.startswith("star_"), TourRequest.hotel_stars)
 async def process_stars(callback_query: types.CallbackQuery, state: FSMContext):
-    await callback_query.message.edit_reply_markup(reply_markup=None)
+    try:
+        await callback_query.message.delete()
+    except Exception:
+        await callback_query.message.edit_reply_markup(reply_markup=None)
+        
     star = callback_query.data.split("_")[1]
     label = "Будь-яка" if star == "any" else f"{star}*"
     await state.update_data(stars=label)
+    
     msg1 = await callback_query.message.answer(f"⭐ Готель: {label}")
     
     meals_builder = InlineKeyboardBuilder.from_markup(meals_kb())
@@ -1142,11 +1286,25 @@ async def process_stars(callback_query: types.CallbackQuery, state: FSMContext):
 
 @dp.callback_query(F.data == "back_to_stars", TourRequest.meal_type)
 async def back_to_stars(callback_query: types.CallbackQuery, state: FSMContext):
-    await callback_query.message.delete()
+    try:
+        await callback_query.message.delete()
+    except Exception:
+        pass
+        
+    data = await state.get_data()
+    msgs_to_delete = data.get("msgs_to_delete", [])
+    tasks = [bot.delete_message(chat_id=callback_query.message.chat.id, message_id=m_id) for m_id in msgs_to_delete]
+    if tasks:
+        await asyncio.gather(*tasks, return_exceptions=True)
+    await state.update_data(msgs_to_delete=[])
+
     stars_builder = InlineKeyboardBuilder.from_markup(stars_kb())
     add_back_button(stars_builder, "back_to_nights")
-    msg = await callback_query.message.answer("⭐ Оберіть категорію готелю", reply_markup=stars_builder.as_markup())
-    await save_msg(msg, state)
+    
+    msg1 = await callback_query.message.answer(f"🌙 Ночей: {data.get('nights')}")
+    msg2 = await callback_query.message.answer("⭐ Оберіть категорію готелю", reply_markup=stars_builder.as_markup())
+    await save_msg(msg1, state)
+    await save_msg(msg2, state)
     await state.set_state(TourRequest.hotel_stars)
 
 @dp.message(TourRequest.meal_type, ~Command(commands=BOT_COMMANDS))
@@ -1157,10 +1315,15 @@ async def check_meals_input(message: types.Message, state: FSMContext):
 
 @dp.callback_query(F.data.startswith("meal_"), TourRequest.meal_type)
 async def process_meals(callback_query: types.CallbackQuery, state: FSMContext):
-    await callback_query.message.edit_reply_markup(reply_markup=None)
+    try:
+        await callback_query.message.delete()
+    except Exception:
+        await callback_query.message.edit_reply_markup(reply_markup=None)
+        
     meal_map = {"BB": "Сніданки", "HB": "Сніданок+вечеря", "AI": "Все включено", "UAI": "Ультра все включено", "RO": "Без харчування", "any": "Будь-яке"}
     meal_text = meal_map.get(callback_query.data.split("_")[1], "Будь-яке")
     await state.update_data(meals=meal_text)
+    
     msg1 = await callback_query.message.answer(f"🍴 Харчування: {meal_text}")
     
     builder = InlineKeyboardBuilder()
@@ -1172,16 +1335,31 @@ async def process_meals(callback_query: types.CallbackQuery, state: FSMContext):
 
 @dp.callback_query(F.data == "back_to_meals", TourRequest.budget)
 async def back_to_meals(callback_query: types.CallbackQuery, state: FSMContext):
-    await callback_query.message.delete()
+    try:
+        await callback_query.message.delete()
+    except Exception:
+        pass
+        
+    data = await state.get_data()
+    msgs_to_delete = data.get("msgs_to_delete", [])
+    tasks = [bot.delete_message(chat_id=callback_query.message.chat.id, message_id=m_id) for m_id in msgs_to_delete]
+    if tasks:
+        await asyncio.gather(*tasks, return_exceptions=True)
+    await state.update_data(msgs_to_delete=[])
+
     meals_builder = InlineKeyboardBuilder.from_markup(meals_kb())
     add_back_button(meals_builder, "back_to_stars")
-    msg = await callback_query.message.answer("🍴 Яке харчування Вам підходить:", reply_markup=meals_builder.as_markup())
-    await save_msg(msg, state)
+    
+    msg1 = await callback_query.message.answer(f"⭐ Готель: {data.get('stars')}")
+    msg2 = await callback_query.message.answer("🍴 Яке харчування Вам підходить:", reply_markup=meals_builder.as_markup())
+    await save_msg(msg1, state)
+    await save_msg(msg2, state)
     await state.set_state(TourRequest.meal_type)
 
 @dp.message(TourRequest.budget, ~Command(commands=BOT_COMMANDS))
 async def process_budget(message: types.Message, state: FSMContext):
     budget_raw = message.text.lower().replace(" ", "").replace("грн", "").replace("$", "").replace("usd", "").replace("eur", "")
+    await save_msg(message, state)
     
     if not budget_raw.isdigit():
         builder = InlineKeyboardBuilder()
@@ -1190,8 +1368,15 @@ async def process_budget(message: types.Message, state: FSMContext):
         await save_msg(msg, state)
         return
 
-    await save_msg(message, state)
     await state.update_data(budget=budget_raw)
+    
+    # Видаляємо проміжний ввід бюджету перед новим кроком
+    data = await state.get_data()
+    msgs_to_delete = data.get("msgs_to_delete", [])
+    tasks = [bot.delete_message(chat_id=message.chat.id, message_id=m_id) for m_id in msgs_to_delete]
+    if tasks:
+        await asyncio.gather(*tasks, return_exceptions=True)
+    await state.update_data(msgs_to_delete=[])
     
     reply_builder = ReplyKeyboardBuilder()
     reply_builder.add(types.KeyboardButton(text="📱 Поділитися контактом", request_contact=True))
@@ -1199,6 +1384,7 @@ async def process_budget(message: types.Message, state: FSMContext):
     inline_builder = InlineKeyboardBuilder()
     add_back_button(inline_builder, "back_to_budget")
     
+    msg0 = await message.answer(f"💰 Бюджет: {budget_raw} ГРН")
     msg = await message.answer(
         "📞 Будь ласка, натисніть кнопку <b>«📱 Поділитися контактом»</b> нижче або введіть свій номер/нікнейм вручну:",
         reply_markup=reply_builder.as_markup(resize_keyboard=True, one_time_keyboard=True),
@@ -1206,6 +1392,7 @@ async def process_budget(message: types.Message, state: FSMContext):
     )
     msg_inline = await message.answer("Або поверніться назад:", reply_markup=inline_builder.as_markup())
     
+    await save_msg(msg0, state)
     await save_msg(msg, state)
     await save_msg(msg_inline, state)
     await state.set_state(TourRequest.contact)
@@ -1213,12 +1400,25 @@ async def process_budget(message: types.Message, state: FSMContext):
 @dp.callback_query(F.data == "back_to_budget", TourRequest.contact)
 async def back_to_budget(callback_query: types.CallbackQuery, state: FSMContext):
     await callback_query.message.answer("Повертаємось...", reply_markup=types.ReplyKeyboardRemove())
-    await callback_query.message.delete()
-    
+    try:
+        await callback_query.message.delete()
+    except Exception:
+        pass
+        
+    data = await state.get_data()
+    msgs_to_delete = data.get("msgs_to_delete", [])
+    tasks = [bot.delete_message(chat_id=callback_query.message.chat.id, message_id=m_id) for m_id in msgs_to_delete]
+    if tasks:
+        await asyncio.gather(*tasks, return_exceptions=True)
+    await state.update_data(msgs_to_delete=[])
+
     builder = InlineKeyboardBuilder()
     add_back_button(builder, "back_to_meals")
-    msg = await callback_query.message.answer("💰 Який Ви плануєте витратити бюджет у гривнях (цифрами):", reply_markup=builder.as_markup())
-    await save_msg(msg, state)
+    
+    msg1 = await callback_query.message.answer(f"🍴 Харчування: {data.get('meals')}")
+    msg2 = await callback_query.message.answer("💰 Який Ви плануєте витратити бюджет у гривнях (цифрами):", reply_markup=builder.as_markup())
+    await save_msg(msg1, state)
+    await save_msg(msg2, state)
     await state.set_state(TourRequest.budget)
 
 @dp.message(TourRequest.contact, ~Command(commands=BOT_COMMANDS))
@@ -1260,6 +1460,7 @@ async def process_contact(message: types.Message, state: FSMContext):
     )
     await bot.send_message(ADMIN_ID, report, parse_mode="HTML")
     
+    # Видаляємо абсолютно всі накопичені повідомлення опитування з чату користувача
     msgs_to_delete = data.get("msgs_to_delete", [])
     tasks = [bot.delete_message(chat_id=message.chat.id, message_id=m_id) for m_id in msgs_to_delete]
     if tasks:
@@ -1267,6 +1468,18 @@ async def process_contact(message: types.Message, state: FSMContext):
         
     re_builder = ReplyKeyboardBuilder()
     re_builder.add(types.KeyboardButton(text="🔄 СТВОРИТИ НОВУ ЗАЯВКУ"))
+
+    # Примусово ховаємо нативну кнопку "Поділитися контактом" з нижньої панелі
+    await message.answer(
+        "Прибираємо тимчасові кнопки...", 
+        reply_markup=types.ReplyKeyboardRemove()
+    )
+    
+    # Видаляємо системний напис про прибирання кнопок, щоб чат залишався ідеальним
+    try:
+        await bot.delete_message(chat_id=message.chat.id, message_id=message.message_id + 1)
+    except Exception:
+        pass
 
     await message.answer(
         f"✅ Дякуємо! Заявку успішно відправлено!\nМи зв'яжемося з Вами найближчим часом 😊\n\n"
