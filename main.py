@@ -39,7 +39,7 @@ try:
     REVIEWS_CHAT_ID = int(os.getenv("REVIEWS_CHAT_ID"))
     FEEDBACK_HOUR = int(os.getenv("FEEDBACK_HOUR", "11"))
     FEEDBACK_MINUTE = int(os.getenv("FEEDBACK_MINUTE", "0"))
-    ASSISTANT_HOUR = int(os.getenv("ASSISTANT_HOUR", "19"))
+    ASSISTANT_HOUR = int(os.getenv("ASSISTANT_HOUR", "10"))
     ASSISTANT_MINUTE = int(os.getenv("ASSISTANT_MINUTE", "0"))
 except ValueError:
     raise ValueError("ADMIN_ID, REVIEWS_CHAT_ID, FEEDBACK_HOUR та FEEDBACK_MINUTE мають бути цілими числами!")
@@ -1465,16 +1465,7 @@ async def process_contact(message: types.Message, state: FSMContext):
     tasks = [bot.delete_message(chat_id=message.chat.id, message_id=m_id) for m_id in msgs_to_delete]
     if tasks:
         await asyncio.gather(*tasks, return_exceptions=True)
-        
-    re_builder = ReplyKeyboardBuilder()
-    re_builder.add(types.KeyboardButton(text="🔄 СТВОРИТИ НОВУ ЗАЯВКУ"))
-
-    # Примусово ховаємо нативну кнопку "Поділитися контактом" з нижньої панелі
-    await message.answer(
-        "Прибираємо тимчасові кнопки...", 
-        reply_markup=types.ReplyKeyboardRemove()
-    )
-    
+     
     # Видаляємо системний напис про прибирання кнопок, щоб чат залишався ідеальним
     try:
         await bot.delete_message(chat_id=message.chat.id, message_id=message.message_id + 1)
