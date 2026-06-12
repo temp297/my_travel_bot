@@ -1385,6 +1385,8 @@ async def process_budget(message: types.Message, state: FSMContext):
     add_back_button(inline_builder, "back_to_budget")
     
     msg0 = await message.answer(f"💰 Бюджет: {budget_raw} ГРН")
+            reply_markup=inline_builder.as_markup() # Кнопка "Назад" тепер тут, без тексту "Або поверніться..."
+    )
     msg = await message.answer(
         "📞 Будь ласка, натисніть кнопку <b>«📱 Поділитися контактом»</b> нижче",
         reply_markup=reply_builder.as_markup(resize_keyboard=True, one_time_keyboard=True),
@@ -1393,7 +1395,6 @@ async def process_budget(message: types.Message, state: FSMContext):
     
     await save_msg(msg0, state)
     await save_msg(msg, state)
-    await save_msg(msg_inline, state)
     await state.set_state(TourRequest.contact)
 
 @dp.callback_query(F.data == "back_to_budget", TourRequest.contact)
