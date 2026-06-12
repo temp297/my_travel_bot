@@ -22,14 +22,16 @@ from bs4 import BeautifulSoup
 # Оновлений офіційний пакет Google GenAI
 from google import genai
 
-# Безпечний імпорт асинхронного планувальника для APScheduler v4+
-# Оскільки 'async' є зарезервованим словом, використовуємо динамічний імпорт:
+# Безпечний імпорт асинхронного планувальника з обробкою версій та відсутності пакета
 try:
     _async_mod = importlib.import_module("apscheduler.schedulers.async")
     AsyncScheduler = getattr(_async_mod, "AsyncScheduler")
-except ImportError:
-    # Фолбек на випадок старіших версій
-    from apscheduler.schedulers.asyncio import AsyncioScheduler as AsyncScheduler
+except (ImportError, ModuleNotFoundError):
+    try:
+        from apscheduler.schedulers.asyncio import AsyncioScheduler as AsyncScheduler
+    except (ImportError, ModuleNotFoundError):
+        logging.error("🛑 КРИТИЧНО: Бібліотека apscheduler не встановлена в системі!")
+        AsyncScheduler = None
 
 from aiogram_calendar import SimpleCalendar, SimpleCalendarCallback
 
@@ -52,7 +54,7 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 FEEDBACK_HOUR = int(os.getenv("FEEDBACK_HOUR", 12))
 FEEDBACK_MINUTE = int(os.getenv("FEEDBACK_MINUTE", 0))
 ASSISTANT_HOUR = int(os.getenv("ASSISTANT_HOUR", 10))
-ASSISTANT_MINUTE = int(os.getenv("ASSISTANT_MINUTE", 40))
+ASSISTANT_MINUTE = int(os.getenv("ASSISTANT_MINUTE", 55))
 
 # Сучасна ініціалізація клієнта Google AI
 ai_client = genai.Client(api_key=GEMINI_API_KEY)
@@ -62,7 +64,7 @@ storage = MemoryStorage()
 dp = Dispatcher(storage=storage)
 
 # Ініціалізація планувальника
-scheduler = AsyncScheduler()
+scheduler = AsyncScheduler() if AsyncScheduler else None
 pool = None
 
 BOT_COMMANDS = ["start", "discount", "admin", "use_discount", "users"]
@@ -311,7 +313,7 @@ async def generate_and_send_ai_tour_post():
         f"3. Якщо в тексті немає взагалі ні 5★, ні 4★ готелів для цієї країни, тільки в цьому крайньому разі дозволено брати та показувати готелі зірковості 3★ (3*).\n\n"
         
         f"⚠️ ХУДОЖНІЙ ПЕРЕХІД:\n"
-        f"У вступному абзаці обов'язково адаптуй фразу-перехід під фактично обрану зірковість готелів.\n\n"
+        f"У вступному абзаці обов'язково адаптуй фразу-перехід под фактично обрану зірковість готелів.\n\n"
         
         f"⚠️ ГОЛОВНИЙ КРИТЕРІЙ ВІДБОРУ — ПРІОРІТЕТ ТРАНСПОРТУ ТА ПОВНОГО ПАКЕТУ:\n"
         f"Проаналізуй тип транспорту для готелів та відбере варіанти за суворим каскадним пріоритетом:\n"
@@ -453,7 +455,8 @@ async def show_users_list(event: types.Message | types.CallbackQuery, state: FSM
 @dp.message(Command("start"))
 async def start_cmd(message: types.Message, state: FSMContext):
     await state.clear()
-    await track_user(message.from_user)
+    if pool:
+        await track_user(message.from_user)
         
     welcome_text = (
         f"👋 <b>Вітаємо, {message.from_user.first_name} у trevel-боті нашої агенції!</b>\n\n"
@@ -518,7 +521,7 @@ async def process_dropdown_selection(callback_query: types.CallbackQuery, state:
     
     if choice == "other":
         await callback_query.message.edit_reply_markup(reply_markup=None)
-        msg = await callback_query.message.answer("✍️ Будь ласка, напишіть назву країни вручну у повідомленні:")
+        msg = await callback_query.message.answer("✍️ Будь ласка, напишіть назву країну вручну у повідомленні:")
         await save_msg(msg, state)
         await callback_query.answer()
         return
@@ -613,7 +616,6 @@ async def process_adults(callback_query: types.CallbackQuery, state: FSMContext)
 @dp.callback_query(F.data == "back_to_adults", TourRequest.children_count)
 async def back_to_adults(callback_query: types.CallbackQuery, state: FSMContext):
     await callback_query.message.delete()
-    data = await state.get_data()
     builder = InlineKeyboardBuilder()
     builder.add(
         types.InlineKeyboardButton(text="1", callback_data="adults_1"),
@@ -716,11 +718,12 @@ async def process_date_to(callback_query: types.CallbackQuery, callback_data: Si
     selected, date = await SimpleCalendar().process_selection(callback_query, callback_data)
     if selected:
         data = await state.get_data()
-        date_from = datetime.strptime(data.get('date_from'), "%d.%m.%Y")
-        
-        if date < date_from:
-            await callback_query.answer("⚠️ Дата 'ПО' не може бути ранішою за дату 'З'!", show_alert=True)
-            return
+        date_from_str = data.get('date_from')
+        if date_from_str:
+            date_from = datetime.strptime(date_from_str, "%d.%m.%Y")
+            if date < date_from:
+                await callback_query.answer("⚠️ Дата 'ПО' не може бути ранішою за дату 'З'!", show_alert=True)
+                return
 
         formatted = date.strftime("%d.%m.%Y")
         await state.update_data(date_to=formatted)
@@ -741,7 +744,7 @@ async def back_to_date_to(callback_query: types.CallbackQuery, state: FSMContext
     ])
     msg = await callback_query.message.answer(f"📅 Оберіть дату, до якої можна планувати виліт (ПО):", reply_markup=calendar_markup)
     await save_msg(msg, state)
-    await state.set_state(TourRequest.nights_count)
+    await state.set_state(TourRequest.date_to)
 
 @dp.message(TourRequest.nights_count, ~CommandFilter(commands=BOT_COMMANDS))
 async def process_nights(message: types.Message, state: FSMContext):
@@ -863,7 +866,7 @@ async def back_to_budget(callback_query: types.CallbackQuery, state: FSMContext)
     await save_msg(msg, state)
     await state.set_state(TourRequest.budget)
 
-# --- КРОК 10: ОБРОБКА ТА ВІДПРАВКА ЗАЯВКИ (ВИПРАВЛЕНО ДУБЛЮВАННЯ reply_markup) ---
+# --- КРОК 10: ОБРОБКА ТА ВІДПРАВКА ЗАЯВКИ (БЕЗ ДУБЛЮВАННЯ reply_markup) ---
 @dp.message(TourRequest.contact, ~CommandFilter(commands=BOT_COMMANDS))
 async def process_contact(message: types.Message, state: FSMContext):
     await save_msg(message, state)
@@ -872,9 +875,12 @@ async def process_contact(message: types.Message, state: FSMContext):
     data = await state.get_data()
     user = message.from_user
     
-    async with pool.acquire() as conn:
-        discount_row = await conn.fetchrow("SELECT discount_value FROM discounts WHERE user_id = $1 AND is_used = FALSE", user.id)
-    discount_status = f"{discount_row['discount_value']}%" if discount_row else "Немає"
+    discount_status = "Немає"
+    if pool:
+        async with pool.acquire() as conn:
+            discount_row = await conn.fetchrow("SELECT discount_value FROM discounts WHERE user_id = $1 AND is_used = FALSE", user.id)
+        if discount_row:
+            discount_status = f"{discount_row['discount_value']}%"
     
     info_table = (
         f"🌍 <b>Напрямок:</b> {data.get('destination')}\n"
@@ -904,7 +910,7 @@ async def process_contact(message: types.Message, state: FSMContext):
     re_builder = ReplyKeyboardBuilder()
     re_builder.add(types.KeyboardButton(text="🔄 СТВОРИТИ НОВУ ЗАЯВКУ"))
     
-    # ВИПРАВЛЕНО: ТУТ БУЛА ПОМИЛКА ДУБЛЮВАННЯ reply_markup. Тепер все передається один раз.
+    # Виправлено дублювання reply_markup!
     await message.answer(
         f"✅ Дякуємо! Заявку успішно відправлено!\n\n<b>ДЕТАЛІ ВАШОЇ ЗАЯВКИ:</b>\n"
         f"━━━━━━━━━━━━━━━\n{info_table}\n━━━━━━━━━━━━━━━", 
@@ -918,6 +924,8 @@ async def process_contact(message: types.Message, state: FSMContext):
 # =====================================================================
 
 async def check_returns():
+    if not pool:
+        return
     today_str = datetime.now().strftime("%d.%m.%Y")
     async with pool.acquire() as conn:
         rows = await conn.fetch("SELECT id, user_id FROM feedbacks WHERE return_date = $1 AND sent = 0", today_str)
@@ -959,7 +967,7 @@ async def send_delayed_feedback(forwarded_msg_id: int, rating: int):
 @dp.message(FeedbackState.waiting_for_text, ~CommandFilter(commands=BOT_COMMANDS))
 async def process_feedback_text(message: types.Message, state: FSMContext):
     data = await state.get_data()
-    rating = data.get("user_rating")
+    rating = data.get("user_rating", 5)
     user = message.from_user
     feedback_header = (
         f"🌟 <b>НОВИЙ ВІДГУК!</b>\n━━━━━━━━━━━━━━━\n"
@@ -972,19 +980,21 @@ async def process_feedback_text(message: types.Message, state: FSMContext):
     
     wait_seconds = random.randint(60, 600)
     
-    await scheduler.add_schedule(
-        send_delayed_feedback,
-        trigger='date',
-        start_time=datetime.now() + timedelta(seconds=wait_seconds),
-        args=[forwarded_msg.message_id, rating]
-    )
+    if scheduler:
+        await scheduler.add_schedule(
+            send_delayed_feedback,
+            trigger='date',
+            start_time=datetime.now() + timedelta(seconds=wait_seconds),
+            args=[forwarded_msg.message_id, rating]
+        )
 
 @dp.callback_query(F.data.startswith("apply_"), F.from_user.id == ADMIN_ID)
 async def apply_discount_callback(callback_query: types.CallbackQuery, state: FSMContext):
     user_id = int(callback_query.data.split("_")[1])
     await clean_admin_messages(state, callback_query.message.chat.id)
-    async with pool.acquire() as conn:
-        await conn.execute("UPDATE discounts SET is_used = TRUE WHERE user_id = $1", user_id)
+    if pool:
+        async with pool.acquire() as conn:
+            await conn.execute("UPDATE discounts SET is_used = TRUE WHERE user_id = $1", user_id)
     await callback_query.answer("✅ Знижку використано!")
     try:
         await callback_query.message.delete()
@@ -998,20 +1008,21 @@ async def process_admin_search(message: types.Message, state: FSMContext):
     target_id = None
     username = "невідомий"
     
-    async with pool.acquire() as conn:
-        if input_data.isdigit():
-            row = await conn.fetchrow("SELECT user_id, username FROM users WHERE user_id = $1", int(input_data))
-            if row:
-                target_id = row['user_id']
-                username = f"@{row['username']}" if row['username'] else "без юзернейму"
+    if pool:
+        async with pool.acquire() as conn:
+            if input_data.isdigit():
+                row = await conn.fetchrow("SELECT user_id, username FROM users WHERE user_id = $1", int(input_data))
+                if row:
+                    target_id = row['user_id']
+                    username = f"@{row['username']}" if row['username'] else "без юзернейму"
+                else:
+                    target_id = int(input_data)
+                    username = "ID введено вручну"
             else:
-                target_id = int(input_data)
-                username = "ID введено вручну"
-        else:
-            row = await conn.fetchrow("SELECT user_id, username FROM users WHERE LOWER(username) = $1", input_data)
-            if row:
-                target_id = row['user_id']
-                username = f"@{row['username']}"
+                row = await conn.fetchrow("SELECT user_id, username FROM users WHERE LOWER(username) = $1", input_data)
+                if row:
+                    target_id = row['user_id']
+                    username = f"@{row['username']}"
 
     if target_id:
         await state.update_data(client_id=target_id, client_username=username)
@@ -1038,11 +1049,11 @@ async def process_admin_date(callback_query: types.CallbackQuery, callback_data:
         formatted = date.strftime("%d.%m.%Y")
         data = await state.get_data()
         client_id = data.get('client_id')
-        username = data.get('client_username')
 
-        async with pool.acquire() as conn:
-            await conn.execute("DELETE FROM feedbacks WHERE user_id = $1 AND sent = 0", client_id)
-            await conn.execute("INSERT INTO feedbacks (user_id, return_date, sent) VALUES ($1, $2, 0)", client_id, formatted)
+        if pool:
+            async with pool.acquire() as conn:
+                await conn.execute("DELETE FROM feedbacks WHERE user_id = $1 AND sent = 0", client_id)
+                await conn.execute("INSERT INTO feedbacks (user_id, return_date, sent) VALUES ($1, $2, 0)", client_id, formatted)
 
         await clean_admin_messages(state, callback_query.message.chat.id)
         
@@ -1062,7 +1073,8 @@ async def on_shutdown(app: web.Application):
     global pool
     if pool:
         await pool.close()
-    await scheduler.stop()
+    if scheduler:
+        await scheduler.stop()
 
 async def main():
     await init_db()
@@ -1098,11 +1110,11 @@ async def main():
     await bot.set_my_commands(user_commands, scope=types.BotCommandScopeDefault())
     await bot.set_my_commands(admin_commands, scope=types.BotCommandScopeChat(chat_id=ADMIN_ID))
  
-    # Реєстрація регулярних задач
-    await scheduler.add_schedule(check_returns, trigger='cron', hour=FEEDBACK_HOUR, minute=FEEDBACK_MINUTE)
-    await scheduler.add_schedule(generate_and_send_ai_tour_post, trigger='cron', hour=ASSISTANT_HOUR, minute=ASSISTANT_MINUTE)
-    
-    await scheduler.start()
+    # Реєстрація регулярних задач, якщо планувальник ініціалізовано
+    if scheduler:
+        await scheduler.add_schedule(check_returns, trigger='cron', hour=FEEDBACK_HOUR, minute=FEEDBACK_MINUTE)
+        await scheduler.add_schedule(generate_and_send_ai_tour_post, trigger='cron', hour=ASSISTANT_HOUR, minute=ASSISTANT_MINUTE)
+        await scheduler.start()
     
     runner = web.AppRunner(app)
     await runner.setup()
