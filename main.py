@@ -1399,7 +1399,6 @@ async def process_budget(message: types.Message, state: FSMContext):
 
 @dp.callback_query(F.data == "back_to_budget", TourRequest.contact)
 async def back_to_budget(callback_query: types.CallbackQuery, state: FSMContext):
-    await callback_query.message.answer("Повертаємось...", reply_markup=types.ReplyKeyboardRemove())
     try:
         await callback_query.message.delete()
     except Exception:
