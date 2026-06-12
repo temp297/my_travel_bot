@@ -833,20 +833,6 @@ async def start_use_discount(message: types.Message, state: FSMContext):
     
 # --- ОБРОБНИКИ СТАНІВ (З ФІЛЬТРАЦІЄЮ КОМАНД) ---
 
-@dp.message(TourRequest.start_confirmed, ~CommandFilter(commands=BOT_COMMANDS))
-async def check_start_input(message: types.Message, state: FSMContext):
-    await save_msg(message, state)
-    msg = await message.answer("⚠️ Будь ласка, натисніть на кнопку «🚀 ПОЧАТИ ПІДБІР ТУРУ»")
-    await save_msg(msg, state)
-
-@dp.callback_query(F.data == "start_selection")
-async def process_start_callback(callback_query: types.CallbackQuery, state: FSMContext):
-    await state.clear() 
-    await callback_query.message.edit_reply_markup(reply_markup=None)
-    msg = await callback_query.message.answer("🌍 Вкажіть пріоритетну країну та назву готелю (якщо визначилися)", reply_markup=types.ReplyKeyboardRemove())
-    await save_msg(msg, state)
-    await state.set_state(TourRequest.destination)
-
 @dp.message(TourRequest.start_confirmed, ~Command(commands=BOT_COMMANDS))
 async def check_start_input(message: types.Message, state: FSMContext):
     await save_msg(message, state)
