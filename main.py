@@ -327,7 +327,7 @@ def get_dropdown_countries_kb(open_region_id: str = None):
             builder.row(types.InlineKeyboardButton(text=f"📂 {region['title']} (Натисніть, щоб згорнути)", callback_data="toggle_close"))
             for item_id, item_name in region["items"].items():
                 builder.row(types.InlineKeyboardButton(text=f"📍 {item_name}", callback_data=f"select_country_{item_id}"))
-        builder.row(types.InlineKeyboardButton(text="⬅️ Назад до регіонів", callback_data="select_country_other"))
+        builder.row(types.InlineKeyboardButton(text="⬅️ Назад до регіонів", callback_data="start_selection"))
     return builder.as_markup()
 
 def generate_discount():
