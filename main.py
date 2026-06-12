@@ -538,19 +538,12 @@ async def discount_cmd(message: types.Message):
 # 9. ДІАЛОГ ПІДБОРУ ТУРУ (КРОКИ ЗБОРУ ІНФОРМАЦІЇ)
 # =====================================================================
 
-# Допоміжна функція для уникнення дублювання при переході на крок "Дорослі"
-async def proceed_to_adults_selection(target_message: types.Message, state: FSMContext, final_destination: str):
-    await state.update_data(destination=final_destination)
-    
+# Функція для швидкої генерації кнопок кількості дорослих (видаляє дублювання тексту кнопок)
+def get_adults_kb():
     builder = InlineKeyboardBuilder()
     for i in ["1", "2", "3+"]:
         builder.add(types.InlineKeyboardButton(text=i, callback_data=f"adults_{i}"))
-        
-    msg1 = await target_message.answer(f"✅ Напрямок: {final_destination}")
-    msg2 = await target_message.answer(f"👤 Оберіть кількість дорослих:", reply_markup=add_back_button(builder, "back_to_dest"))
-    await save_msg(msg1, state)
-    await save_msg(msg2, state)
-    await state.set_state(TourRequest.adults_count)
+    return add_back_button(builder, "back_to_dest")
 
 
 @dp.message(TourRequest.start_confirmed, ~CommandFilter(commands=BOT_COMMANDS))
@@ -606,7 +599,14 @@ async def process_dropdown_selection(callback_query: types.CallbackQuery, state:
             break
 
     await callback_query.message.edit_reply_markup(reply_markup=None)
-    await proceed_to_adults_selection(callback_query.message, state, final_destination)
+    await state.update_data(destination=final_destination)
+    
+    msg1 = await callback_query.message.answer(f"✅ Напрямок: {final_destination}")
+    msg2 = await callback_query.message.answer(f"👤 Оберіть кількість дорослих:", reply_markup=get_adults_kb())
+    
+    await save_msg(msg1, state)
+    await save_msg(msg2, state)
+    await state.set_state(TourRequest.adults_count)
     await callback_query.answer()
 
 
@@ -620,7 +620,15 @@ async def process_dest_text(message: types.Message, state: FSMContext):
         await save_msg(msg, state)
         return
 
-    await proceed_to_adults_selection(message, state, text.capitalize())
+    final_destination = text.capitalize()
+    await state.update_data(destination=final_destination)
+    
+    msg1 = await message.answer(f"✅ Напрямок: {final_destination}")
+    msg2 = await message.answer(f"👤 Оберіть кількість дорослих:", reply_markup=get_adults_kb())
+    
+    await save_msg(msg1, state)
+    await save_msg(msg2, state)
+    await state.set_state(TourRequest.adults_count)
 
 
 @dp.callback_query(F.data == "back_to_dest", TourRequest.adults_count)
@@ -665,12 +673,8 @@ async def process_adults(callback_query: types.CallbackQuery, state: FSMContext)
 @dp.callback_query(F.data == "back_to_adults", TourRequest.children_count)
 async def back_to_adults(callback_query: types.CallbackQuery, state: FSMContext):
     await callback_query.message.delete()
-    builder = InlineKeyboardBuilder()
-    for i in ["1", "2", "3+"]:
-        builder.add(types.InlineKeyboardButton(text=i, callback_data=f"adults_{i}"))
-        
     msg = await callback_query.message.answer(
-        f"👤 Оберіть кількість дорослих:", reply_markup=add_back_button(builder, "back_to_dest")
+        f"👤 Оберіть кількість дорослих:", reply_markup=get_adults_kb()
     )
     await save_msg(msg, state)
     await state.set_state(TourRequest.adults_count)
@@ -929,7 +933,7 @@ async def back_to_budget(callback_query: types.CallbackQuery, state: FSMContext)
     msg = await callback_query.message.answer(f"💰 Який Ви плануєте бюджет у гривнях (цифрами):", reply_markup=add_back_button(inline_builder, "back_to_meals"))
     await save_msg(msg, state)
     await state.set_state(TourRequest.budget)
-
+    
 # --- КРОК 10: ОБРОБКА ТА ВІДПРАВКА ЗАЯВКИ ---
 @dp.message(TourRequest.contact, ~CommandFilter(commands=BOT_COMMANDS))
 async def process_contact(message: types.Message, state: FSMContext):
