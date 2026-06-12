@@ -17,8 +17,13 @@ from aiogram.filters import BaseFilter, Command
 import asyncpg
 import httpx
 from bs4 import BeautifulSoup
-import google.generativeai as genai
-from apscheduler.schedulers.asyncio import AsyncioScheduler
+
+# Оновлений офіційний пакет Google GenAI
+from google import genai
+
+# Новий імпорт для сучасної версії APScheduler v4+
+from apscheduler.schedulers.async import AsyncScheduler
+
 from aiogram_calendar import SimpleCalendar, SimpleCalendarCallback
 
 # =====================================================================
@@ -40,15 +45,17 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 FEEDBACK_HOUR = int(os.getenv("FEEDBACK_HOUR", 12))
 FEEDBACK_MINUTE = int(os.getenv("FEEDBACK_MINUTE", 0))
 ASSISTANT_HOUR = int(os.getenv("ASSISTANT_HOUR", 10))
-ASSISTANT_MINUTE = int(os.getenv("ASSISTANT_MINUTE", 0))
+ASSISTANT_MINUTE = int(os.getenv("ASSISTANT_MINUTE", 35))
 
-genai.configure(api_key=GEMINI_API_KEY)
-ai_model = genai.GenerativeModel('gemini-pro')
+# Сучасна ініціалізація клієнта Google AI
+ai_client = genai.Client(api_key=GEMINI_API_KEY)
 
 bot = Bot(token=BOT_TOKEN)
 storage = MemoryStorage()
 dp = Dispatcher(storage=storage)
-scheduler = AsyncioScheduler()
+
+# Ініціалізація нового асинхронного планувальника APScheduler v4
+scheduler = AsyncScheduler()
 pool = None
 
 BOT_COMMANDS = ["start", "discount", "admin", "use_discount", "users"]
@@ -347,13 +354,17 @@ async def generate_and_send_ai_tour_post():
         f"⚠️ СУВОРЕ ТА КАТЕГОРИЧНЕ ПРАВИЛО ЩОДО СТИЛЮ МІНУСІВ ТА ЗАБОРОНИ НЕВВЕРНЕНОСТІ:\n"
         f"- КАТЕГОРИЧНО ЗАБОРОНЕНО використовувати конструкції: 'Може бути...', 'Здається...', 'Можливо...', 'Не всім сподобається...'. Текст має бути чітким, професійним та констатувати факти.\n"
         f"- Пиши прямо і професійно: НЕ 'Може бути завеликим' -> А 'Велика територія'; НЕ 'Може бути далеко від моря' -> А 'Друга лінія, 400 м до пляжу'; НЕ 'Можливо старі номери' -> А 'Класичний/традиційний номерний фонд'.\n"
-        f"- Також повністю заборонені фрази типу: 'Не вказано конкретних матеріальних недоліків в наданому тексті', 'Інформація відсутня'. Якщо даних немає — напиши нейтральний художній нюанс, який підходить усім готелям, але НІКОЛИ не пиши технічні виправдання!.\n\n"
+        f"- Також повністю заборонені фрази типу: 'Не вказано конкретних матеріальних недоліків в наданому тексті', 'Інформація відсутня'. Якщо даних немає — напиши нейтральний художній нюанс, який підходить усім готелям, но НІКОЛИ не пиши технічні виправдання!.\n\n"
         
         f"Ось текстові дані з готелями СУТО ДЛЯ ЦІЄЇ КРАЇНИ: {country_data}"
     )
     
     try:
-        response = ai_model.generate_content(prompt)
+        # Новий формат генерації тексту через google-genai
+        response = ai_client.models.generate_content(
+            model='gemini-2.5-flash',
+            contents=prompt,
+        )
         post_text = response.text
         
         builder = InlineKeyboardBuilder()
@@ -450,7 +461,7 @@ async def show_users_list(event: types.Message | types.CallbackQuery, state: FSM
         await show_admin_base(msg_ctx, state)
 
 # =====================================================================
-# 8. СУВОРЕ ВІДТВОРЕННЯ КОМАНД СТАРТУ ТА ЗНИЖОК ДЛЯ ТУРИСТІВ
+# 8. КОМАНДИ СТАРТУ ТА ЗНИЖОК ДЛЯ ТУРИСТІВ
 # =====================================================================
 
 @dp.message(Command("start"))
@@ -481,7 +492,7 @@ async def discount_cmd(message: types.Message):
         await message.answer("ℹ️ Наразі у вас немає активних індивідуальних знижок лояльності. Проте ми гарантуємо найкращі ціни на ринку під час підбору туру!")
 
 # =====================================================================
-# 9. ДІАЛОГ ПІДБОРУ ТУРУ (НЕЗМІННІ ОРИГІНАЛЬНІ ТЕКСТИ КРОКІВ)
+# 9. ДІАЛОГ ПІДБОРУ ТУРУ (КРОКИ ЗБОРУ ІНФОРМАЦІЇ)
 # =====================================================================
 
 @dp.message(TourRequest.start_confirmed, ~CommandFilter(commands=BOT_COMMANDS))
@@ -504,7 +515,7 @@ async def process_start_callback(callback_query: types.CallbackQuery, state: FSM
     await save_msg(msg, state)
     await state.set_state(TourRequest.destination)
 
-# --- КРОК 1: РОЗКРИВНИЙ СПИСОК РЕГІОНІВ ТА КРАЇН ---
+# --- КРОК 1: СПИСОК РЕГІОНІВ ТА КРАЇН ---
 @dp.callback_query(F.data.startswith("toggle_"), TourRequest.destination)
 async def toggle_region(callback_query: types.CallbackQuery):
     region_id = callback_query.data.split("_")[1]
@@ -560,9 +571,8 @@ async def process_dropdown_selection(callback_query: types.CallbackQuery, state:
 async def process_dest_text(message: types.Message, state: FSMContext):
     await save_msg(message, state)
     text = message.text.strip()
-    text_lower = text.lower()
     
-    if text_lower.isdigit() or len(text_lower) < 2:
+    if text.isdigit() or len(text) < 2:
         msg = await message.answer("⚠️ Введіть назву країни літерами.")
         await save_msg(msg, state)
         return
@@ -783,7 +793,7 @@ async def back_to_date_to(callback_query: types.CallbackQuery, state: FSMContext
         reply_markup=calendar_markup
     )
     await save_msg(msg, state)
-    await state.set_state(TourRequest.date_to)
+    await state.set_state(TourRequest.nights_count)
 
 # --- КРОК 6: КІЛЬКІСТЬ НОЧЕЙ ---
 @dp.message(TourRequest.nights_count, ~CommandFilter(commands=BOT_COMMANDS))
@@ -810,10 +820,9 @@ async def process_nights(message: types.Message, state: FSMContext):
 @dp.callback_query(F.data == "back_to_nights", TourRequest.hotel_stars)
 async def back_to_nights(callback_query: types.CallbackQuery, state: FSMContext):
     await callback_query.message.delete()
-    builder = InlineKeyboardBuilder()
     msg = await callback_query.message.answer(
         "🌙 На скільки ночей плануєте відпочинок?",
-        reply_markup=add_back_button(builder, "back_to_date_to")
+        reply_markup=add_back_button(InlineKeyboardBuilder(), "back_to_date_to")
     )
     await save_msg(msg, state)
     await state.set_state(TourRequest.nights_count)
@@ -892,7 +901,7 @@ async def back_to_meals(callback_query: types.CallbackQuery, state: FSMContext):
     await save_msg(msg, state)
     await state.set_state(TourRequest.meal_type)
 
-# --- КРОК 9: БЮДЖЕТ ТА КНОПКА КОНТАКТУ ---
+# --- КРОК 9: БЮДЖЕТ ТА КОНТАКТИ ---
 @dp.message(TourRequest.budget, ~CommandFilter(commands=BOT_COMMANDS))
 async def process_budget(message: types.Message, state: FSMContext):
     budget_raw = message.text.lower().replace(" ", "").replace("грн", "").replace("$", "").replace("usd", "").replace("eur", "")
@@ -915,7 +924,7 @@ async def process_budget(message: types.Message, state: FSMContext):
     
     inline_builder = InlineKeyboardBuilder()
     msg_back_info = await message.answer(
-        "ℹ️ Якщо хочете змінити бюджет, натисніть кнопку нижче:",
+        "ℹ️ Якщо хочете змінити бюджет, натисніть кнопку ниже:",
         reply_markup=add_back_button(inline_builder, "back_to_budget")
     )
     
@@ -931,9 +940,7 @@ async def process_budget(message: types.Message, state: FSMContext):
 async def back_to_budget(callback_query: types.CallbackQuery, state: FSMContext):
     await callback_query.message.delete()
     
-    # Створюємо інлайн-клавіатуру «Назад»
     inline_builder = InlineKeyboardBuilder()
-    
     msg = await callback_query.message.answer(
         f"💰 Який Ви плануєте витратити бюджет у гривнях (цифрами):",
         reply_markup=add_back_button(inline_builder, "back_to_meals")
@@ -941,7 +948,7 @@ async def back_to_budget(callback_query: types.CallbackQuery, state: FSMContext)
     await save_msg(msg, state)
     await state.set_state(TourRequest.budget)
 
-# --- КРОК 10: СУВОРЕ ВІДТВОРЕННЯ ФІНАЛУ ТАБЛИЦІ ЗАЯВКИ ТА КНОПОК ---
+# --- КРОК 10: ОБРОБКА ТА ВІДПРАВКА ЗАЯВКИ ---
 @dp.message(TourRequest.contact, ~CommandFilter(commands=BOT_COMMANDS))
 async def process_contact(message: types.Message, state: FSMContext):
     await save_msg(message, state)
@@ -1006,7 +1013,7 @@ async def process_contact(message: types.Message, state: FSMContext):
     await state.clear()
 
 # =====================================================================
-# 10. АВТОМАТИЗОВАНІ ВІДГУКИ (ТОЧНІ ОРИГІНАЛЬНІ ТЕКСТИ)
+# 10. АВТОМАТИЗОВАНІ ВІДГУКИ ТА ОПИТУВАННЯ
 # =====================================================================
 
 async def check_returns():
@@ -1051,7 +1058,7 @@ async def send_delayed_feedback(forwarded_msg_id: int, rating: int):
     elif rating == 3:
         reply_text = "🙏 Дякуємо за ваш відгук. Ми обов'язково врахуємо ваші зауваження, щоб стать кращими!"
     else: 
-        reply_text = "😔 Нам дуже прикро, що ви залишилися незадоволені. Менеджер вже вивчає ситуацию, щоб зв'язатися з вами та все владнати."
+        reply_text = "😔 Нам дуже прикро, що ви залишилися незадоволені. Менеджер вже вивчає ситуацію, щоб зв'язатися з вами та все владнати."
     try:
         await bot.send_message(chat_id=REVIEWS_CHAT_ID, text=reply_text, reply_to_message_id=forwarded_msg_id)
     except Exception as e:
@@ -1076,8 +1083,14 @@ async def process_feedback_text(message: types.Message, state: FSMContext):
     await state.clear()
     
     wait_seconds = random.randint(60, 600)
-    run_time = datetime.now() + timedelta(seconds=wait_seconds)
-    scheduler.add_job(send_delayed_feedback, 'date', run_date=run_time, args=[forwarded_msg.message_id, rating])
+    
+    # Використання нового інтерфейсу додавання тасок APScheduler v4
+    await scheduler.add_schedule(
+        send_delayed_feedback,
+        trigger='date',
+        start_time=datetime.now() + timedelta(seconds=wait_seconds),
+        args=[forwarded_msg.message_id, rating]
+    )
 
 @dp.callback_query(F.data.startswith("apply_"), F.from_user.id == ADMIN_ID)
 async def apply_discount_callback(callback_query: types.CallbackQuery, state: FSMContext):
@@ -1170,7 +1183,7 @@ async def on_shutdown(app: web.Application):
     if pool:
         await pool.close()
         logging.info("Пул з'єднань з БД успішно закритий.")
-    scheduler.shutdown()
+    await scheduler.stop()
     logging.info("Планувальник завдань APScheduler зупинено.")
 
 async def main():
@@ -1220,9 +1233,12 @@ async def main():
     await bot.set_my_commands(admin_commands, scope=types.BotCommandScopeChat(chat_id=ADMIN_ID))
     logging.info("📜 Меню команд оновлено.")
  
-    scheduler.add_job(check_returns, 'cron', hour=FEEDBACK_HOUR, minute=FEEDBACK_MINUTE)
-    scheduler.add_job(generate_and_send_ai_tour_post, 'cron', hour=ASSISTANT_HOUR, minute=ASSISTANT_MINUTE)
-    scheduler.start()
+    # Реєстрація регулярних задач за синтаксисом APScheduler v4
+    await scheduler.add_schedule(check_returns, trigger='cron', hour=FEEDBACK_HOUR, minute=FEEDBACK_MINUTE)
+    await scheduler.add_schedule(generate_and_send_ai_tour_post, trigger='cron', hour=ASSISTANT_HOUR, minute=ASSISTANT_MINUTE)
+    
+    # Запуск контекст-менеджера планувальника асинхронно
+    await scheduler.start()
     logging.info(f"⏰ Автоматизацію налаштовано. Опитування: {FEEDBACK_HOUR}:{FEEDBACK_MINUTE}, ШІ-контент: {ASSISTANT_HOUR}:{ASSISTANT_MINUTE}")
     
     runner = web.AppRunner(app)
