@@ -1,73 +1,127 @@
 import os
-import logging
 import asyncio
+import logging
 import random
-import pytz
-import asyncpg
-import aiogram
-import requests
-import httpx
-from bs4 import BeautifulSoup
-from playwright.async_api import async_playwright
-from datetime import datetime
+import time
+from datetime import datetime, timedelta
+
 from aiohttp import web
-from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from aiogram import Bot, Dispatcher, types, F
-from aiogram.filters import Command, CommandStart, CommandObject, StateFilter, Command as CommandFilter
+from aiogram import Bot, Dispatcher, types, F, BaseMiddleware
+from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.utils.keyboard import InlineKeyboardBuilder, ReplyKeyboardBuilder
 from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
-from aiogram_calendar import SimpleCalendar, SimpleCalendarCallback
+from aiogram.filters import BaseFilter, Command
+
+import asyncpg
+import httpx
+from bs4 import BeautifulSoup
 import google.generativeai as genai
-import aiohttp
-import re
-import json
-import time
+from apscheduler.schedulers.asyncio import AsyncioScheduler
+from aiogram_calendar import SimpleCalendar, SimpleCalendarCallback
 
-# Список команд для фільтрації
-BOT_COMMANDS = ["start", "cancel", "admin", "discount", "check_discounts", "use_discount", "users"]
+# =====================================================================
+# 1. НАЛАШТУВАННЯ ТА ІНІЦІАЛІЗАЦІЯ
+# =====================================================================
 
-# НАЛАШТУВАННЯ
-API_TOKEN = os.getenv("API_TOKEN")
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(name)s - %(message)s"
+)
+
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+ADMIN_ID = int(os.getenv("ADMIN_ID", 0))
+REVIEWS_CHAT_ID = int(os.getenv("REVIEWS_CHAT_ID", 0))
+CHANNEL_ID = int(os.getenv("CHANNEL_ID", 0))
 DATABASE_URL = os.getenv("DATABASE_URL")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
-# --- НАЛАШТУВАННЯ ДЛЯ ШІ ТА КАНАЛУ ПОМІЧНИКА ---
-GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
-AUTO_POST_CHAT_ID = os.getenv("AUTO_POST_CHAT_ID")
+FEEDBACK_HOUR = int(os.getenv("FEEDBACK_HOUR", 12))
+FEEDBACK_MINUTE = int(os.getenv("FEEDBACK_MINUTE", 0))
+ASSISTANT_HOUR = int(os.getenv("ASSISTANT_HOUR", 10))
+ASSISTANT_MINUTE = int(os.getenv("ASSISTANT_MINUTE", 0))
 
-try:
-    ADMIN_ID = int(os.getenv("ADMIN_ID"))
-    REVIEWS_CHAT_ID = int(os.getenv("REVIEWS_CHAT_ID"))
-    FEEDBACK_HOUR = int(os.getenv("FEEDBACK_HOUR", "11"))
-    FEEDBACK_MINUTE = int(os.getenv("FEEDBACK_MINUTE", "0"))
-    ASSISTANT_HOUR = int(os.getenv("ASSISTANT_HOUR", "9"))
-    ASSISTANT_MINUTE = int(os.getenv("ASSISTANT_MINUTE", "30"))
-except ValueError:
-    raise ValueError("ADMIN_ID, REVIEWS_CHAT_ID, FEEDBACK_HOUR та FEEDBACK_MINUTE мають бути цілими числами!")
+genai.configure(api_key=GEMINI_API_KEY)
+ai_model = genai.GenerativeModel('gemini-pro')
 
-if not API_TOKEN or not DATABASE_URL:
-    raise ValueError("Помилка: API_TOKEN або DATABASE_URL не встановлені в Environment Variables!")
-
-logging.basicConfig(level=logging.INFO)
-bot = Bot(token=API_TOKEN)
-
+bot = Bot(token=BOT_TOKEN)
 storage = MemoryStorage()
 dp = Dispatcher(storage=storage)
+scheduler = AsyncioScheduler()
+pool = None
 
-ukraine_tz = pytz.timezone('Europe/Kyiv')
-scheduler = AsyncIOScheduler(timezone=ukraine_tz)
+BOT_COMMANDS = ["start", "discount", "admin", "use_discount", "users"]
 
-# Ініціалізація Google Gemini для Електронного помічника
-if GOOGLE_API_KEY:
-    genai.configure(api_key=GOOGLE_API_KEY)
-    ai_model = genai.GenerativeModel('gemini-2.5-flash')
-else:
-    ai_model = None
-    logging.warning("⚠️ GOOGLE_API_KEY не знайдено. Електронний помічник (ШІ) вимкнено.")
+DIAL_COUNTRIES = {
+    "region_europe": {
+        "title": "🇪🇺 Європа",
+        "items": {
+            "болгарія": "Болгарія", 
+            "греція": "Греція", 
+            "чорногорія": "Чорногорія", 
+            "хорватія": "Хорватія",
+            "іспанія": "Іспанія", 
+            "італія": "Італія",
+            "кіпр": "Кіпр",
+            "албанія": "Албанія",
+            "португалія": "Португалія",
+            "франція": "Франція"
+        }
+    },
+    "region_east": {
+        "title": "🕌 Близький Схід & Африка",
+        "items": {
+            "турція": "Туреччина", 
+            "египет": "Єгипет", 
+            "оае": "ОАЕ", 
+            "туніс": "Туніс"
+        }
+    },
+    "region_exotic": {
+        "title": "🏝 Екзотика",
+        "items": {
+            "мальдіви": "Мальдіви", 
+            "таїланд": "Таїланд", 
+            "домінікана": "Домінікана", 
+            "занзібар": "Занзібар", 
+            "балі": "Балі (Індонезія)",
+            "шрі ланка": "Шрі-Ланка"
+        }
+    }
+}
 
-# СТАНИ
+# =====================================================================
+# 2. MIDDLEWARES (АНТИ-СПАМ)
+# =====================================================================
+
+class ThrottlingMiddleware(BaseMiddleware):
+    def __init__(self, slow_mode_delay: float = 0.7):
+        self.delay = slow_mode_delay
+        self.user_caches = {}
+        super().__init__()
+
+    async def __call__(self, handler, event: types.TelegramObject, data: dict):
+        user = data.get("event_from_user")
+        if user:
+            user_id = user.id
+            current_time = time.time()
+            last_time = self.user_caches.get(user_id, 0)
+            
+            if current_time - last_time < self.delay:
+                if isinstance(event, types.CallbackQuery):
+                    await event.answer("⚠️ Не спамте кнопками!", show_alert=True)
+                return
+            self.user_caches[user_id] = current_time
+        return await handler(handler, event, data)
+
+dp.message.middleware(ThrottlingMiddleware())
+dp.callback_query.middleware(ThrottlingMiddleware())
+
+# =====================================================================
+# 3. СТАНИ FSM
+# =====================================================================
+
 class TourRequest(StatesGroup):
     start_confirmed = State()
     destination = State()
@@ -80,14 +134,68 @@ class TourRequest(StatesGroup):
     meal_type = State()
     budget = State()
     contact = State()
-    
+
+class FeedbackState(StatesGroup):
+    waiting_for_text = State()
+
 class AdminPanel(StatesGroup):
     waiting_for_client_info = State()
     waiting_for_date = State()
 
-class FeedbackState(StatesGroup):
-    waiting_for_rating = State()
-    waiting_for_text = State()
+# =====================================================================
+# 4. ФІЛЬТРИ ТА КЛАВІАТУРИ (ХЕЛПЕРИ)
+# =====================================================================
+
+class CommandFilter(BaseFilter):
+    def __init__(self, commands: list):
+        self.commands = commands
+    async def __call__(self, message: types.Message) -> bool:
+        if not message.text or not message.text.startswith("/"):
+            return False
+        cmd = message.text.split()[0][1:].split("@")[0]
+        return cmd in self.commands
+
+def add_back_button(builder: InlineKeyboardBuilder, back_callback: str):
+    builder.row(types.InlineKeyboardButton(text="⬅️ Назад", callback_data=back_callback))
+    return builder.as_markup()
+
+def get_dropdown_countries_kb(opened_region: str = None):
+    builder = InlineKeyboardBuilder()
+    
+    for reg_id, reg_data in DIAL_COUNTRIES.items():
+        if opened_region == reg_id:
+            builder.row(types.InlineKeyboardButton(text=f"🔽 {reg_data['title']}", callback_data="toggle_close"))
+            for item_cmd, item_name in reg_data["items"].items():
+                builder.row(types.InlineKeyboardButton(text=f"   ▪️ {item_name}", callback_data=f"select_country_{item_cmd}"))
+        else:
+            builder.row(types.InlineKeyboardButton(text=f"▶️ {reg_data['title']}", callback_data=f"toggle_{reg_id}"))
+            
+    builder.row(types.InlineKeyboardButton(text="🌍 Інша країна (ввести вручну)", callback_data="select_country_other"))
+    return builder.as_markup()
+
+def stars_kb():
+    builder = InlineKeyboardBuilder()
+    builder.add(
+        types.InlineKeyboardButton(text="3*", callback_data="star_3"),
+        types.InlineKeyboardButton(text="4*", callback_data="star_4"),
+        types.InlineKeyboardButton(text="5*", callback_data="star_5"),
+        types.InlineKeyboardButton(text="Будь-яка", callback_data="star_any")
+    )
+    builder.adjust(3, 1)
+    return builder.as_markup()
+
+def meals_kb():
+    builder = InlineKeyboardBuilder()
+    builder.add(
+        types.InlineKeyboardButton(text="🍳 BB (Сніданки)", callback_data="meal_BB"),
+        types.InlineKeyboardButton(text="🍲 HB (Сніданок+Вечеря)", callback_data="meal_HB"),
+        types.InlineKeyboardButton(text="🍹 AI (Все включено)", callback_data="meal_AI"),
+        types.InlineKeyboardButton(text="👑 UAI (Ультра Все Включено)", callback_data="meal_UAI"),
+        types.InlineKeyboardButton(text="❌ RO (Без харчування)", callback_data="meal_RO"),
+        types.InlineKeyboardButton(text="🤷‍♂️ Будь-яке", callback_data="meal_any")
+    )
+    builder.adjust(1)
+    return builder.as_markup()
 
 async def save_msg(message: types.Message, state: FSMContext):
     data = await state.get_data()
@@ -95,683 +203,286 @@ async def save_msg(message: types.Message, state: FSMContext):
     msgs.append(message.message_id)
     await state.update_data(msgs_to_delete=msgs)
 
-async def clean_admin_messages(state: FSMContext, chat_id: int):
-    """Видаляє всі зареєстровані тимчасові повідомлення"""
+# =====================================================================
+# 5. РОБОТА З БАЗОЮ ДАНИХ
+# =====================================================================
+
+async def init_db():
+    global pool
+    pool = await asyncpg.create_pool(DATABASE_URL)
+    async with pool.acquire() as conn:
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS users (
+                user_id BIGINT PRIMARY KEY,
+                username VARCHAR(255),
+                full_name VARCHAR(255),
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+            CREATE TABLE IF NOT EXISTS feedbacks (
+                id SERIAL PRIMARY KEY,
+                user_id BIGINT,
+                return_date VARCHAR(50),
+                sent INT DEFAULT 0
+            );
+            CREATE TABLE IF NOT EXISTS discounts (
+                user_id BIGINT PRIMARY KEY,
+                discount_value INT DEFAULT 5,
+                is_used BOOLEAN DEFAULT FALSE
+            );
+        """)
+
+async def track_user(user: types.User):
+    async with pool.acquire() as conn:
+        await conn.execute(
+            """INSERT INTO users (user_id, username, full_name) 
+               VALUES ($1, $2, $3) ON CONFLICT (user_id) 
+               DO UPDATE SET username = $2, full_name = $3""",
+            user.id, user.username, user.full_name
+        )
+
+# =====================================================================
+# 6. ПАРСЕР ТУРІВ ТА ПОВНИЙ ОРИГІНАЛЬНИЙ ПРОМТ GEMINI AI
+# =====================================================================
+
+async def fetch_hot_tours():
+    url = "https://www.otpusk.com/hot/"
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            response = await client.get(url, headers=headers)
+            if response.status_code != 200:
+                return []
+        soup = BeautifulSoup(response.text, 'html.parser')
+        tours = []
+        items = soup.find_all('div', class_='story') or soup.find_all('div', class_='hot-b-item')
+        for item in items[:4]:
+            title = item.find('h3').text.strip() if item.find('h3') else "Гарячий тур"
+            price = item.find('span', class_='price').text.strip() if item.find('span', class_='price') else ""
+            desc = item.find('div', class_='description').text.strip() if item.find('div', class_='description') else ""
+            tours.append(f"Курорт: {title}. Деталі: {desc}. Ціна: {price}")
+        return tours
+    except Exception as e:
+        logging.error(f"Парсинг гарячих турів не вдався: {e}")
+        return []
+
+async def generate_and_send_ai_tour_post():
+    raw_tours = await fetch_hot_tours()
+    country_data = "\n".join(raw_tours) if raw_tours else "Наразі доступні загальні акційні пропозиції по Туреччині, Єгипту та Греції."
+    
+    cat = {
+        "name": "Гарячі тури",
+        "prompt_part": "Зроби вибірку найсмачніших гарячих турів, які підійдуть для сімейного або парного відпочинку, з акцентом на вигідну ціну."
+    }
+    
+    prompt = (
+        f"Ти — професійний travel-копірайтер компанії. На основі НАДАНИХ ТЕКСТОВИХ ДАНИХ склади один цікавий, "
+        f"структурований і залучаючий пост для Telegram-каналу українською мовою.\n\n"
+        f"ТВОЄ ГОЛОВНЕ ЗАВДАННЯ: {cat['prompt_part']}\n\n"
+        
+        f"🚫  ПРАВИЛО ЛОГІКИ ТРАНСПОРТУ ТА ЕМОДЗІ (ЗАБОРОНА ПЛУТАНИНИ):\n"
+        f"1. Автобусні тури маркуються ЛИШЕ символом 🚌 в усьому рядку. Наприклад: '🚌 Автобус із Києва' або '🚌 Автобус зі Львова'. Заборонено в цей рядок ставити літак ✈️!\n"
+        f"2. Авіатури маркуються ЛИШЕ символом ✈️ в усьому рядку. Наприклад: '✈️ Авіа з Кишинева' або '✈️ Авіа з Варшави'. Заборонено в цей рядок ставити автобус 🚌!\n"
+        f"3. Ніколи не зліплюй емодзі автобуса з текстом про авіарейси. Кожен тип транспорту має відповідати своему єдиному значку.\n"
+        f"4. ЗАБОРОНА ФЕЙКОВИХ ВИЛЬОТІВ З УКРАЇНИ: Наразі авіатури з міст України (Київ, Харків, Львів, Одеса тощо) не здійснюються! Якщо тур авіаційний — місто вильоту обов'язково має бути іноземним (Кишинів, Варшава, Жешув, Сучава, Катовіце тощо). З українських міст можливий ТІЛЬКИ автобусний виїзд чи власний транспорт. Не вигадуй вильоти літаків з України!\n\n"
+
+        f"❌ КАТЕГОРИЧНА ЗАБОРОНА НА ФРАЗИ 'ЗА ЗАПИТОМ', 'УТОЧНЮЙТЕ' ТА АБСТРАКЦІЇ:\n"
+        f"- Тобі законодавчо заборонено використовувати у фінальному тексті фрази: 'з міст Європи', 'уточнюйте', 'за запитом', 'уточнюйте у менеджера', 'деталі за телефоном', 'кількість ночей за запитом'. Пост повинен містити виключно готову, фіксовану та конкретну інформацію для туриста.\n"
+        f"- У полі трансферу та виїзду ОБОВ'ЯЗКОВО має бути чітко вказано конкретне місто вильоту або виїзду. Жодних розмитих формулювань. Якщо це авіатур — проаналізуй контекст і вкажи конкретне закордонне місто, з якого виконується цей рейс (наприклад, Кишинів, Варшава тощо).\n"
+        f"- Якщо для якогось готелю в наданому тексті замість конкретної дати, кількості ночей чи типу харчування вказано 'уточнюйте' або 'за запитом' — повністю ІГНОРУЙ такий готель і переходь до аналізу наступних варіантів, де є точні та прописані дані.\n\n"
+        
+        f"⚠️ КРИТИЧНО ВАЖЛИВЕ ПРАВИЛО ПРІОРИТЕТУ ЗІРКОВОСТІ ГОТЕЛІВ:\n"
+        f"Ти повинен робити вибірку готелів (до 5 штук) суворо за такому каскадним пріоритетом:\n"
+        f"1. Наданий тобі список вже відсортований на рівні Python: на самому початку йдуть преміум-готелі 5★. Твоє головне завдання — вибрати до 5 найкращих готелів 5★. Сформуй добірку виключно або переважно з них.\n"
+        f"2. Тільки якщо готелів 5★ у списку виявиться менше 5 штук, добирай решту з готелів зірковості 4★ (4*).\n"
+        f"3. Якщо в тексті немає взагалі ні 5★, ні 4★ готелів для цієї країни, тільки в цьому крайньому разі дозволено брати та показувати готелі зірковості 3★ (3*).\n"
+        f"Порушення цього пріоритету заборонено! Якщо є вища зірковість — нижчу ігноруй.\n\n"
+        
+        f"⚠️ ХУДОЖНІЙ ПЕРЕХІД:\n"
+        f"У вступному абзаці обов'язково адаптуй фразу-перехід під фактично обрану зірковість готелів. Наприклад, якщо у списку опинилися лише 5★, напиши: 'Ось наша добірка найкращих преміум-готелів 5★...'. Якщо вийшов мікс 5★ та 4★, напиши: 'Ось добірка найкращих готелів 4★ та 5★...'.\n\n"
+        
+        f"⚠️ ГОЛОВНИЙ КРИТЕРІЙ ВІДБОРУ — ПРІОРІТЕТ ТРАНСПОРТУ ТА ПОВНОГО ПАКЕТУ:\n"
+        f"Проаналізуй тип транспорту для готелів та відбере варіанти за суворим каскадним пріоритетом:\n"
+        f"1. ПРІОРІТЕТ №1 — АВІАТУРИ: Шукай у тексті готелі, де вказано авіапереліт (літак/авіа з Кишинева, Сучави, Жешува, Варшави тощо).\n"
+        f"    🔥 КРИТИЧНА ВИМОГА ДЛЯ АВІА: Серед усіх знайдених авіатурів ти зобов'язаний ПЕРШОЧЕРГОВО вибирати варіанти, які є ПОВНИМ ПАКЕТОМ (куди одночасно включено: Проїзд, Страховка та Трасфер до готелю). Формуй добірку з них. Якщо авіатурів у тексті є хоча б 3-5 штук, повністю ігноруй автобуси та власний транспорт!\n"
+        f"2. АВТОБУСНІ ТУРИ: Включай автобусні тури у пост ТІЛЬКИ у випадку, якщо в наданих даних взагалі немає авіатурів по цій країні.\n"
+        f"    🔥 КРИТИЧНА ВИМОГА ДЛЯ АВТОБУСІВ: Аналогічно, серед автобусних турів вибирай насамперед ті, куди включено повний пакет (Проїзд + Страховка + Трасфер).\n"
+        f"3. БЕЗ ТРАНСФЕРУ: Варіанти 'Власний транспорт / Без трансферу' дозволено брати лише в крайньому разі, якщо немає ні авіа, ні автобусів.\n"
+        f"Підсумок: Завжди зберігай пріоритет транспорту (Авіа -> Автобус), але ВСЕРЕДИНІ обраного транспорту вибирай ТІЛЬКИ ті тури, де чітко включено проїзд, страховку та трансфер!\n\n"
+        
+        f"⚠️ КРИТИЧНО ВАЖЛИВЕ ПРАВИЛО ДЛЯ НАЙНИЖЧОЇ ЦІНИ ТА СИНХРОНІЗАЦІЇ:\n"
+        f"- Коли алгоритм відібрав готелі за пріоритетом трансферу (наприклад, авіа з повним пакетом), вибирай серед них варіанти за ЯКІСТЮ та НАЙВИГІДНІШОЮ ціною для конкретної кількості ночей. \n"
+        f"- НІКОЛИ не зліплюй ціну від дешевого автобусного туру з описом авіатуру! Ціна, тип харчування, трансфер та кількість ночей у шаблоні мають бути СУВОРО СИНХРОНІЗОВАНІ між собою для обраного варіанту.\n"
+        f"- Якщо для одного готелю є кілька цін (за 4, 5 чи 7 ночей), виводь ту, яка є найпривабливішою, чітко вказавши відповідну їй кількість ночей.\n"
+        f"- Уникай 'оверпрайсу': не вибирай готелі з космічними цінами (наприклад, за 250-500 тис. грн), якщо в тексті є чудові варіанти за 60-100 тис. грн. Шукай 'золоту середину' ціни та сервісу.\n\n"
+        
+        f"⚠️ СУВОРЕ ПРАВИЛО ДЛЯ АНАЛІЗУ ТА ФОРМАТУ ДАТ (ТОЧНИЙ ПОВТОР З САЙТУ):\n"
+        f"1. Знайди в тексті конкретного туру дату вильоту/виїзду (день, місяць, рік), яка прописана поруч із обраною ціною. Заборонено вигадувати дані самостійно.\n"
+        f"2. КРИТИЧНО ВАЖЛИВО: Переноси дату в шаблон СУВОРО в тому форматі, в якому вона написана в джерелі (на сайті). "
+        f"Якщо на сайті вказано цифровий формат (наприклад, '15.06.2026'), пиши '15.06.2026'. "
+        f"Якщо на сайті вказано словами (наприклад, '19 червня' або '5 липня'), ти зобов'язаний перенести саме так: '19 червня' або '5 липня'. "
+        f"Нічого від себе не змінюй, не трансформуй формати та не додавай зайвих слів чи літер (наприклад, р., рік тощо).\n\n"
+        
+        f"⚠️ Суворо дотримуйся наступних правил конструювання текста:\n"
+        f"1. НІКОЛИ не згадуй назву сторонніх сайтів чи парсерів.\n"     
+        f"2. Текст ОБОВ'ЯЗКОВО має починатися одразу з ХУДОЖНЬОГО ВСТУПУ: напиши один короткий, емоційний та вступний художній абзац про країну {cat['name']}, який яскраво описує переваги відпочинку в цьому напрямку.\n"
+        f"3. СУВОРЕ ПРАВИЛО ДЛЯ ВСТУПУ:\n"
+        f"- Заборони будь-які технічні чи робочі фрази типу 'Згідно з наявними даними...', 'Ми знайшли...'. Текст повинен виглядати як рекомендація живого експерта.\n"
+        f"4. СУВОРЕ ПРАВИЛО ДЛЯ РОЗДІЛЕННЯ ТУРИВ: Відокремлюй картки готелів одну від одної СУВОРО одним порожнім рядком. Категорично ЗАБОРОНЕНО самостійно малювати штучні лінії, ставити знаки мінусів, дефісів чи символи на кшталт '---' між готелями! Тільки порожній рядок.\n"
+        f"5. Після художнього вступу виведи список готелів. Для КОЖНОГО готелю суворо використовуй наступний візуальний шаблон (заповнюй дані, зберігаючи емодзі та жирний шрифт, у полі виїзду обов'язково вказуй назву міста):\n\n"
+        
+        f"📍 <b>{cat['name'].upper()} ([Вкажи регіон/курорт])</b>\n"
+        f"🏨 <b>[Назва готелю латиницею в оригіналі] [Зірковість, наприклад: 4* або 5*]</b>\n"
+        f"🚌 <b>Трансфер та виїзд:</b> [Залежно від туру, вкажи чітке місто вильоту чи виїзду! Приклади: '✈️ Авіа з Кишинева', '✈️ Авіа з Варшави', '🚌 Автобус із Києва', '🚗 Власний транспорт'. Жодних загальних фраз типу 'міст Європи' чи 'уточнюйте'!]\n"
+        f"🍽 <b>Харчування:</b> [Вкажи тип харчування, що відповідає обраній ціні, наприклад: 'Все включено (AI)' або 'Без харчування (RO)']\n"
+        f"📅 <b>Виліт/Дата:</b> [Вкажи точную дату туру з тексту СУВОРО в оригінальному форматі сайту: ДД.ММ.РРРР або ДД місяця], [Вкажи кількість ночей саме для цієї ціни]\n"
+        f"💰 <b>Ціна:</b> [Вкажи саме вартість для обраного типу трансферу] грн. за 2-х дорослих\n"
+        f"<i>[Тут напиши короткий художній опис саме цього готелю. Коротко вкажи реальні матеріальні переваги самого готелю: інфраструктура, перша лінія, басейни, спа, свіжий ремонт, зелена територія, аквапарк тощо]</i>\n\n"
+        
+        f"⚠️ ДОДАТКОВІ ОБМЕЖЕННЯ ДЛЯ ОФОРМЛЕННЯ ГОТЕЛІВ:\n"
+        f"- СУВОРЕ ПРАВИЛО ДЛЯ ДАТИ: Заборонено примусово міняти формат дати. Відображай символ в символ, як у тексті джерела. Без самодіяльності та зайвих знаків.\n"
+        f"- СУВОРЕ ПРАВИЛО ДЛЯ НАЗВИ ГОТЕЛЮ: Виводь назву готелю в оригіналі так, як вона вказана в тексті джерела (латиницею).\n\n"
+        
+        f"⚠️ ОБМЕЖЕННЯ: Описуй каждый готель ємно. Твій підсумковий текст має бути не більше за 3000 символів. Використовуй тільки HTML-теги <b> та <i>.\n\n"
+        
+        f"⚠️ СУВОРЕ ТА КАТЕГОРИЧНЕ ПРАВИЛО ЩОДО СТИЛЮ МІНУСІВ ТА ЗАБОРОНИ НЕВВЕРНЕНОСТІ:\n"
+        f"- КАТЕГОРИЧНО ЗАБОРОНЕНО використовувати конструкції: 'Може бути...', 'Здається...', 'Можливо...', 'Не всім сподобається...'. Текст має бути чітким, професійним та констатувати факти.\n"
+        f"- Пиши прямо і професійно: НЕ 'Може бути завеликим' -> А 'Велика територія'; НЕ 'Може бути далеко від моря' -> А 'Друга лінія, 400 м до пляжу'; НЕ 'Можливо старі номери' -> А 'Класичний/традиційний номерний фонд'.\n"
+        f"- Також повністю заборонені фрази типу: 'Не вказано конкретних матеріальних недоліків в наданому тексті', 'Інформація відсутня'. Якщо даних немає — напиши нейтральний художній нюанс, який підходить усім готелям, але НІКОЛИ не пиши технічні виправдання!.\n\n"
+        
+        f"Ось текстові дані з готелями СУТО ДЛЯ ЦІЄЇ КРАЇНИ: {country_data}"
+    )
+    
+    try:
+        response = ai_model.generate_content(prompt)
+        post_text = response.text
+        
+        builder = InlineKeyboardBuilder()
+        builder.add(types.InlineKeyboardButton(text="🤖 Підібрати свій тур", url=f"https://t.me/{(await bot.get_me()).username}?start=channel_post"))
+        
+        await bot.send_message(chat_id=CHANNEL_ID, text=post_text, reply_markup=builder.as_markup(), parse_mode="HTML")
+        logging.info("AI-пост успішно згенеровано та опубліковано.")
+    except Exception as e:
+        logging.error(f"Помилка генерації AI поста: {e}")
+
+# =====================================================================
+# 7. АДМІНІСТРАТИВНА ПАНЕЛЬ
+# =====================================================================
+
+async def show_admin_base(message: types.Message, state: FSMContext):
+    builder = InlineKeyboardBuilder()
+    builder.add(
+        types.InlineKeyboardButton(text="📅 Перепризначити відгук", callback_data="adm_feedback"),
+        types.InlineKeyboardButton(text="👥 Список користувачів", callback_data="adm_users")
+    )
+    builder.adjust(1)
+    msg = await message.answer("🛠 <b>ПАНЕЛЬ МЕНЕДЖЕРА АГЕНЦІЇ</b>", reply_markup=builder.as_markup(), parse_mode="HTML")
+    
     data = await state.get_data()
-    msgs_to_delete = data.get("admin_msgs_to_clean", [])
-    for msg_id in msgs_to_delete:
+    msgs = data.get("admin_msgs_to_clean", [])
+    msgs.append(msg.message_id)
+    await state.update_data(admin_msgs_to_clean=msgs)
+
+async def clean_admin_messages(state: FSMContext, chat_id: int):
+    data = await state.get_data()
+    msgs = data.get("admin_msgs_to_clean", [])
+    for m_id in msgs:
         try:
-            await bot.delete_message(chat_id=chat_id, message_id=msg_id)
+            await bot.delete_message(chat_id=chat_id, message_id=m_id)
         except:
             pass
     await state.update_data(admin_msgs_to_clean=[])
 
-async def show_admin_base(message: types.Message, state: FSMContext):
-    """Надсилає актуальний список туристів зі статусами відгуків"""
-    global pool
-    async with pool.acquire() as conn:
-        rows = await conn.fetch("""
-            SELECT 
-                u.user_id, u.username, u.full_name, 
-                d.discount_value,
-                f.return_date, f.sent
-            FROM users u 
-            LEFT JOIN discounts d ON u.user_id = d.user_id AND d.is_used = FALSE
-            LEFT JOIN (
-                SELECT DISTINCT ON (user_id) user_id, return_date, sent 
-                FROM feedbacks 
-                ORDER BY user_id, id DESC
-            ) f ON u.user_id = f.user_id
-        """)
+@dp.message(Command("admin"), F.from_user.id == ADMIN_ID)
+async def admin_cmd(message: types.Message, state: FSMContext):
+    await state.clear()
+    await show_admin_base(message, state)
 
-    text = "👥 <b>Список туристів:</b>\n━━━━━━━━━━━━━━━\n"
-    
-    if not rows:
-        text += "База порожня."
-    else:
-        for row in rows:
-            username = f"@{row['username']}" if row['username'] else "немає"
-            name = row['full_name'] or "Ім'я не вказано"
-            discount = f" | 🎁 {row['discount_value']}%" if row['discount_value'] else ""
-            
-            feedback_status = ""
-            if row['return_date']:
-                if row['sent'] == 1:
-                    feedback_status = f"\n     └ ✅ Запит на відгук надіслано ({row['return_date']})"
-                else:
-                    feedback_status = f"\n     └ ⏳ Запит на відгук заплановано ({row['return_date']})"
-
-            text += f"👤 <b>{name}</b> — {username} (<code>{row['user_id']}</code>){discount}{feedback_status}\n"
-    
-    text += "━━━━━━━━━━━━━━━"
-    
-    new_msg = await bot.send_message(chat_id=message.chat.id, text=text, parse_mode="HTML")
+@dp.callback_query(F.data == "adm_feedback", F.from_user.id == ADMIN_ID)
+async def adm_feedback_start(callback_query: types.CallbackQuery, state: FSMContext):
+    await callback_query.message.edit_reply_markup(reply_markup=None)
+    msg = await callback_query.message.answer("📝 Введіть Telegram ID клієнта або його @username для налаштування опитування:")
     
     data = await state.get_data()
-    current_msgs = data.get("admin_msgs_to_clean", [])
-    current_msgs.append(new_msg.message_id)
-    await state.update_data(admin_msgs_to_clean=current_msgs)
-
-pool = None
-
-async def init_db():
-    global pool
-    pool = await asyncpg.create_pool(
-        DATABASE_URL,
-        min_size=1,
-        max_size=2
-    )
-    async with pool.acquire() as conn:
-        await conn.execute("""
-            CREATE TABLE IF NOT EXISTS discounts (
-                user_id BIGINT PRIMARY KEY,
-                discount_value INTEGER,
-                is_used BOOLEAN DEFAULT FALSE
-                )
-        """)
-        await conn.execute("""
-            CREATE TABLE IF NOT EXISTS feedbacks (
-                id SERIAL PRIMARY KEY,
-                user_id BIGINT,
-                return_date TEXT,
-                sent INTEGER DEFAULT 0
-                )
-        """)
-        await conn.execute("""
-            CREATE TABLE IF NOT EXISTS users (
-                user_id BIGINT PRIMARY KEY,
-                username TEXT,
-                full_name TEXT
-                )
-        """)
-        await conn.execute("""
-            CREATE TABLE IF NOT EXISTS daily_posts (
-                message_id INTEGER PRIMARY KEY
-            )
-        """)
-        try:
-            await conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS full_name TEXT")
-        except Exception as e:
-            logging.info(f"Колонка full_name вже існує або помилка: {e}")
-
-async def save_user(user: types.User):
-    async with pool.acquire() as conn:
-        await conn.execute(
-            "INSERT INTO users (user_id, username, full_name) VALUES ($1, $2, $3) "
-            "ON CONFLICT (user_id) DO UPDATE SET "
-            "username = EXCLUDED.username, full_name = EXCLUDED.full_name",
-            user.id, user.username, user.full_name
-        )
-
-async def get_user_discount(user_id: int):
-    async with pool.acquire() as conn:
-        return await conn.fetchrow(
-            "SELECT discount_value FROM discounts WHERE user_id = $1 AND is_used = FALSE", 
-            user_id
-        )
-
-async def check_returns():
-    now = datetime.now(ukraine_tz)
-    today = now.strftime("%d.%m.%Y")
-    logging.info(f"🔎 [SCHEDULER] Перевірка bases на дату: {today}")
-    
-    async with pool.acquire() as conn:
-        rows = await conn.fetch(
-            "SELECT user_id FROM feedbacks WHERE return_date = $1 AND sent = 0", 
-            today
-        )
-        
-        logging.info(f"📊 [SCHEDULER] Знайдено записів: {len(rows)}")
-        
-        for row in rows:
-            try:
-                await bot.send_message(
-                    row['user_id'],
-                    "✈️ З поверненням! Сподіваємося, Ваш відпочинок був чудовим.\n\nБудь ласка, оцініть нашу роботу:",
-                    reply_markup=rating_kb()
-                )
-                await conn.execute(
-                    "UPDATE feedbacks SET sent = 1 WHERE user_id = $1 AND return_date = $2", 
-                    row['user_id'], today
-                )
-                logging.info(f"✅ [SCHEDULER] Відгук надіслано ID: {row['user_id']}")
-            except Exception as e:
-                logging.error(f"❌ [SCHEDULER] Помилка для ID {row['user_id']}: {e}")
-
-# КЛАВІАТУРИ
-def start_inline_kb():
-    builder = InlineKeyboardBuilder()
-    builder.add(types.InlineKeyboardButton(text="🚀 ПОЧАТИ ПІДБІР ТУРУ", callback_data="start_selection"))
-    return builder.as_markup()
-
-def rating_kb():
-    builder = InlineKeyboardBuilder()
-    for i in range(1, 6):
-        builder.add(types.InlineKeyboardButton(text=f"{i}⭐", callback_data=f"rate_{i}"))
-    builder.adjust(5)
-    return builder.as_markup()
-
-def stars_kb():
-    builder = InlineKeyboardBuilder()
-    builder.add(types.InlineKeyboardButton(text="3*", callback_data="star_3"),
-        types.InlineKeyboardButton(text="4*", callback_data="star_4"),
-        types.InlineKeyboardButton(text="5*", callback_data="star_5"))
-    builder.add(types.InlineKeyboardButton(text="Будь-яка", callback_data="star_any"))
-    builder.adjust(3, 1)
-    return builder.as_markup()
-
-def meals_kb():
-    builder = InlineKeyboardBuilder()
-    builder.add(types.InlineKeyboardButton(text="Сніданки (BB)", callback_data="meal_BB"),
-        types.InlineKeyboardButton(text="Сніданок+вечеря (HB)", callback_data="meal_HB"),
-        types.InlineKeyboardButton(text="Все включено (AI)", callback_data="meal_AI"),
-        types.InlineKeyboardButton(text="Ультра все включено (UAI)", callback_data="meal_UAI"),
-        types.InlineKeyboardButton(text="Без харчування (RO)", callback_data="meal_RO"))
-    builder.adjust(1)
-    return builder.as_markup()
-
-def generate_discount():
-    chance = random.random()
-    if chance < 0.80:
-        return random.randint(2, 3)
-    elif chance < 0.95:
-        return 4
-    else:
-        return 5
-
-# --- ФУНКЦІЇ ЕЛЕКТРОННОГО ПОМІЧНИКА (ПАРСИНГ ТА ШІ) ---
-
-async def fetch_tat_ua_data():
-    country_urls = {
-        "turkey": "https://tat.ua/search/turkey/",
-        "egypt": "https://tat.ua/search/egypt/",
-        "bulgaria": "https://tat.ua/search/bulgaria/",
-        "greece": "https://tat.ua/search/greece/",
-        "cyprus": "https://tat.ua/search/cyprus/",
-        "spain": "https://tat.ua/search/spain/",
-        "ukraine": "https://tat.ua/search/ukraine/"
-    }
-    
-    # Ротуємо заголовки для повної імітації реального браузера (захист від блокувань)
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
-        "Accept-Language": "uk-UA,uk;q=0.9,en-US;q=0.8,en;q=0.7",
-        "Referer": "https://turne.ua/ua/hottours",
-        "Cache-Control": "no-cache",
-        "Connection": "keep-alive"
-    }
-    
-    logging.info(f"🚀 [ПАРСЕР] Початок ОДНОРАЗОВОГО швидкого збору даних з сортуванням зірковості через HTTPX...")
-    cleaned_country_data = {}
-    max_pages_per_country = 1 
-    
-    try:
-        # Відкриваємо асинхронну сесію клієнта
-        async with httpx.AsyncClient(headers=headers, timeout=20.0, follow_redirects=True) as client:
-            for country_slug, base_url in country_urls.items():
-                logging.info(f"🌍 Збираємо пропозиції для напрямку: {country_slug.upper()}")
-                country_raw_blocks = []
-                
-                for page_num in range(1, max_pages_per_country + 1):
-                    url = base_url if page_num == 1 else f"{base_url}?page={page_num}"
-                    
-                    try:
-                        # Асинхронний безпечний HTTP-запит (не блокує Event Loop бота)
-                        response = await client.get(url)
-                        if response.status_code == 200:
-                            soup = BeautifulSoup(response.text, 'html.parser')
-                            
-                            # Видаляємо важкі елементи коду (скрипти, стилі, іконки svg) для економії пам'яті
-                            for element in soup(["script", "style", "header", "footer", "nav", "aside", "form", "svg"]):
-                                element.decompose()
-                                
-                            page_text = " ".join(soup.get_text(separator=" ", strip=True).split())
-                            
-                            if "грн" in page_text or "ноч" in page_text:
-                                # Розбиваємо сирий текст сторінки за маркером валюти на окремі сутності
-                                raw_hotel_blocks = page_text.split("грн")
-                                for b in raw_hotel_blocks:
-                                    cleaned_block = b.strip()
-                                    if len(cleaned_block) > 100 and ("ноч" in cleaned_block or "*" in cleaned_block or "★" in cleaned_block):
-                                        country_raw_blocks.append(cleaned_block + " грн")
-                            else:
-                                break
-                        else:
-                            logging.warning(f"⚠️ Статус-код {response.status_code} для сторінки {page_num} ({country_slug})")
-                            break
-                        
-                        # Коректна неблокуюча пауза між запитами
-                        await asyncio.sleep(0.5)
-                        
-                    except Exception as page_err:
-                        logging.error(f"❌ Помилка пагінації {page_num} для {country_slug}: {page_err}")
-                        continue
-
-                # --- РОЗУМНЕ СОРТУВАННЯ ТА ПЕРЕМІШУВАННЯ ---
-                if country_raw_blocks:
-                    hotels_5_stars = []
-                    hotels_4_stars = []
-                    hotels_3_stars = []
-                    
-                    for block in country_raw_blocks:
-                        b_low = block.lower()
-                        # «Всеїдний» пошук за всіма можливими текстовими варіаціями зірок на сайті
-                        if "5*" in b_low or "5★" in b_low or "5 *" in b_low or "5 зірок" in b_low:
-                            hotels_5_stars.append(block)
-                        elif "4*" in b_low or "4★" in b_low or "4 *" in b_low or "4 зірок" in b_low:
-                            hotels_4_stars.append(block)
-                        else:
-                            hotels_3_stars.append(block)
-                    
-                    # Перемішуємо кожну категорію окремо, щоб пости щодня були різноманітними
-                    random.shuffle(hotels_5_stars)
-                    random.shuffle(hotels_4_stars)
-                    random.shuffle(hotels_3_stars)
-                    
-                    # Збираємо масив назад (5★ гарантовано та суворо стають на самий початок списку)
-                    sorted_blocks = hotels_5_stars + hotels_4_stars + hotels_3_stars
-                    
-                    # Беремо оптимальну вибірку з 35 готелів для аналізу ШІ
-                    selected_blocks = sorted_blocks[:35]
-                    
-                    # Точний перерахунок зірок, які РЕАЛЬНО потрапили у фінальну вибірку для передачі в Gemini
-                    final_5_count = sum(1 for b in selected_blocks if any(x in b.lower() for x in ["5*", "5★", "5 *", "5 зірок"]))
-                    final_4_count = sum(1 for b in selected_blocks if any(x in b.lower() for x in ["4*", "4★", "4 *", "4 зірок"]))
-                    
-                    country_text_combined = " | ".join(selected_blocks)
-                    final_chunk = " ".join(country_text_combined.split())
-                    
-                    if len(final_chunk) > 200:
-                        cleaned_country_data[country_slug] = (
-                            f"\n=== ПОЧАТОК БЛОКУ КРАЇНИ: {country_slug.upper()} ===\n"
-                            f"{final_chunk}"
-                            f"\n=== КІНЕЦЬ БЛОКУ КРАЇНИ: {country_slug.upper()} ===\n"
-                        )
-                        # Тепер логи відображатимуть реальні та чесні цифри знайдених готелів
-                        logging.info(f"🎯 Сортування завершено ({country_slug.upper()}): Передано ШІ {final_5_count}шт 5★ та {final_4_count}шт 4★. (Всього у вибірці: {len(selected_blocks)} готелів).")
-                else:
-                    logging.warning(f"⚠️ Не вдалося виділити готелі для напрямку {country_slug.upper()}")
-                    
-            return cleaned_country_data if cleaned_country_data else None
-
-    except Exception as e:
-        logging.error(f"❌ Загальна помилка під час збору даних: {e}")
-        return None
-
-async def generate_and_send_ai_tour_post():
-    if not ai_model or not AUTO_POST_CHAT_ID:
-        logging.info("🤖 Помічник пропущений: немає моделі ШІ або AUTO_POST_CHAT_ID.")
-        return
-
-    # --- БЕЗПЕЧНА ПЕРЕВІРКА ТА ПЕРЕНАПРАВЛЕННЯ ---
-    raw_topic_id = os.getenv("NAVIGATOR_DAY_TOPIC_ID")
-    if raw_topic_id and raw_topic_id.strip() != "None":
-        try:
-            NAVIGATOR_DAY_TOPIC_ID = int(raw_topic_id)
-            CURRENT_CHAT_ID = AUTO_POST_CHAT_ID
-        except ValueError:
-            NAVIGATOR_DAY_TOPIC_ID = None
-            CURRENT_CHAT_ID = ADMIN_ID
-    else:
-        NAVIGATOR_DAY_TOPIC_ID = None
-        CURRENT_CHAT_ID = ADMIN_ID
-
-    bot_link1 = "https://t.me/NavigatorToursBot?start=welcome"
-    bot_link2 = "https://t.me/NavigatorToursBot?start=discount"
-    current_date_str = datetime.now().strftime("%d.%m.%Y")
-
-    cta_text = (
-        f"⚠️ <b>Зверніть увагу: всі ціни вказані за тур та є актуальними на сьогодні!</b>\n\n"
-        f"✈️ Бажаєте забронювати або підібрати інший варіант?\n"
-        f"Наш електронний помічник допоможе вам швидко сформувати запит, а професійний менеджер особисто опрацює ваші побажання.\n"
-        f"👉 <a href='{bot_link1}'>Залишити запит менеджеру</a>\n\n"
-        f"🎁 <b>Приємний бонус:</b> кожен наш клієнт може отримати персональну знижку за програмою лояльності!\n"
-        f"👉 <a href='{bot_link2}'>Отримати знижку</a>\n\n"
-        f"🗣 <b>Сподобалася добірка?</b>\n"
-        f"Поширюйте канал серед знайомих мандрівників — разом шукати вигідні тури цікавіше!"
-    )
-
-    # --- 1. ВИДАЛЕННЯ ВЧОРАШНІХ ПОСТІВ З БАЗИ ДАНИХ ПЕРЕД ЗАПУСКОМ ---
-    async with pool.acquire() as conn:
-        old_rows = await conn.fetch("SELECT message_id FROM daily_posts")
-        if old_rows:
-            logging.info(f"🧹 Знайдено вчорашні пости для видалення в БД. Кількість: {len(old_rows)}")
-            for row in old_rows:
-                try:
-                    await bot.delete_message(chat_id=CURRENT_CHAT_ID, message_id=row['message_id'])
-                except Exception as del_err:
-                    logging.warning(f"Не вдалося видалити старий post {row['message_id']}: {del_err}")
-            await conn.execute("DELETE FROM daily_posts")
-            logging.info("✨ Таблиця вчорашніх постів в БД успішно очищена.")
-
-    # --- 2. ОДНОРАЗОВИЙ СКАНОР ВСЬОГО САЙТУ ЧЕРЕЗ REQUESTS ---
-    global_raw_tour_data = await fetch_tat_ua_data()
-    if not global_raw_tour_data:
-        logging.error("🛑 Не вдалося отримати контент із сайту. Роботу ШІ зупинено.")
-        return
-
-    categories = [
-        {"name": "ТУРЕЧЧИНА", "slug": "turkey", "flag": "🇹🇷", "stars": "5★, 4★, 3★", "prompt_part": "Уважно проскануй весь наданий текст. Твоє завдання — вибрати до 5 НАЙКРАЩИХ РІЗНИХ готелів СУТО в ТУРЕЧЧИНІ (шукай маркер [ПОЧАТОК БЛОКУ КРАЇНИ: TURKEY]) за суворим пріоритетом зірковості."},
-        {"name": "ЄГИПЕТ", "slug": "egypt", "flag": "🇪🇬", "stars": "5★, 4★, 3★", "prompt_part": "Уважно проскануй весь наданий текст. Твоє завдання — вибрати до 5 НАЙКРАЩИХ РІЗНИХ готелів СУТО в ЄГИПТІ (шукай маркер [ПОЧАТОК БЛОКУ КРАЇНИ: EGYPT]) за суворим пріоритетом зірковості."},
-        {"name": "БОЛГАРІЯ", "slug": "bulgaria", "flag": "🇧🇬", "stars": "5★, 4★, 3★", "prompt_part": "Уважно проскануй весь наданий текст. Твоє завдання — вибрати до 5 НАЙКРАЩИХ РІЗНИХ готелів СУТО в БОЛГАРІЇ (шукай маркер [ПОЧАТОК БЛОКУ КРАЇНИ: BULGARIA]) за суворим пріоритетом зірковості."},
-        {"name": "ГРЕЦІЯ", "slug": "greece", "flag": "🇬🇷", "stars": "5★, 4★, 3★", "prompt_part": "Уважно проскануй весь наданий текст. Твоє завдання — вибрати до 5 НАЙКРАЩИХ РІЗНИХ готелів СУТО в ГРЕЦІЇ (шукай маркер [ПОЧАТОК БЛОКУ КРАЇНИ: GREECE]) за суворим пріоритетом зірковості."},
-        {"name": "КІПР", "slug": "cyprus", "flag": "🇨🇾", "stars": "5★, 4★, 3★", "prompt_part": "Уважно проскануй весь наданий текст. Твоє завдання — вибрати до 5 НАЙКРАЩИХ РІЗНИХ готелів СУТО на КІПРІ (шукай маркер [ПОЧАТОК БЛОКУ КРАЇНИ: CYPRUS]) за суворим пріоритетом зірковості."},
-        {"name": "ІСПАНІЯ", "slug": "spain", "flag": "🇪🇸", "stars": "5★, 4★, 3★", "prompt_part": "Уважно проскануй весь наданий текст. Твоє завдання — вибрати до 5 НАЙКРАЩИХ РІЗНИХ готелів СУТО в ІСПАНІЇ (шукай маркер [ПОЧАТОК БЛОКУ КРАЇНИ: SPAIN]) за суворим пріоритетом зірковості."},
-        {"name": "УКРАЇНА", "slug": "ukraine", "flag": "🇺🇦", "stars": "5★, 4★, 3★", "prompt_part": "Уважно проскануй весь наданий текст. Твоє завдання — вибрати до 5 НАЙКРАЩИХ РІЗНИХ готелів СУТО в УКРАЇНІ (шукай маркер [ПОЧАТОК БЛОКУ КРАЇНИ: UKRAINE]) за суворим пріоритетом зірковості."}
-    ]
-    
-    successful_posts_count = 0
-
-    for index, cat in enumerate(categories):
-        if index > 0:
-            logging.info(f"⏳ Очікуємо 10 секунд перед обробкою ШІ для напрямку '{cat['name']}'...")
-            await asyncio.sleep(10)
-
-        country_data = global_raw_tour_data.get(cat['slug'], "") if global_raw_tour_data else ""
-        if not country_data:
-            logging.info(f"⏩ Пропущено block '{cat['name']}', бо в парсері немає даних для цієї країни.")
-            continue
-
-        prompt = (
-            f"Ти — професійний travel-копірайтер компанії. На основі НАДАНИХ ТЕКСТОВИХ ДАНИХ склади один цікавий, "
-            f"структурований і залучаючий пост для Telegram-каналу українською мовою.\n\n"
-            f"ТВОЄ ГОЛОВНЕ ЗАВДАННЯ: {cat['prompt_part']}\n\n"
-            
-            f"🚫  ПРАВИЛО ЛОГІКИ ТРАНСПОРТУ ТА ЕМОДЗІ (ЗАБОРОНА ПЛУТАНИНИ):\n"
-            f"1. Автобусні тури маркуються ЛИШЕ символом 🚌 в усьому рядку. Наприклад: '🚌 Автобус із Києва' або '🚌 Автобус зі Львова'. Заборонено в цей рядок ставити літак ✈️!\n"
-            f"2. Авіатури маркуються ЛИШЕ символом ✈️ в усьому рядку. Наприклад: '✈️ Авіа з Кишинева' або '✈️ Авіа з Варшави'. Заборонено в цей рядок ставити автобус 🚌!\n"
-            f"3. Ніколи не зліплюй емодзі автобуса з текстом про авіарейси. Кожен тип транспорту має відповідати своєму єдиному значку.\n"
-            f"4. ЗАБОРОНА ФЕЙКОВИХ ВИЛЬОТІВ З УКРАЇНИ: Наразі авіатури з міст України (Київ, Харків, Львів, Одеса тощо) не здійснюються! Якщо тур авіаційний — місто вильоту обов'язково має бути іноземним (Кишинів, Варшава, Жешув, Сучава, Катовіце тощо). З українських міст можливий ТІЛЬКИ автобусний виїзд чи власний транспорт. Не вигадуй вильоти літаків з України!\n\n"
-
-            f"❌ КАТЕГОРИЧНА ЗАБОРОНА НА ФРАЗИ 'ЗА ЗАПИТОМ', 'УТОЧНЮЙТЕ' ТА АБСТРАКЦІЇ:\n"
-            f"- Тобі категорично заборонено використовувати у фінальному тексті фрази: 'з міст Європи', 'уточнюйте', 'за запитом', 'уточнюйте у менеджера', 'деталі за телефоном', 'кількість ночей за запитом'. Пост повинен містити виключно готову, фіксовану та конкретну інформацію для туриста.\n"
-            f"- У полі трансферу та виїзду ОБОВ'ЯЗКОВО має бути чітко вказано конкретне місто вильоту або виїзду. Жодних розмитих формулювань. Якщо це авіатур — проаналізуй контекст і вкажи конкретне закордонне місто, з якого виконується цей рейс (наприклад, Кишинів, Варшава тощо).\n"
-            f"- Якщо для якогось готелю в наданому тексті замість конкретної дати, кількості ночей чи типу харчування вказано 'уточнюйте' або 'за запитом' — повністю ІГНОРУЙ такий готель і переходь до аналізу наступних варіантів, де є точні та прописані дані.\n\n"
-            
-            f"⚠️ КРИТИЧНО ВАЖЛИВЕ ПРАВИЛО ПРІОРИТЕТУ ЗІРКОВОСТІ ГОТЕЛІВ:\n"
-            f"Ти повинен робити вибірку готелів (до 5 штук) суворо за такому каскадним пріоритетом:\n"
-            f"1. Наданий тобі список вже відсортований на рівні Python: на самому початку йдуть преміум-готелі 5★. Твоє головне завдання — вибрати до 5 найкращих готелів 5★. Сформуй добірку виключно або переважно з них.\n"
-            f"2. Тільки якщо готелів 5★ у списку виявиться менше 5 штук, добирай решту з готелів зірковості 4★ (4*).\n"
-            f"3. Якщо в тексті немає взагалі ні 5★, ні 4★ готелів для цієї країни, тільки в цьому крайньому разі дозволено брати та показувати готелі зірковості 3★ (3*).\n"
-            f"Порушення цього пріоритету заборонено! Якщо є вища зірковість — нижчу ігноруй.\n\n"
-            
-            f"⚠️ ХУДОЖНІЙ ПЕРЕХІД:\n"
-            f"У вступному абзаці обов'язково адаптуй фразу-перехід під фактично обрану зірковість готелів. Наприклад, якщо у списку опинилися лише 5★, напиши: 'Ось наша добірка найкращих преміум-готелів 5★...'. Якщо вийшов мікс 5★ та 4★, напиши: 'Ось добірка найкращих готелів 4★ та 5★...'.\n\n"
-            
-            f"⚠️ ГОЛОВНИЙ КРИТЕРІЙ ВІДБОРУ — ПРІОРІТЕТ ТРАНСПОРТУ ТА ПОВНОГО ПАКЕТУ:\n"
-            f"Проаналізуй тип транспорту для готелів та відбере варіанти за суворим каскадним пріоритетом:\n"
-            f"1. ПРІОРІТЕТ №1 — АВІАТУРИ: Шукай у тексті готелі, де вказано авіапереліт (літак/авіа з Кишинева, Сучави, Жешува, Варшави тощо).\n"
-            f"    🔥 КРИТИЧНА ВИМОГА ДЛЯ АВІА: Серед усіх знайдених авіатурів ти зобов'язаний ПЕРШОЧЕРГОВО вибирати варіанти, які є ПОВНИМ ПАКЕТОМ (куди одночасно включено: Проїзд, Страховка та Трансфер до готелю). Формуй добірку з них. Якщо авіатурів у тексті є хоча б 3-5 штук, повністю ігноруй автобуси та власний транспорт!\n"
-            f"2. АВТОБУСНІ ТУРИ: Включай автобусні тури у пост ТІЛЬКИ у випадку, якщо в наданих даних взагалі немає авіатурів по цій країні.\n"
-            f"    🔥 КРИТИЧНА ВИМОГА ДЛЯ АВТОБУСІВ: Аналогічно, серед автобусних турів вибирай насамперед ті, куди включено повний пакет (Проїзд + Страховка + Трасфер).\n"
-            f"3. БЕЗ ТРАНСФЕРУ: Варіанти 'Власний транспорт / Без трансферу' дозволено брати лише в крайньому разі, якщо немає ні авіа, ні автобусів.\n"
-            f"Підсумок: Завжди зберігай пріоритет транспорту (Авіа -> Автобус), але ВСЕРЕДИНІ обраного транспорту вибирай ТІЛЬКИ ті тури, де чітко включено проїзд, страховку та трансфер!\n\n"
-            
-            f"⚠️ КРИТИЧНО ВАЖЛИВЕ ПРАВИЛО ДЛЯ НАЙНИЖЧОЇ ЦІНИ ТА СИНХРОНІЗАЦІЇ:\n"
-            f"- Коли алгоритм відібрав готелі за пріоритетом трансферу (наприклад, авіа з повним пакетом), вибирай серед них варіанти за ЯКІСТЮ та НАЙВИГІДНІШОЮ ціною для конкретної кількості ночей. \n"
-            f"- НІКОЛИ не зліплюй ціну від дешевого автобусного туру з описом авіатуру! Ціна, тип харчування, трансфер та кількість ночей у шаблоні мають бути СУВОРО СИНХРОНІЗОВАНІ між собою для обраного варіанту.\n"
-            f"- Якщо для одного готелю є кілька цін (за 4, 5 чи 7 ночей), виводь ту, яка є найпривабливішою, чітко вказавши відповідну їй кількість ночей.\n"
-            f"- Уникай 'оверпрайсу': не вибирай готелі з космічними цінами (наприклад, за 250-500 тис. грн), якщо в тексті є чудові варіанти за 60-100 тис. грн. Шукай 'золоту середину' ціни та сервісу.\n\n"
-            
-            f"⚠️ СУВОРЕ ПРАВИЛО ДЛЯ АНАЛІЗУ ТА ФОРМАТУ ДАТ (ТОЧНИЙ ПОВТОР З САЙТУ):\n"
-            f"1. Знайди в тексті конкретного туру дату вильоту/виїзду (день, месяц, рік), яка прописана поруч із обраною ціною. Заборонено вигадувати дані самостійно.\n"
-            f"2. КРИТИЧНО ВАЖЛИВО: Переноси дату в шаблон СУВОРО в тому форматі, в якому вона написана в джерелі (на сайті). "
-            f"Якщо на сайті вказано цифровий формат (наприклад, '15.06.2026'), пиши '15.06.2026'. "
-            f"Якщо на сайті вказано словами (наприклад, '19 червня' або '5 липня'), ти зобов'язаний перенести саме так: '19 червня' або '5 липня'. "
-            f"Нічого від себе не змінюй, не трансформуй формати та не додавай зайвих слів чи літер (наприклад, р., рік тощо).\n\n"
-            
-            f"⚠️ Суворо дотримуйся наступних правил конструювання текста:\n"
-            f"1. НІКОЛИ не згадуй назву сторонніх сайтів чи парсерів.\n"     
-            f"2. Текст ОБОВ'ЯЗКОВО має починатися одразу з ХУДОЖНЬОГО ВСТУПУ: напиши один короткий, емоційний та вступний художній абзац про країну {cat['name']}, який яскраво описує переваги відпочинку в цьому напрямку.\n"
-            f"3. СУВОРЕ ПРАВИЛО ДЛЯ ВСТУПУ:\n"
-            f"- Заборони будь-які технічні чи робочі фрази типу 'Згідно з наявними даними...', 'Ми знайшли...'. Текст повинен виглядати як рекомендація живого експерта.\n"
-            f"4. СУВОРЕ ПРАВИЛО ДЛЯ РОЗДІЛЕННЯ ТУРИВ: Відокремлюй картки готелів одну від одної СУВОРО одним порожнім рядком. Категорично ЗАБОРОНЕНО самостійно малювати штучні лінії, ставити знаки мінусів, дефісів чи символи на кшталт '---' між готелями! Тільки порожній рядок.\n"
-            f"5. Після художнього вступу виведи список готелів. Для КОЖНОГО готелю суворо використовуй наступний візуальний шаблон (заповнюй дані, зберігаючи емодзі та жирний шрифт, у полі виїзду обов'язково вказуй назву міста):\n\n"
-            
-            f"📍 <b>{cat['name'].upper()} ([Вкажи регіон/курорт])</b>\n"
-            f"🏨 <b>[Назва готелю латиницею в оригіналі] [Зірковість, наприклад: 4* або 5*]</b>\n"
-            f"🚌 <b>Трансфер та виїзд:</b> [Залежно від туру, вкажи чітке місто вильоту чи виїзду! Приклади: '✈️ Авіа з Кишинева', '✈️ Авіа з Варшави', '🚌 Автобус із Києва', '🚗 Власний транспорт'. Жодних загальних фраз типу 'міст Європи' чи 'уточнюйте'!]\n"
-            f"🍽 <b>Харчування:</b> [Вкажи тип харчування, що відповідає обраній ціні, наприклад: 'Все включено (AI)' або 'Без харчування (RO)']\n"
-            f"📅 <b>Виліт/Дата:</b> [Вкажи точну дату туру з тексту СУВОРО в оригінальному форматі сайту: ДД.ММ.РРРР або ДД місяця], [Вкажи кількість ночей саме для цієї ціни]\n"
-            f"💰 <b>Ціна:</b> [Вкажи саме вартість для обраного типу трансферу] грн. за 2-х дорослих\n"
-            f"<i>[Тут напиши короткий художній опис саме цього готелю. Коротко вкажи реальні матеріальні переваги самого готелю: інфраструктура, перша лінія, басейни, спа, свіжий ремонт, зелена територія, аквапарк тощо]</i>\n\n"
-            
-            f"⚠️ ДОДАТКОВІ ОБМЕЖЕННЯ ДЛЯ ОФОРМЛЕННЯ ГОТЕЛІВ:\n"
-            f"- СУВОРЕ ПРАВИЛО ДЛЯ ДАТИ: Заборонено примусово міняти формат дати. Відображай символ в символ, як у тексті джерела. Без самодіяльності та зайвих знаків.\n"
-            f"- СУВОРЕ ПРАВИЛО ДЛЯ НАЗВИ ГОТЕЛЮ: Виводь назву готелю в оригіналі так, як вона вказана в тексті джерела (латиницею).\n\n"
-            
-            f"⚠️ ОБМЕЖЕННЯ: Описуй каждый готель ємно. Твій підсумковий текст має бути не більше за 3000 символів. Використовуй тільки HTML-теги <b> та <i>.\n\n"
-            
-            f"⚠️ СУВОРЕ ТА КАТЕГОРИЧНЕ ПРАВИЛО ЩОДО СТИЛЮ МІНУСІВ ТА ЗАБОРОНИ НЕВВЕРНЕНОСТІ:\n"
-            f"- КАТЕГОРИЧНО ЗАБОРОНЕНО використовувати конструкції: 'Може бути...', 'Здається...', 'Можливо...', 'Не всім сподобається...'. Текст має бути чітким, професійним та констатувати факти.\n"
-            f"- Пиши прямо і професійно: НЕ 'Може бути завеликим' -> А 'Велика територія'; НЕ 'Може бути далеко від моря' -> А 'Друга лінія, 400 м до пляжу'; НЕ 'Можливо старі номери' -> А 'Класичний/традиційний номерний фонд'.\n"
-            f"- Також повністю заборонені фрази типу: 'Не вказано конкретних матеріальних недоліків в наданому тексті', 'Інформація відсутня'. Якщо даних немає — напиши нейтральний художній нюанс, який підходить усім готелям, але НІКОЛИ не пиши технічні виправдання!.\n\n"
-            
-            f"Ось текстові дані з готелями СУТО ДЛЯ ЦІЄЇ КРАЇНИ: {country_data}"
-        )
-
-        try:
-            response = ai_model.generate_content(prompt)
-            post_text = response.text
-            
-            if len(post_text.strip()) < 100 or "📍" not in post_text or "🏨" not in post_text:
-                logging.info(f"⏩ Пропущено блок '{cat['name']}', бо в згенерованому ШІ тексті немає карток готелів (можливо, країна зараз відсутня у вивантаженні).")
-                continue
-
-            header_text = f"🧭 <b>Навігатор дня: {cat['name'].upper()} {cat['flag']} | {current_date_str}</b>\n\n"
-            full_message = f"{header_text}{post_text}"
-            
-            msg = await bot.send_message(
-                chat_id=CURRENT_CHAT_ID, 
-                text=full_message, 
-                parse_mode="HTML",
-                message_thread_id=NAVIGATOR_DAY_TOPIC_ID if NAVIGATOR_DAY_TOPIC_ID else None,
-                disable_web_page_preview=True
-            )
-
-            async with pool.acquire() as conn:
-                await conn.execute("INSERT INTO daily_posts (message_id) VALUES ($1)", msg.message_id)
-                
-            successful_posts_count += 1
-            logging.info(f"✅ Пост для категорії '{cat['name']}' успішно опубліковано!")
-            
-        except Exception as ai_err:
-            logging.error(f"❌ Помилка роботи ШІ Gemini для категорії {cat['name']}: {ai_err}")
-
-    # --- НАДСИЛАЄТЬСЯ ОБ'ЄДНАНИЙ ФІНАЛЬНИЙ БЛОК (ЯКЩО БУЛИ ПУБЛІКАЦІЇ КРАЇН) ---
-    if successful_posts_count > 0:
-        try:
-            logging.info("⏳ Очікуємо 2 секунди перед надсиланням фінального блоку...")
-            await asyncio.sleep(2)
-            final_msg = await bot.send_message(
-                chat_id=CURRENT_CHAT_ID,
-                text=cta_text,
-                parse_mode="HTML",
-                message_thread_id=NAVIGATOR_DAY_TOPIC_ID if NAVIGATOR_DAY_TOPIC_ID else None,
-                disable_web_page_preview=True
-            )
-            async with pool.acquire() as conn:
-                await conn.execute("INSERT INTO daily_posts (message_id) VALUES ($1)", final_msg.message_id)
-            logging.info(f"✅ Фінальний CTA-пост успішно опубліковано!")
-        except Exception as final_err:
-            logging.error(f"❌ Помилка надсилання фінального повідомлення: {final_err}")
-            
-# --- ОБРОБНИКИ КОМАНД (ВЕРХНІЙ ПРІОРИТЕТ) ---
-
-@dp.message(CommandStart(), StateFilter("*"))
-async def cmd_start(message: types.Message, state: FSMContext, command: CommandObject):
-    await state.clear()
-    global pool 
-    args = command.args
-    user = message.from_user
-    name = user.full_name or "Мандрівник"
-    await save_user(user)
-    
-    if args == "discount":
-        existing_discount = await get_user_discount(user.id)
-        if existing_discount:
-            discount = existing_discount['discount_value']
-            greeting = f"Вітаємо, {name}! 🎁 У вас є активна знижка: {discount}%.\nВикористайте її під час бронювання наступного туру!"
-        else:
-            discount = generate_discount()
-            await pool.execute("""
-                INSERT INTO discounts (user_id, discount_value, is_used) 
-                VALUES ($1, $2, FALSE) 
-                ON CONFLICT (user_id) DO UPDATE 
-                SET discount_value = EXCLUDED.discount_value, is_used = FALSE
-                """, user.id, discount)
-            greeting = f"Вітаємо, {name}! 🎁 Ви активували знижку {discount}%."
-    else:
-        discount_row = await get_user_discount(user.id)
-        if discount_row:
-            greeting = f"Вітаємо, {name}! 🎁 У вас є активна знижка: {discount_row['discount_value']}%.\nВикористайте її під час бронювання наступного туру!"
-        else:
-            greeting = f"Вітаємо, {name}! Я допоможу вам підібрати тур."
-    
-    # ВІДПРАВКА: Текст вітання + Кнопка в одному повідомленні
-    msg = await message.answer(greeting, reply_markup=start_inline_kb())
-    
-    await state.set_state(TourRequest.start_confirmed)
-    
-    # ЗБЕРЕЖЕННЯ: Зберігаємо вхідне повідомлення від юзера та відповідь бота
-    await save_msg(message, state)
-    await save_msg(msg, state)
-
-@dp.message(Command("cancel"), StateFilter("*"))
-async def cmd_cancel(message: types.Message, state: FSMContext):
-    await state.clear()
-    await message.answer(
-        "❌ Дія скасована. Тепер ви можете вільно користуватися іншими командами.", 
-        reply_markup=types.ReplyKeyboardRemove()
-    )
-
-@dp.message(Command("discount"), StateFilter("*"))
-async def cmd_discount(message: types.Message, state: FSMContext):
-    await state.clear()
-    user = message.from_user
-    name = user.full_name or "Мандрівник"
-    user_id = user.id
-    username = user.username or "none"
-
-    async with pool.acquire() as conn:
-        await conn.execute("""
-            INSERT INTO users (user_id, username, full_name)
-            VALUES ($1, $2, $3)
-            ON CONFLICT (user_id) DO NOTHING
-        """, user_id, username, name)
-        row = await conn.fetchrow(
-            "SELECT discount_value FROM discounts WHERE user_id = $1 AND is_used = FALSE", 
-            user_id
-        )
-
-        if row:
-            discount = row['discount_value']
-            text = f"🎁 Вітаємо, {name}, у вас є активна знижка: **{discount}%**\nВикористайте її під час бронювання наступного туру!"
-        else:
-            chance = random.random()
-            if chance < 0.70:
-                discount = random.randint(2, 3)
-            elif chance < 0.95:
-                discount = 4
-            else:
-                discount = 5
-
-            await conn.execute("""
-                INSERT INTO discounts (user_id, discount_value, is_used) 
-                VALUES ($1, $2, FALSE)
-                ON CONFLICT (user_id) DO UPDATE SET discount_value = $2, is_used = FALSE
-            """, user_id, discount)
-
-            text = f"Вітаємо, {name}! 🎉 Ви виграли знижку на наступну подорож: **{discount}%.**\nВикористайте її під час бронювання наступного туру!"
-
-    # 5. Встановлюємо стан та відправляємо відповідь
-    await state.set_state(TourRequest.start_confirmed)
-    await message.answer(
-        text, 
-        parse_mode="Markdown", 
-        reply_markup=start_inline_kb()
-    )
-
-@dp.message(Command("check_discounts"), F.from_user.id == ADMIN_ID, StateFilter("*"))
-async def check_active_discounts(message: types.Message, state: FSMContext):
-    await clean_admin_messages(state, message.chat.id)
-    async with pool.acquire() as conn:
-        rows = await conn.fetch("SELECT user_id, discount_value FROM discounts WHERE is_used = FALSE")
-        if not rows:
-            msg = await message.answer("Активних знижок зараз немає.")
-            await state.update_data(admin_msgs_to_clean=[message.message_id, msg.message_id])
-            return
-        text = "🎁 <b>Список клієнтів з активними знижками:</b>\n"
-        for row in rows:
-            text += f"👤 ID: <code>{row['user_id']}</code> — {row['discount_value']}%\n"
-        new_msg = await message.answer(text, parse_mode="HTML")
-        await state.update_data(admin_msgs_to_clean=[message.message_id, new_msg.message_id])
-
-@dp.message(Command("admin"), F.from_user.id == ADMIN_ID, StateFilter("*"))
-async def admin_start(message: types.Message, state: FSMContext):
-    await clean_admin_messages(state, message.chat.id)
-    try: await message.delete() # Видаляємо текст "/admin"
-    except: pass
-    await state.clear()
-    msg = await message.answer("🛠 <b>Панель менеджера</b>\n\nВведіть <b>ID</b> або <b>Username</b> клієнта:", parse_mode="HTML")
-    await state.update_data(admin_msgs_to_clean=[msg.message_id])
-    await show_admin_base(message, state)
+    msgs = data.get("admin_msgs_to_clean", [])
+    msgs.append(msg.message_id)
+    await state.update_data(admin_msgs_to_clean=msgs)
     await state.set_state(AdminPanel.waiting_for_client_info)
 
-@dp.message(Command("users"), F.from_user.id == ADMIN_ID, StateFilter("*"))
-async def list_users(message: types.Message, state: FSMContext):
-    await clean_admin_messages(state, message.chat.id)
-    try: await message.delete() # Видаляємо текст "/users"
-    except: pass
-    await show_admin_base(message, state)
-
-@dp.message(Command("use_discount"), F.from_user.id == ADMIN_ID, StateFilter("*"))
-async def start_use_discount(message: types.Message, state: FSMContext):
-    await clean_admin_messages(state, message.chat.id)
-    try: 
-        await message.delete()
-    except: 
-        pass
-    await state.clear()
-    
-    async with pool.acquire() as conn:
-        # Додаємо username до запиту, щоб використати його в кнопці
-        rows = await conn.fetch("""
-            SELECT u.user_id, u.full_name, u.username, d.discount_value 
-            FROM users u 
-            JOIN discounts d ON u.user_id = d.user_id 
-            WHERE d.is_used = FALSE
-        """)
-        
-    if not rows:
-        msg = await message.answer("❌ Немає активних знижок.")
-        await state.update_data(admin_msgs_to_clean=[msg.message_id])
-        await show_admin_base(message, state)
+@dp.message(Command("use_discount"), F.from_user.id == ADMIN_ID)
+async def use_discount_cmd(message: types.Message):
+    args = message.text.split()
+    if len(args) < 2 or not args[1].isdigit():
+        await message.answer("⚠️ Формат команди: <code>/use_discount [ID_Користувача]</code>", parse_mode="HTML")
         return
+    u_id = int(args[1])
+    async with pool.acquire() as conn:
+        await conn.execute("UPDATE discounts SET is_used = TRUE WHERE user_id = $1", u_id)
+    await message.answer(f"✅ Усі активні знижки для користувача <code>{u_id}</code> успішно анульовані (позначені як використані).", parse_mode="HTML")
 
-    kb = InlineKeyboardBuilder()
-    for row in rows:
-        # Формуємо текст кнопки точно як у списку туристів
-        username = f"@{row['username']}" if row['username'] else "немає"
-        button_text = f"{row['full_name']} — {username} ({row['user_id']}) | 🎁 {row['discount_value']}%"
+@dp.message(Command("users"), F.from_user.id == ADMIN_ID)
+@dp.callback_query(F.data == "adm_users", F.from_user.id == ADMIN_ID)
+async def show_users_list(event: types.Message | types.CallbackQuery, state: FSMContext):
+    if isinstance(event, types.CallbackQuery):
+        await event.message.edit_reply_markup(reply_markup=None)
+        msg_ctx = event.message
+    else:
+        msg_ctx = event
+
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("SELECT user_id, username, full_name FROM users ORDER BY created_at DESC LIMIT 30")
+    
+    if not rows:
+        await msg_ctx.answer("База даних користувачів наразі порожня.")
+        return
         
-        kb.row(types.InlineKeyboardButton(
-            text=button_text, 
-            callback_data=f"apply_{row['user_id']}")
-        )
+    text = "👥 <b>ОСТАННІ ТУРИСТИ В БАЗІ БОТА:</b>\n━━━━━━━━━━━━━━━\n"
+    for r in rows:
+        user_link = f"@{r['username']}" if r['username'] else "немає"
+        text += f"• <code>{r['user_id']}</code> — {r['full_name']} ({user_link})\n"
+    text += "━━━━━━━━━━━━━━━"
+    
+    msg = await msg_ctx.answer(text, parse_mode="HTML")
+    if isinstance(event, types.CallbackQuery):
+        data = await state.get_data()
+        msgs = data.get("admin_msgs_to_clean", [])
+        msgs.append(msg.message_id)
+        await state.update_data(admin_msgs_to_clean=msgs)
+        await show_admin_base(msg_ctx, state)
+
+# =====================================================================
+# 8. СУВОРЕ ВІДТВОРЕННЯ КОМАНД СТАРТУ ТА ЗНИЖОК ДЛЯ ТУРИСТІВ
+# =====================================================================
+
+@dp.message(Command("start"))
+async def start_cmd(message: types.Message, state: FSMContext):
+    await state.clear()
+    await track_user(message.from_user)
         
-    msg = await message.answer("🎁 <b>Оберіть клієнта для використання знижки:</b>", reply_markup=kb.as_markup(), parse_mode="HTML")
+    welcome_text = (
+        f"👋 <b>Вітаємо, {message.from_user.first_name} у trevel-боті нашої агенції!</b>\n\n"
+        f"🌴 Ми підберемо для Вас найкращі пропозиції відпочинку (Туреччина, Єгипет, Європа, Екзотика) за лічені хвилини.\n\n"
+        f"Натисніть кнопку нижче, щоб розпочати інтерактивний пошук туру своєї мрії 👇"
+    )
     
-    # Реєструємо повідомлення для чистки
-    data = await state.get_data()
-    current_msgs = data.get("admin_msgs_to_clean", [])
-    current_msgs.append(msg.message_id)
-    await state.update_data(admin_msgs_to_clean=current_msgs)
+    builder = InlineKeyboardBuilder()
+    builder.add(types.InlineKeyboardButton(text="🚀 ПОЧАТИ ПІДБІР ТУРУ", callback_data="start_selection"))
     
-    await show_admin_base(message, state)
-    
-# --- ОБРОБНИКИ СТАНІВ (З ФІЛЬТРАЦІЄЮ КОМАНД) ---
+    msg = await message.answer(welcome_text, reply_markup=builder.as_markup(), parse_mode="HTML")
+    await state.set_state(TourRequest.start_confirmed)
+    await state.update_data(msgs_to_delete=[msg.message_id])
+
+@dp.message(Command("discount"))
+async def discount_cmd(message: types.Message):
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow("SELECT discount_value FROM discounts WHERE user_id = $1 AND is_used = FALSE", message.from_user.id)
+    if row:
+        await message.answer(f"🎁 Ваша активна знижка лояльності становить: <b>{row['discount_value']}%</b>.\nВона автоматично застосується під час оформлення наступної заявки!", parse_mode="HTML")
+    else:
+        await message.answer("ℹ️ Наразі у вас немає активних індивідуальних знижок лояльності. Проте ми гарантуємо найкращі ціни на ринку під час підбору туру!")
+
+# =====================================================================
+# 9. ДІАЛОГ ПІДБОРУ ТУРУ (НЕЗМІННІ ОРИГІНАЛЬНІ ТЕКСТИ КРОКІВ)
+# =====================================================================
 
 @dp.message(TourRequest.start_confirmed, ~CommandFilter(commands=BOT_COMMANDS))
 async def check_start_input(message: types.Message, state: FSMContext):
@@ -783,44 +494,112 @@ async def check_start_input(message: types.Message, state: FSMContext):
 async def process_start_callback(callback_query: types.CallbackQuery, state: FSMContext):
     await state.clear() 
     await callback_query.message.edit_reply_markup(reply_markup=None)
-    msg = await callback_query.message.answer("🌍 Вкажіть пріоритетну країну та назву готелю (якщо визначилися)", reply_markup=types.ReplyKeyboardRemove())
+    
+    msg = await callback_query.message.answer(
+        "🌍 <b>Оберіть напрямок для відпочинку.</b>\n"
+        "Натисніть на регіон, щоб розкрити список країн, або оберіть ручне введення:", 
+        reply_markup=get_dropdown_countries_kb(),
+        parse_mode="HTML"
+    )
     await save_msg(msg, state)
     await state.set_state(TourRequest.destination)
 
+# --- КРОК 1: РОЗКРИВНИЙ СПИСОК РЕГІОНІВ ТА КРАЇН ---
+@dp.callback_query(F.data.startswith("toggle_"), TourRequest.destination)
+async def toggle_region(callback_query: types.CallbackQuery):
+    region_id = callback_query.data.split("_")[1]
+    await callback_query.message.edit_reply_markup(reply_markup=get_dropdown_countries_kb(opened_region=f"region_{region_id}"))
+    await callback_query.answer()
+
+@dp.callback_query(F.data == "toggle_close", TourRequest.destination)
+async def toggle_close_region(callback_query: types.CallbackQuery):
+    await callback_query.message.edit_reply_markup(reply_markup=get_dropdown_countries_kb())
+    await callback_query.answer()
+
+@dp.callback_query(F.data.startswith("select_country_"), TourRequest.destination)
+async def process_dropdown_selection(callback_query: types.CallbackQuery, state: FSMContext):
+    choice = callback_query.data.replace("select_country_", "")
+    
+    if choice == "other":
+        await callback_query.message.edit_reply_markup(reply_markup=None)
+        msg = await callback_query.message.answer(
+            "✍️ Будь ласка, напишіть назву країни (або конкретного готелю) вручну у повідомленні:"
+        )
+        await save_msg(msg, state)
+        await callback_query.answer()
+        return
+
+    final_destination = "Невідома країна"
+    for reg in DIAL_COUNTRIES.values():
+        if choice in reg["items"]:
+            final_destination = reg["items"][choice]
+            break
+
+    await callback_query.message.edit_reply_markup(reply_markup=None)
+    await state.update_data(destination=final_destination)
+    
+    builder = InlineKeyboardBuilder()
+    builder.add(
+        types.InlineKeyboardButton(text="1", callback_data="adults_1"),
+        types.InlineKeyboardButton(text="2", callback_data="adults_2"),
+        types.InlineKeyboardButton(text="3+", callback_data="adults_3+")
+    )
+    
+    msg1 = await callback_query.message.answer(f"✅ Напрямок: {final_destination}")
+    msg2 = await callback_query.message.answer(
+        f"👤 Оберіть кількість дорослих:", 
+        reply_markup=add_back_button(builder, "back_to_dest")
+    )
+    await save_msg(msg1, state)
+    await save_msg(msg2, state)
+    await state.set_state(TourRequest.adults_count)
+    await callback_query.answer()
+
+# --- КРОК 1: РУЧНЕ ВВЕДЕННЯ НАПРЯМКУ ---
 @dp.message(TourRequest.destination, ~CommandFilter(commands=BOT_COMMANDS))
-async def process_dest(message: types.Message, state: FSMContext):
+async def process_dest_text(message: types.Message, state: FSMContext):
     await save_msg(message, state)
-    text = message.text.strip().lower()
-    if text.isdigit() or len(text) < 2:
+    text = message.text.strip()
+    text_lower = text.lower()
+    
+    if text_lower.isdigit() or len(text_lower) < 2:
         msg = await message.answer("⚠️ Введіть назву країни літерами.")
         await save_msg(msg, state)
         return
-    replacements = {
-        "турция": "Туреччина", "туреччина": "Туреччина", "турція": "Туреччина", "анталія": "Туреччина (Анталія)", "анталия": "Туреччина (Анталія)", "кемер": "Туреччина (Кемер)", "аланія": "Туреччина (Аланія)", "белек": "Туреччина (Белек)",
-        "египет": "Єгипет", "єгипет": "Єгипет", "егіпет": "Єгипет", "єгіпет": "Єгипет", "египт": "Єгипет", "єгіпєт": "Єгипет", "егіпєт": "Єгипет", "шарм": "Єгипет (Шарм-ель-Шейх)", "хургада": "Єгипет (Хургада)", "марса": "Єгипет (Марса-Алам)",
-        "болгарія": "Болгарія", "болгария": "Болгарія", "греція": "Греція", "греция": "Греція", "крит": "Греція (Крит)",
-        "чорногорія": "Чорногорія", "черногория": "Чорногорія", "хорватія": "Хорватія", "хорватия": "Хорватія",
-        "іспанія": "Іспанія", "испания": "Іспанія", "італія": "Італія", "италия": "Італія", "кіпр": "Кіпр", "кипр": "Кіпр",
-        "албанія": "Албанія", "албания": "Албанія", "португалія": "Португалія", "португалия": "Португалія", "франція": "Франція", "франция": "Франція",
-        "оае": "ОАЕ", "оаэ": "ОАЕ", "емираты": "ОАЕ", "емірати": "ОАЕ", "дубай": "ОАЕ (Дубай)", "дубаи": "ОАЕ (Дубай)",
-        "таїланд": "Таїланд", "thailand": "Таїланд", "тайланд": "Таїланд", "тай": "Таїланд", "пхукет": "Таїланд (Пхукет)",
-        "мальдіви": "Мальдіви", "мальдивы": "Мальдіви", "мальдиви": "Мальдіви", "домінікана": "Домінікана", "доминикана": "Домінікана",
-        "занзібар": "Занзібар", "занзибар": "Занзібар", "шрі ланка": "Шрі-Ланка", "шри ланка": "Шрі-Ланка", "балі": "Балі (Індонезія)", "бали": "Балі (Індонезія)"
-    }
 
-    user_text = message.text.strip().lower()
-    final_destination = replacements.get(user_text, message.text.strip().capitalize())
+    final_destination = text.capitalize()
     await state.update_data(destination=final_destination)
+    
     builder = InlineKeyboardBuilder()
-    builder.add(types.InlineKeyboardButton(text="1", callback_data="adults_1"),
+    builder.add(
+        types.InlineKeyboardButton(text="1", callback_data="adults_1"),
         types.InlineKeyboardButton(text="2", callback_data="adults_2"),
-        types.InlineKeyboardButton(text="3+", callback_data="adults_3+"))
+        types.InlineKeyboardButton(text="3+", callback_data="adults_3+")
+    )
+    
     msg1 = await message.answer(f"✅ Напрямок: {final_destination}")
-    msg2 = await message.answer(f"👤 Оберіть кількість дорослих:", reply_markup=builder.as_markup())
+    msg2 = await message.answer(
+        f"👤 Оберіть кількість дорослих:", 
+        reply_markup=add_back_button(builder, "back_to_dest")
+    )
     await save_msg(msg1, state)
     await save_msg(msg2, state)
     await state.set_state(TourRequest.adults_count)
 
+@dp.callback_query(F.data == "back_to_dest", TourRequest.adults_count)
+async def back_to_dest(callback_query: types.CallbackQuery, state: FSMContext):
+    await callback_query.message.delete()
+    msg = await callback_query.message.answer(
+        "🌍 <b>Оберіть напрямок для відпочинку.</b>\n"
+        "Натисніть на регіон, щоб розкрити список країн, або оберіть ручне введення:", 
+        reply_markup=get_dropdown_countries_kb(),
+        parse_mode="HTML"
+    )
+    await save_msg(msg, state)
+    await state.set_state(TourRequest.destination)
+    await callback_query.answer()
+
+# --- КРОК 2: КІЛЬКІСТЬ ДОРОСЛИХ ---
 @dp.message(TourRequest.adults_count, ~CommandFilter(commands=BOT_COMMANDS))
 async def check_adults_input(message: types.Message, state: FSMContext):
     await save_msg(message, state)
@@ -832,18 +611,43 @@ async def process_adults(callback_query: types.CallbackQuery, state: FSMContext)
     await callback_query.message.edit_reply_markup(reply_markup=None)
     count = callback_query.data.split("_")[1]
     await state.update_data(adults=count)
+    
     builder = InlineKeyboardBuilder()
     builder.add(types.InlineKeyboardButton(text="Без дітей (0)", callback_data="child_0"))
-    builder.add(types.InlineKeyboardButton(text="1", callback_data="child_1"),
+    builder.add(
+        types.InlineKeyboardButton(text="1", callback_data="child_1"),
         types.InlineKeyboardButton(text="2", callback_data="child_2"),
-        types.InlineKeyboardButton(text="3+", callback_data="child_3"))
+        types.InlineKeyboardButton(text="3+", callback_data="child_3")
+    )
     builder.adjust(1, 3)
+    
     msg1 = await callback_query.message.answer(f"👤 Дорослих: {count}")
-    msg2 = await callback_query.message.answer(f"👶 Скільки буде дітей?", reply_markup=builder.as_markup())
+    msg2 = await callback_query.message.answer(
+        f"👶 Скільки будет дітей?", 
+        reply_markup=add_back_button(builder, "back_to_adults")
+    )
     await save_msg(msg1, state)
     await save_msg(msg2, state)
     await state.set_state(TourRequest.children_count)
 
+@dp.callback_query(F.data == "back_to_adults", TourRequest.children_count)
+async def back_to_adults(callback_query: types.CallbackQuery, state: FSMContext):
+    await callback_query.message.delete()
+    data = await state.get_data()
+    builder = InlineKeyboardBuilder()
+    builder.add(
+        types.InlineKeyboardButton(text="1", callback_data="adults_1"),
+        types.InlineKeyboardButton(text="2", callback_data="adults_2"),
+        types.InlineKeyboardButton(text="3+", callback_data="adults_3+")
+    )
+    msg = await callback_query.message.answer(
+        f"👤 Оберіть кількість дорослих (Поточний вибір був: {data.get('adults', 'немає')}):", 
+        reply_markup=add_back_button(builder, "back_to_dest")
+    )
+    await save_msg(msg, state)
+    await state.set_state(TourRequest.adults_count)
+
+# --- КРОК 3: КІЛЬКІСТЬ ДІТЕЙ ---
 @dp.message(TourRequest.children_count, ~CommandFilter(commands=BOT_COMMANDS))
 async def check_children_input(message: types.Message, state: FSMContext):
     await save_msg(message, state)
@@ -855,15 +659,41 @@ async def process_children(callback_query: types.CallbackQuery, state: FSMContex
     await callback_query.message.edit_reply_markup(reply_markup=None)
     count = callback_query.data.split("_")[1]
     await state.update_data(children=count)
+    
     msg1 = await callback_query.message.answer(f"👶 Дітей: {count}")
+    
+    calendar_markup = await SimpleCalendar().start_calendar()
+    calendar_markup.inline_keyboard.append([
+        types.InlineKeyboardButton(text="⬅️ Назад до вибору дітей", callback_data="back_to_children")
+    ])
+
     msg2 = await callback_query.message.answer(
         f"📅 Оберіть дату, з якої можна планувати виліт (З):", 
-        reply_markup=await SimpleCalendar().start_calendar()
+        reply_markup=calendar_markup
     )
     await save_msg(msg1, state)
     await save_msg(msg2, state)
     await state.set_state(TourRequest.date_from) 
 
+@dp.callback_query(F.data == "back_to_children", TourRequest.date_from)
+async def back_to_children(callback_query: types.CallbackQuery, state: FSMContext):
+    await callback_query.message.delete()
+    builder = InlineKeyboardBuilder()
+    builder.add(types.InlineKeyboardButton(text="Без дітей (0)", callback_data="child_0"))
+    builder.add(
+        types.InlineKeyboardButton(text="1", callback_data="child_1"),
+        types.InlineKeyboardButton(text="2", callback_data="child_2"),
+        types.InlineKeyboardButton(text="3+", callback_data="child_3")
+    )
+    builder.adjust(1, 3)
+    msg = await callback_query.message.answer(
+        f"👶 Скільки буде дітей?", 
+        reply_markup=add_back_button(builder, "back_to_adults")
+    )
+    await save_msg(msg, state)
+    await state.set_state(TourRequest.children_count)
+
+# --- КРОК 4: ДАТА ВІД (З) ---
 @dp.message(TourRequest.date_from, ~CommandFilter(commands=BOT_COMMANDS))
 async def check_date_from_input(message: types.Message, state: FSMContext):
     await save_msg(message, state)
@@ -874,17 +704,43 @@ async def check_date_from_input(message: types.Message, state: FSMContext):
 async def process_date_from(callback_query: types.CallbackQuery, callback_data: SimpleCalendarCallback, state: FSMContext):
     selected, date = await SimpleCalendar().process_selection(callback_query, callback_data)
     if selected:
+        if date.date() < datetime.now().date():
+            await callback_query.answer("⚠️ Не можна обрати дату в минулому!", show_alert=True)
+            return
+
         formatted = date.strftime("%d.%m.%Y")
         await state.update_data(date_from=formatted)
+        
         msg1 = await callback_query.message.answer(f"📅 Дата вильоту (З): {formatted}")
+        
+        calendar_markup = await SimpleCalendar().start_calendar()
+        calendar_markup.inline_keyboard.append([
+            types.InlineKeyboardButton(text="⬅️ Назад до дати (З)", callback_data="back_to_date_from")
+        ])
+
         msg2 = await callback_query.message.answer(
             f"📅 Оберіть дату, до якої можна планувати виліт (ПО):", 
-            reply_markup=await SimpleCalendar().start_calendar()
+            reply_markup=calendar_markup
         )
         await save_msg(msg1, state)
         await save_msg(msg2, state)
         await state.set_state(TourRequest.date_to)
 
+@dp.callback_query(F.data == "back_to_date_from", TourRequest.date_to)
+async def back_to_date_from(callback_query: types.CallbackQuery, state: FSMContext):
+    await callback_query.message.delete()
+    calendar_markup = await SimpleCalendar().start_calendar()
+    calendar_markup.inline_keyboard.append([
+        types.InlineKeyboardButton(text="⬅️ Назад до вибору дітей", callback_data="back_to_children")
+    ])
+    msg = await callback_query.message.answer(
+        f"📅 Оберіть дату, з якої можна планувати виліт (З):", 
+        reply_markup=calendar_markup
+    )
+    await save_msg(msg, state)
+    await state.set_state(TourRequest.date_from)
+
+# --- КРОК 5: ДАТА ДО (ПО) ---
 @dp.message(TourRequest.date_to, ~CommandFilter(commands=BOT_COMMANDS))
 async def check_date_to_input(message: types.Message, state: FSMContext):
     await save_msg(message, state)
@@ -895,30 +751,74 @@ async def check_date_to_input(message: types.Message, state: FSMContext):
 async def process_date_to(callback_query: types.CallbackQuery, callback_data: SimpleCalendarCallback, state: FSMContext):
     selected, date = await SimpleCalendar().process_selection(callback_query, callback_data)
     if selected:
+        data = await state.get_data()
+        date_from = datetime.strptime(data.get('date_from'), "%d.%m.%Y")
+        
+        if date < date_from:
+            await callback_query.answer("⚠️ Дата 'ПО' не може бути ранішою за дату 'З'!", show_alert=True)
+            return
+
         formatted = date.strftime("%d.%m.%Y")
         await state.update_data(date_to=formatted)
+        
+        builder = InlineKeyboardBuilder()
         msg1 = await callback_query.message.answer(f"✅ Дата вильоту (ПО): {formatted}")
-        msg2 = await callback_query.message.answer(f"🌙 На скільки ночей плануєте відпочинок?")
+        msg2 = await callback_query.message.answer(
+            f"🌙 На скільки ночей плануєте відпочинок?",
+            reply_markup=add_back_button(builder, "back_to_date_to")
+        )
         await save_msg(msg1, state)
         await save_msg(msg2, state)
         await state.set_state(TourRequest.nights_count)
 
+@dp.callback_query(F.data == "back_to_date_to", TourRequest.nights_count)
+async def back_to_date_to(callback_query: types.CallbackQuery, state: FSMContext):
+    await callback_query.message.delete()
+    calendar_markup = await SimpleCalendar().start_calendar()
+    calendar_markup.inline_keyboard.append([
+        types.InlineKeyboardButton(text="⬅️ Назад до дати (З)", callback_data="back_to_date_from")
+    ])
+    msg = await callback_query.message.answer(
+        f"📅 Оберіть дату, до якої можна планувати виліт (ПО):", 
+        reply_markup=calendar_markup
+    )
+    await save_msg(msg, state)
+    await state.set_state(TourRequest.date_to)
+
+# --- КРОК 6: КІЛЬКІСТЬ НОЧЕЙ ---
 @dp.message(TourRequest.nights_count, ~CommandFilter(commands=BOT_COMMANDS))
 async def process_nights(message: types.Message, state: FSMContext):
     await save_msg(message, state)
     nights_input = message.text.strip()
     
-    # Перевірка, чи є введений текст числом
     if not nights_input.isdigit():
         msg = await message.answer("⚠️ Будь ласка, введіть кількість ночей тільки цифрами (наприклад: 7):")
         await save_msg(msg, state)
         return
 
     await state.update_data(nights=nights_input)
-    msg = await message.answer("⭐ Оберіть категорію готелю", reply_markup=stars_kb())
+    builder = InlineKeyboardBuilder()
+    builder.attach(InlineKeyboardBuilder.from_markup(stars_kb()))
+
+    msg = await message.answer(
+        "⭐ Оберіть категорію готелю", 
+        reply_markup=add_back_button(builder, "back_to_nights")
+    )
     await save_msg(msg, state)
     await state.set_state(TourRequest.hotel_stars)
-    
+
+@dp.callback_query(F.data == "back_to_nights", TourRequest.hotel_stars)
+async def back_to_nights(callback_query: types.CallbackQuery, state: FSMContext):
+    await callback_query.message.delete()
+    builder = InlineKeyboardBuilder()
+    msg = await callback_query.message.answer(
+        "🌙 На скільки ночей плануєте відпочинок?",
+        reply_markup=add_back_button(builder, "back_to_date_to")
+    )
+    await save_msg(msg, state)
+    await state.set_state(TourRequest.nights_count)
+
+# --- КРОК 7: ЗІРКОВІСТЬ ГОТЕЛЮ ---
 @dp.message(TourRequest.hotel_stars, ~CommandFilter(commands=BOT_COMMANDS))
 async def check_stars_input(message: types.Message, state: FSMContext):
     await save_msg(message, state)
@@ -931,12 +831,32 @@ async def process_stars(callback_query: types.CallbackQuery, state: FSMContext):
     star = callback_query.data.split("_")[1]
     label = "Будь-яка" if star == "any" else f"{star}*"
     await state.update_data(stars=label)
+    
+    builder = InlineKeyboardBuilder()
+    builder.attach(InlineKeyboardBuilder.from_markup(meals_kb()))
+
     msg1 = await callback_query.message.answer(f"⭐ Готель: {label}")
-    msg2 = await callback_query.message.answer(f"🍴 Яке харчування Вам підходить:", reply_markup=meals_kb())
+    msg2 = await callback_query.message.answer(
+        f"🍴 Яке харчування Вам підходить:", 
+        reply_markup=add_back_button(builder, "back_to_stars")
+    )
     await save_msg(msg1, state)
     await save_msg(msg2, state)
     await state.set_state(TourRequest.meal_type)
 
+@dp.callback_query(F.data == "back_to_stars", TourRequest.meal_type)
+async def back_to_stars(callback_query: types.CallbackQuery, state: FSMContext):
+    await callback_query.message.delete()
+    builder = InlineKeyboardBuilder()
+    builder.attach(InlineKeyboardBuilder.from_markup(stars_kb()))
+    msg = await callback_query.message.answer(
+        "⭐ Оберіть категорію готелю", 
+        reply_markup=add_back_button(builder, "back_to_nights")
+    )
+    await save_msg(msg, state)
+    await state.set_state(TourRequest.hotel_stars)
+
+# --- КРОК 8: ТИП ХАРЧУВАННЯ ---
 @dp.message(TourRequest.meal_type, ~CommandFilter(commands=BOT_COMMANDS))
 async def check_meals_input(message: types.Message, state: FSMContext):
     await save_msg(message, state)
@@ -946,15 +866,33 @@ async def check_meals_input(message: types.Message, state: FSMContext):
 @dp.callback_query(F.data.startswith("meal_"), TourRequest.meal_type)
 async def process_meals(callback_query: types.CallbackQuery, state: FSMContext):
     await callback_query.message.edit_reply_markup(reply_markup=None)
-    meal_map = {"BB": "Сніданки", "HB": "Сніданок+вечеря", "AI": "Все включено", "UAI": "Ультра все включено", "RO": "Без харчування"}
+    meal_map = {"BB": "Сніданки", "HB": "Сніданок+вечеря", "AI": "Все включено", "UAI": "Ультра Все Включено", "RO": "Без харчування"}
     meal_text = meal_map.get(callback_query.data.split("_")[1], "Будь-яке")
     await state.update_data(meals=meal_text)
+    
+    builder = InlineKeyboardBuilder()
     msg1 = await callback_query.message.answer(f"🍴 Харчування: {meal_text}")
-    msg2 = await callback_query.message.answer(f"💰 Який Ви плануєте витратити бюджет у гривнях (цифрами):")
+    msg2 = await callback_query.message.answer(
+        f"💰 Який Ви плануєте витратити бюджет у гривнях (цифрами):",
+        reply_markup=add_back_button(builder, "back_to_meals")
+    )
     await save_msg(msg1, state)
     await save_msg(msg2, state)
     await state.set_state(TourRequest.budget)
 
+@dp.callback_query(F.data == "back_to_meals", TourRequest.budget)
+async def back_to_meals(callback_query: types.CallbackQuery, state: FSMContext):
+    await callback_query.message.delete()
+    builder = InlineKeyboardBuilder()
+    builder.attach(InlineKeyboardBuilder.from_markup(meals_kb()))
+    msg = await callback_query.message.answer(
+        f"🍴 Яке харчування Вам підходить:", 
+        reply_markup=add_back_button(builder, "back_to_stars")
+    )
+    await save_msg(msg, state)
+    await state.set_state(TourRequest.meal_type)
+
+# --- КРОК 9: БЮДЖЕТ ТА КНОПКА КОНТАКТУ ---
 @dp.message(TourRequest.budget, ~CommandFilter(commands=BOT_COMMANDS))
 async def process_budget(message: types.Message, state: FSMContext):
     budget_raw = message.text.lower().replace(" ", "").replace("грн", "").replace("$", "").replace("usd", "").replace("eur", "")
@@ -966,61 +904,132 @@ async def process_budget(message: types.Message, state: FSMContext):
 
     await save_msg(message, state)
     await state.update_data(budget=budget_raw)
-    msg = await message.answer("📞 Ваш номер телефону або нікнейм для зв'язку:")
+    
+    contact_keyboard = types.ReplyKeyboardMarkup(
+        keyboard=[
+            [types.KeyboardButton(text="📱 ПОДІЛИТИСЯ НОМЕРОМ", request_contact=True)]
+        ],
+        resize_keyboard=True,
+        one_time_keyboard=True
+    )
+    
+    inline_builder = InlineKeyboardBuilder()
+    msg_back_info = await message.answer(
+        "ℹ️ Якщо хочете змінити бюджет, натисніть кнопку нижче:",
+        reply_markup=add_back_button(inline_builder, "back_to_budget")
+    )
+    
+    msg = await message.answer(
+        "📞 Натисніть кнопку нижче, щоб поділитися контактом, або напишіть свій нікнейм/телефон вручну:",
+        reply_markup=contact_keyboard
+    )
+    await save_msg(msg_back_info, state)
     await save_msg(msg, state)
     await state.set_state(TourRequest.contact)
 
+@dp.callback_query(F.data == "back_to_budget", TourRequest.contact)
+async def back_to_budget(callback_query: types.CallbackQuery, state: FSMContext):
+    await callback_query.message.delete()
+    msg = await callback_query.message.answer(
+        f"💰 Який Ви плануєте витратити бюджет у гривнях (цифрами):",
+        reply_markup=add_back_button(InlineKeyboardBuilder(), "back_to_meals"),
+        reply_markup=types.ReplyKeyboardRemove()
+    )
+    await save_msg(msg, state)
+    await state.set_state(TourRequest.budget)
+
+# --- КРОК 10: СУВОРЕ ВІДТВОРЕННЯ ФІНАЛУ ТАБЛИЦІ ЗАЯВКИ ТА КНОПОК ---
 @dp.message(TourRequest.contact, ~CommandFilter(commands=BOT_COMMANDS))
 async def process_contact(message: types.Message, state: FSMContext):
     await save_msg(message, state)
+    
+    if message.contact:
+        contact_info = message.contact.phone_number
+    else:
+        contact_info = message.text
+
     data = await state.get_data()
     user = message.from_user
+    
     async with pool.acquire() as conn:
         discount_row = await conn.fetchrow(
-        "SELECT discount_value FROM discounts WHERE user_id = $1 AND is_used = FALSE", 
-        user.id
+            "SELECT discount_value FROM discounts WHERE user_id = $1 AND is_used = FALSE", 
+            user.id
         )
     discount_status = f"{discount_row['discount_value']}%" if discount_row else "Немає"
+    
     info_table = (
-f"🌍 <b>Напрямок:</b> {data.get('destination')}\n"
-f"👥 <b>Склад:</b> {data.get('adults')} дор. + {data.get('children')} діт.\n"
-f"📅 <b>Дати початку туру:</b> {data.get('date_from')} - {data.get('date_to')}\n"
-f"🌙 <b>Ночей:</b> {data.get('nights')}\n"
-f"⭐ <b>Готель:</b> {data.get('stars')}\n"
-f"🍴 <b>Харчування:</b> {data.get('meals')}\n"
-f"💰 <b>Бюджет:</b> {data.get('budget')} ГРН\n"
-f"🎁 <b>Знижка:</b> {discount_status}\n"
-f"📱 <b>Контакт:</b> {message.text}"
+        f"🌍 <b>Напрямок:</b> {data.get('destination')}\n"
+        f"👥 <b>Склад:</b> {data.get('adults')} дор. + {data.get('children')} діт.\n"
+        f"📅 <b>Дати початку туру:</b> {data.get('date_from')} - {data.get('date_to')}\n"
+        f"🌙 <b>Ночей:</b> {data.get('nights')}\n"
+        f"⭐ <b>Готель:</b> {data.get('stars')}\n"
+        f"🍴 <b>Харчування:</b> {data.get('meals')}\n"
+        f"💰 <b>Бюджет:</b> {data.get('budget')} ГРН\n"
+        f"🎁 <b>Знижка:</b> {discount_status}\n"
+        f"📱 <b>Контакт:</b> {contact_info}"
     )
+    
     report = (
-f"🔥 <b>НОВА ЗАЯВКА НА ТУР!</b>\n"
-f"━━━━━━━━━━━━━━━\n"
-f"{info_table}\n"
-f"━━━━━━━━━━━━━━━\n"
-f"👤 <b>Клієнт:</b> <a href='tg://user?id={user.id}'>{user.full_name}</a>\n"
-f"🆔 <b>Username:</b> @{user.username if user.username else 'немає'}\n"
-f"🆔 <b>ID для відгуку:</b> <code>{user.id}</code>\n"
-f"━━━━━━━━━━━━━━━"
+        f"🔥 <b>НОВА ЗАЯВКА НА ТУР!</b>\n"
+        f"━━━━━━━━━━━━━━━\n"
+        f"{info_table}\n"
+        f"━━━━━━━━━━━━━━━\n"
+        f"👤 <b>Клієнт:</b> <a href='tg://user?id={user.id}'>{user.full_name}</a>\n"
+        f"🆔 <b>Username:</b> @{user.username if user.username else 'немає'}\n"
+        f"🆔 <b>ID для відгуку:</b> <code>{user.id}</code>\n"
+        f"━━━━━━━━━━━━━━━"
     )
+    
     await bot.send_message(ADMIN_ID, report, parse_mode="HTML")
+    
     msgs_to_delete = data.get("msgs_to_delete", [])
     tasks = [bot.delete_message(chat_id=message.chat.id, message_id=m_id) for m_id in msgs_to_delete]
     if tasks:
         await asyncio.gather(*tasks, return_exceptions=True)
+        
     re_builder = ReplyKeyboardBuilder()
     re_builder.add(types.KeyboardButton(text="🔄 СТВОРИТИ НОВУ ЗАЯВКУ"))
+    
     await message.answer(
-f"✅ Дякуємо! Заявку успішно відправлено!\nМи зв'яжемося з Вами найближчим часом 😊\n\n"
-f"<b>ДЕТАЛІ ВАШОЇ ЗАЯВКИ:</b>\n"
-f"━━━━━━━━━━━━━━━\n"
-f"{info_table}\n"
-f"━━━━━━━━━━━━━━━", 
+        f"✅ Дякуємо! Заявку успішно відправлено!\nМи зв'яжемося з Вами найближчим часом 😊\n\n"
+        f"<b>ДЕТАЛІ ВАШОЇ ЗАЯВКИ:</b>\n"
+        f"━━━━━━━━━━━━━━━\n"
+        f"{info_table}\n"
+        f"━━━━━━━━━━━━━━━", 
         parse_mode="HTML",
         reply_markup=re_builder.as_markup(resize_keyboard=True)
     )
     await state.clear()
 
-# --- ОБРОБНИКИ ВІДГУКІВ ---
+# =====================================================================
+# 10. АВТОМАТИЗОВАНІ ВІДГУКИ (ТОЧНІ ОРИГІНАЛЬНІ ТЕКСТИ)
+# =====================================================================
+
+async def check_returns():
+    today_str = datetime.now().strftime("%d.%m.%Y")
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("SELECT id, user_id FROM feedbacks WHERE return_date = $1 AND sent = 0", today_str)
+        
+    for row in rows:
+        f_id, u_id = row['id'], row['user_id']
+        builder = InlineKeyboardBuilder()
+        for i in range(1, 6):
+            builder.add(types.InlineKeyboardButton(text=f"{i}⭐", callback_data=f"rate_{i}"))
+        
+        try:
+            await bot.send_message(
+                chat_id=u_id,
+                text="👋 З поверненням додому! Нам дуже цікаво дізнатися, як пройшла Ваша подорож.\n"
+                     "Будь ласка, оцініть якість нашого сервісу та туру загалом від 1 до 5:",
+                reply_markup=builder.as_markup()
+            )
+            async with pool.acquire() as conn:
+                await conn.execute("UPDATE feedbacks SET sent = 1 WHERE id = $1", f_id)
+                await conn.execute("INSERT INTO discounts (user_id, discount_value) VALUES ($1, 5) ON CONFLICT (user_id) DO UPDATE SET discount_value = 5, is_used = FALSE", u_id)
+        except Exception as e:
+            logging.error(f"Не вдалося відправити запит на відгук користувачу {u_id}: {e}")
+
 @dp.callback_query(F.data.startswith("rate_"))
 async def process_rating(callback_query: types.CallbackQuery, state: FSMContext):
     rating = int(callback_query.data.split("_")[1])
@@ -1031,21 +1040,19 @@ async def process_rating(callback_query: types.CallbackQuery, state: FSMContext)
     )
     await state.set_state(FeedbackState.waiting_for_text)
 
-async def delayed_feedback_reply(forwarded_msg, rating):
-    wait_time = random.randint(60, 600)
-    await asyncio.sleep(wait_time)
+async def send_delayed_feedback(forwarded_msg_id: int, rating: int):
     if rating == 5:
         reply_text = "😍 Неймовірно! Ми дуже раді, що відпочинок пройшов ідеально. Дякуємо, що обираєте нас! ❤️"
     elif rating == 4:
         reply_text = "😊 Дякуємо за відгук! Раді, що вам сподобалося. Будемо чекати на вас знову! ✨"
     elif rating == 3:
-        reply_text = "🙏 Дякуємо за ваш відгук. Ми обов'язково врахуємо ваші зауваження, щоб стати кращими!"
+        reply_text = "🙏 Дякуємо за ваш відгук. Ми обов'язково врахуємо ваші зауваження, щоб стать кращими!"
     else: 
         reply_text = "😔 Нам дуже прикро, що ви залишилися незадоволені. Менеджер вже вивчає ситуацію, щоб зв'язатися з вами та все владнати."
     try:
-        await forwarded_msg.reply(reply_text)
+        await bot.send_message(chat_id=REVIEWS_CHAT_ID, text=reply_text, reply_to_message_id=forwarded_msg_id)
     except Exception as e:
-        logging.error(f"Error sending delayed reply: {e}")
+        logging.error(f"Помилка надсилання відтермінованої відповіді адміна: {e}")
 
 @dp.message(FeedbackState.waiting_for_text, ~CommandFilter(commands=BOT_COMMANDS))
 async def process_feedback_text(message: types.Message, state: FSMContext):
@@ -1053,18 +1060,21 @@ async def process_feedback_text(message: types.Message, state: FSMContext):
     rating = data.get("user_rating")
     user = message.from_user
     feedback_header = (
-f"🌟 <b>НОВИЙ ВІДГУК!</b>\n"
-f"━━━━━━━━━━━━━━━\n"
-f"👤 <b>Від:</b> {user.full_name}\n"
-f"📱 <b>Username:</b> @{user.username if user.username else 'немає'}\n"
-f"⭐ <b>Оцінка:</b> {rating}⭐\n"
-f"━━━━━━━━━━━━━━━"
-)
+        f"🌟 <b>НОВИЙ ВІДГУК!</b>\n"
+        f"━━━━━━━━━━━━━━━\n"
+        f"👤 <b>Від:</b> {user.full_name}\n"
+        f"📱 <b>Username:</b> @{user.username if user.username else 'немає'}\n"
+        f"⭐ <b>Оцінка:</b> {rating}⭐\n"
+        f"━━━━━━━━━━━━━━━"
+    )
     await bot.send_message(REVIEWS_CHAT_ID, feedback_header, parse_mode="HTML")
     forwarded_msg = await message.forward(chat_id=REVIEWS_CHAT_ID)
-    await message.answer("❤️ Дякуємо за Ваш відгук! Його опубліковано у чаті мандрівників.")
+    await message.answer("❤️ Дякуємо за Ваш відгук! Його опубліковано у чаті мандрівників та нараховано 5% знижки на наступний тур!")
     await state.clear()
-    asyncio.create_task(delayed_feedback_reply(forwarded_msg, rating))
+    
+    wait_seconds = random.randint(60, 600)
+    run_time = datetime.now() + timedelta(seconds=wait_seconds)
+    scheduler.add_job(send_delayed_feedback, 'date', run_date=run_time, args=[forwarded_msg.message_id, rating])
 
 @dp.callback_query(F.data.startswith("apply_"), F.from_user.id == ADMIN_ID)
 async def apply_discount_callback(callback_query: types.CallbackQuery, state: FSMContext):
@@ -1103,7 +1113,7 @@ async def process_admin_search(message: types.Message, state: FSMContext):
     if target_id:
         await state.update_data(client_id=target_id, client_username=username)
         msg = await message.answer(
-            f"✅ Клієнта знайдено:\nID: <code>{target_id}</code>\nUser: {username}\n\nТепер оберіть дату повернення:", 
+            f"✅ Клієнта знайдено:\nID: <code>{target_id}</code>\nUser: {username}\n\nТепер оберіть дату повернення з календаря:", 
             reply_markup=await SimpleCalendar().start_calendar(),
             parse_mode="HTML"
         )
@@ -1129,16 +1139,8 @@ async def process_admin_date(callback_query: types.CallbackQuery, callback_data:
         username = data.get('client_username')
 
         async with pool.acquire() as conn:
-            # 1. Спочатку видаляємо старі записи для цього юзера, які ще не були відправлені
-            await conn.execute(
-                "DELETE FROM feedbacks WHERE user_id = $1 AND sent = 0", 
-                client_id
-            )
-            # 2. Записуємо нову актуальну дату
-            await conn.execute(
-                "INSERT INTO feedbacks (user_id, return_date, sent) VALUES ($1, $2, 0)", 
-                client_id, formatted
-            )
+            await conn.execute("DELETE FROM feedbacks WHERE user_id = $1 AND sent = 0", client_id)
+            await conn.execute("INSERT INTO feedbacks (user_id, return_date, sent) VALUES ($1, $2, 0)", client_id, formatted)
 
         await clean_admin_messages(state, callback_query.message.chat.id)
         
@@ -1152,44 +1154,43 @@ async def process_admin_date(callback_query: types.CallbackQuery, callback_data:
             parse_mode="HTML"
         )
         
-        # Оновлюємо список повідомлень для видалення та показуємо базу
         await state.update_data(admin_msgs_to_clean=[report_msg.message_id])
         await show_admin_base(callback_query.message, state)
         await state.set_state(None)
+
+# =====================================================================
+# 11. ТОЧКА ВХОДУ ТА ЖИТТЄВИЙ ЦИКЛ СЕРВЕРА (WEBHOOK)
+# =====================================================================
 
 async def on_shutdown(app: web.Application):
     global pool
     if pool:
         await pool.close()
-        logging.info("Пул БД закрито.")
+        logging.info("Пул з'єднань з БД успішно закритий.")
     scheduler.shutdown()
-    logging.info("Планувальник зупинено.")
+    logging.info("Планувальник завдань APScheduler зупинено.")
 
 async def main():
-    logging.info("--- БОТ ЗАПУСКАЄТЬСЯ (РЕЖИМ WEBHOOK) ---")
+    logging.info("--- ІНІЦІАЛІЗАЦІЯ БОТА (РЕЖИМ WEBHOOK) ---")
     
-    # 1. Ініціалізація бази даних
     await init_db()
-    logging.info("💾 База даних успішно підключена та перевірена.")
+    logging.info("💾 Структуру таблиць у PostgreSQL верифіковано.")
     
-    # Очищуємо старі завислі оновлення, щоб бот не спамив після перезапуску
     await bot.delete_webhook(drop_pending_updates=True)
     
     WEBHOOK_URL = os.getenv("WEBHOOK_URL")
     WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "super_secret_key")
     
     if not WEBHOOK_URL:
-        logging.error("🛑 КРИТИЧНА ПОМИЛКА: Змінна WEBHOOK_URL не задана в налаштуваннях Render!")
+        logging.error("🛑 КРИТИЧНА ПОМИЛКА: Змінна оточення WEBHOOK_URL порожня!")
         return
 
-    # Встановлюємо актуальний вебхук
     await bot.set_webhook(
         url=f"{WEBHOOK_URL}/webhook",
         secret_token=WEBHOOK_SECRET
     )
-    logging.info(f"🌐 Webhook успішно встановлено на: {WEBHOOK_URL}/webhook")
+    logging.info(f"🌐 Робочий Webhook встановлено на: {WEBHOOK_URL}/webhook")
     
-    # 2. Налаштування веб-додатка aiohttp
     app = web.Application()
     webhook_requests_handler = SimpleRequestHandler(
         dispatcher=dp,
@@ -1200,15 +1201,12 @@ async def main():
     setup_application(app, dp, bot=bot)
     app.on_shutdown.append(on_shutdown)
 
-    # Головна сторінка для перевірки сервісу Render (Health Check)
-    app.router.add_get("/", lambda request: web.Response(text="Bot is running smoothly under Webhook mode!"))
+    app.router.add_get("/", lambda request: web.Response(text="Travel agency core bot engine is up and running!"))
 
-    # 3. Налаштування команд меню
     user_commands = [
         types.BotCommand(command="start", description="🚀 Почати підбір туру"), 
         types.BotCommand(command="discount", description="🎁 Моя знижка")
     ]
-
     admin_commands = user_commands + [
         types.BotCommand(command="admin", description="🛠 Запит на відгук"),
         types.BotCommand(command="use_discount", description="✅ Використати знижку"),
@@ -1217,28 +1215,25 @@ async def main():
    
     await bot.set_my_commands(user_commands, scope=types.BotCommandScopeDefault())
     await bot.set_my_commands(admin_commands, scope=types.BotCommandScopeChat(chat_id=ADMIN_ID))
-    logging.info("📜 Команди меню для користувачів та адміна оновлено.")
+    logging.info("📜 Меню команд оновлено.")
  
-    # 4. Налаштування та старт планувальника завдань (APScheduler)
     scheduler.add_job(check_returns, 'cron', hour=FEEDBACK_HOUR, minute=FEEDBACK_MINUTE)
     scheduler.add_job(generate_and_send_ai_tour_post, 'cron', hour=ASSISTANT_HOUR, minute=ASSISTANT_MINUTE)
     scheduler.start()
-    logging.info(f"⏰ Планувальник запущено. Відгуки: {FEEDBACK_HOUR}:{FEEDBACK_MINUTE}, ШІ-пости: {ASSISTANT_HOUR}:{ASSISTANT_MINUTE}")
+    logging.info(f"⏰ Автоматизацію налаштовано. Опитування: {FEEDBACK_HOUR}:{FEEDBACK_MINUTE}, ШІ-контент: {ASSISTANT_HOUR}:{ASSISTANT_MINUTE}")
     
-    # 5. Запуск сервера на правильному порті (Змінено 8000 на 10000 за замовчуванням для Render)
     runner = web.AppRunner(app)
     await runner.setup()
     
-    port = int(os.environ.get("PORT", 10000))  # <--- ТУТ ТЕПЕР СУВОРО ПОРТ 10000 ДЛЯ RENDER
+    port = int(os.environ.get("PORT", 10000))
     site = web.TCPSite(runner, '0.0.0.0', port)
     await site.start()
-    logging.info(f"🚀 Сервер успішно слухає порт {port}. Очікування запитів...")
+    logging.info(f"🚀 HTTP-сервер успішно запущено на порту {port}.")
 
-    # Утримуємо асинхронний процес активним
     await asyncio.Event().wait()
 
 if __name__ == "__main__":
     try:
         asyncio.run(main())
     except (KeyboardInterrupt, SystemExit):
-        logging.info("--- БОТ ЗУПИНЕНИЙ КОРЕКТНО ---")
+        logging.info("--- БОТ ПОВНІСТЮ ЗУПИНЕНИЙ ---")
