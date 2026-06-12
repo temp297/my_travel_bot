@@ -1440,20 +1440,6 @@ async def process_contact(message: types.Message, state: FSMContext):
     else:
         contact_info = message.text.strip()
 
-    await bot.send_message(ADMIN_ID, report, parse_mode="HTML")
-    
-    # Видаляємо абсолютно всі накопичені повідомлення опитування з чату користувача
-    msgs_to_delete = data.get("msgs_to_delete", [])
-    tasks = [bot.delete_message(chat_id=message.chat.id, message_id=m_id) for m_id in msgs_to_delete]
-    if tasks:
-        await asyncio.gather(*tasks, return_exceptions=True)
-     
-    # Видаляємо системний напис про прибирання кнопок, щоб чат залишався ідеальним
-    try:
-        await bot.delete_message(chat_id=message.chat.id, message_id=message.message_id + 1)
-    except Exception:
-        pass
-
     async with pool.acquire() as conn:
         discount_row = await conn.fetchrow("SELECT discount_value FROM discounts WHERE user_id = $1 AND is_used = FALSE", user.id)
     discount_status = f"{discount_row['discount_value']}%" if discount_row else "Немає"
@@ -1481,6 +1467,13 @@ async def process_contact(message: types.Message, state: FSMContext):
         f"━━━━━━━━━━━━━━━"
     )
 
+    await bot.send_message(ADMIN_ID, report, parse_mode="HTML")
+    
+    msgs_to_delete = data.get("msgs_to_delete", [])
+    tasks = [bot.delete_message(chat_id=message.chat.id, message_id=m_id) for m_id in msgs_to_delete]
+    if tasks:
+        await asyncio.gather(*tasks, return_exceptions=True)
+
     await message.answer(
         f"✅ Дякуємо! Заявку успішно відправлено!\nМи зв'яжемося з Вами найближчим часом 😊\n\n"
         f"<b>ДЕТАЛІ ВАШОЇ ЗАЯВКИ:</b>\n"
@@ -1488,8 +1481,9 @@ async def process_contact(message: types.Message, state: FSMContext):
         f"{info_table}\n"
         f"━━━━━━━━━━━━━━━", 
         parse_mode="HTML",
-        reply_markup=re_builder.as_markup(resize_keyboard=True)
+        reply_markup=types.ReplyKeyboardRemove() # Чистимо нижню панель, кнопка пропаде
     )
+    
     await state.clear()
 
 # --- ОБРОБНИКИ ВІДГУКІВ ---
