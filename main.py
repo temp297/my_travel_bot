@@ -11,7 +11,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.utils.keyboard import InlineKeyboardBuilder, ReplyKeyboardBuilder
-from aiogram.filters import CommandFilter, Command
+from aiogram.filters import CommandStart, Command
 from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
 
 # Робота з базою даних, мережею та парсингом
@@ -39,7 +39,7 @@ AUTO_POST_CHAT_ID = int(os.getenv("AUTO_POST_CHAT_ID", 0))
 FEEDBACK_HOUR = int(os.getenv("FEEDBACK_HOUR", 18))
 FEEDBACK_MINUTE = int(os.getenv("FEEDBACK_MINUTE", 0))
 ASSISTANT_HOUR = int(os.getenv("ASSISTANT_HOUR", 17))
-ASSISTANT_MINUTE = int(os.getenv("ASSISTANT_MINUTE", 0))
+ASSISTANT_MINUTE = int(os.getenv("ASSISTANT_MINUTE", 30))
 
 # Ініціалізація ШІ моделі Gemini
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
@@ -576,7 +576,7 @@ async def admin_set_feedback_callback(callback_query: types.CallbackQuery, state
 # --- ОБРОБНИКИ СТАНІВ (ОПИТУВАННЯ ЩОДО ПАРАМЕТРІВ ТУРУ) ---
 # =====================================================================
 
-@dp.message(TourRequest.start_confirmed, ~CommandFilter(commands=BOT_COMMANDS))
+@dp.message(TourRequest.start_confirmed, ~Command(commands=BOT_COMMANDS))
 async def check_start_input(message: types.Message, state: FSMContext):
     await save_msg(message, state)
     msg = await message.answer("⚠️ Будь ласка, натисніть на кнопку «🚀 ПОЧАТИ ПІДБІР ТУРУ»")
@@ -647,7 +647,7 @@ async def process_dest_callback(callback_query: types.CallbackQuery, state: FSMC
         
     await proceed_to_adults(callback_query.message, final_destination, state)
 
-@dp.message(TourRequest.destination, ~CommandFilter(commands=BOT_COMMANDS))
+@dp.message(TourRequest.destination, ~Command(commands=BOT_COMMANDS))
 async def process_dest_text(message: types.Message, state: FSMContext):
     await save_msg(message, state)
     text = message.text.strip()
@@ -685,7 +685,7 @@ async def back_to_dest(callback_query: types.CallbackQuery, state: FSMContext):
     await save_msg(msg, state)
     await state.set_state(TourRequest.destination)
 
-@dp.message(TourRequest.adults_count, ~CommandFilter(commands=BOT_COMMANDS))
+@dp.message(TourRequest.adults_count, ~Command(commands=BOT_COMMANDS))
 async def check_adults_input(message: types.Message, state: FSMContext):
     await save_msg(message, state)
     msg = await message.answer("⚠️ Будь ласка, оберіть кількість дорослих натиснувши кнопку вище.")
@@ -730,7 +730,7 @@ async def back_to_adults(callback_query: types.CallbackQuery, state: FSMContext)
     await save_msg(msg, state)
     await state.set_state(TourRequest.adults_count)
 
-@dp.message(TourRequest.children_count, ~CommandFilter(commands=BOT_COMMANDS))
+@dp.message(TourRequest.children_count, ~Command(commands=BOT_COMMANDS))
 async def check_children_input(message: types.Message, state: FSMContext):
     await save_msg(message, state)
     msg = await message.answer("⚠️ Будь ласка, оберіть кількість дітей натиснувши кнопку вище.")
@@ -770,7 +770,7 @@ async def back_to_children(callback_query: types.CallbackQuery, state: FSMContex
     await save_msg(msg, state)
     await state.set_state(TourRequest.children_count)
 
-@dp.message(TourRequest.date_from, ~CommandFilter(commands=BOT_COMMANDS))
+@dp.message(TourRequest.date_from, ~Command(commands=BOT_COMMANDS))
 async def check_date_from_input(message: types.Message, state: FSMContext):
     await save_msg(message, state)
     msg = await message.answer("⚠️ Будь ласка, оберіть дату на календарі вище.")
@@ -803,7 +803,7 @@ async def back_to_date_from(callback_query: types.CallbackQuery, state: FSMConte
     await save_msg(msg, state)
     await state.set_state(TourRequest.date_from)
 
-@dp.message(TourRequest.date_to, ~CommandFilter(commands=BOT_COMMANDS))
+@dp.message(TourRequest.date_to, ~Command(commands=BOT_COMMANDS))
 async def check_date_to_input(message: types.Message, state: FSMContext):
     await save_msg(message, state)
     msg = await message.answer("⚠️ Будь ласка, оберіть дату на календарі вище.")
@@ -834,7 +834,7 @@ async def back_to_date_to(callback_query: types.CallbackQuery, state: FSMContext
     await save_msg(msg, state)
     await state.set_state(TourRequest.date_to)
 
-@dp.message(TourRequest.nights_count, ~CommandFilter(commands=BOT_COMMANDS))
+@dp.message(TourRequest.nights_count, ~Command(commands=BOT_COMMANDS))
 async def process_nights(message: types.Message, state: FSMContext):
     await save_msg(message, state)
     nights_input = message.text.strip()
@@ -862,7 +862,7 @@ async def back_to_nights(callback_query: types.CallbackQuery, state: FSMContext)
     await save_msg(msg, state)
     await state.set_state(TourRequest.nights_count)
     
-@dp.message(TourRequest.hotel_stars, ~CommandFilter(commands=BOT_COMMANDS))
+@dp.message(TourRequest.hotel_stars, ~Command(commands=BOT_COMMANDS))
 async def check_stars_input(message: types.Message, state: FSMContext):
     await save_msg(message, state)
     msg = await message.answer("⚠️ Будь ласка, оберіть категорію готелю кнопкою.")
@@ -892,7 +892,7 @@ async def back_to_stars(callback_query: types.CallbackQuery, state: FSMContext):
     await save_msg(msg, state)
     await state.set_state(TourRequest.hotel_stars)
 
-@dp.message(TourRequest.meal_type, ~CommandFilter(commands=BOT_COMMANDS))
+@dp.message(TourRequest.meal_type, ~Command(commands=BOT_COMMANDS))
 async def check_meals_input(message: types.Message, state: FSMContext):
     await save_msg(message, state)
     msg = await message.answer("⚠️ Будь ласка, оберіть тип харчування кнопкою.")
@@ -922,7 +922,7 @@ async def back_to_meals(callback_query: types.CallbackQuery, state: FSMContext):
     await save_msg(msg, state)
     await state.set_state(TourRequest.meal_type)
 
-@dp.message(TourRequest.budget, ~CommandFilter(commands=BOT_COMMANDS))
+@dp.message(TourRequest.budget, ~Command(commands=BOT_COMMANDS))
 async def process_budget(message: types.Message, state: FSMContext):
     budget_raw = message.text.lower().replace(" ", "").replace("грн", "").replace("$", "").replace("usd", "").replace("eur", "")
     
@@ -964,7 +964,7 @@ async def back_to_budget(callback_query: types.CallbackQuery, state: FSMContext)
     await save_msg(msg, state)
     await state.set_state(TourRequest.budget)
 
-@dp.message(TourRequest.contact, ~CommandFilter(commands=BOT_COMMANDS))
+@dp.message(TourRequest.contact, ~Command(commands=BOT_COMMANDS))
 async def process_contact(message: types.Message, state: FSMContext):
     await save_msg(message, state)
     data = await state.get_data()
@@ -1052,7 +1052,7 @@ async def delayed_feedback_reply(forwarded_msg, rating):
     except Exception as e:
         logging.error(f"Помилка відправки затриманої відповіді на відгук: {e}")
 
-@dp.message(FeedbackState.waiting_for_text, ~CommandFilter(commands=BOT_COMMANDS))
+@dp.message(FeedbackState.waiting_for_text, ~Command(commands=BOT_COMMANDS))
 async def process_feedback_text(message: types.Message, state: FSMContext):
     data = await state.get_data()
     rating = data.get("user_rating")
@@ -1088,7 +1088,7 @@ async def apply_discount_callback(callback_query: types.CallbackQuery, state: FS
         pass
     await show_admin_base(callback_query.message, state)
 
-@dp.message(AdminPanel.waiting_for_client_info, ~CommandFilter(commands=BOT_COMMANDS))
+@dp.message(AdminPanel.waiting_for_client_info, ~Command(commands=BOT_COMMANDS))
 async def process_admin_search(message: types.Message, state: FSMContext):
     input_data = message.text.strip().replace("@", "").lower()
     target_id = None
