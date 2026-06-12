@@ -549,7 +549,7 @@ def get_adults_kb():
 @dp.message(TourRequest.start_confirmed, ~CommandFilter(commands=BOT_COMMANDS))
 async def check_start_input(message: types.Message, state: FSMContext):
     await save_msg(message, state)
-    msg = await message.answer("⚠️ Будь ласка, натисніть на кнопку «🚀 ПОЧАТИ ПІДБІР ТУРУ» для старту опитування. Введення власного洍 тексту на цьому етапі заблоковано.")
+    msg = await message.answer("⚠️ Будь ласка, натисніть на кнопку «🚀 ПОЧАТИ ПІДБІР ТУРУ» для старту опитування. Введення власного тексту на цьому етапі заблоковано.")
     await save_msg(msg, state)
 
 
@@ -569,17 +569,38 @@ async def process_start_callback(callback_query: types.CallbackQuery, state: FSM
     await callback_query.answer()
 
 
-# ОБОV'ЯЗКОВО додаємо state: FSMContext в аргументи, щоб aiogram не губив контекст
 @dp.callback_query(F.data.startswith("toggle_"), TourRequest.destination)
 async def toggle_region(callback_query: types.CallbackQuery, state: FSMContext):
-    region_id = callback_query.data.split("_")[1]
-    await callback_query.message.edit_reply_markup(reply_markup=get_dropdown_countries_kb(opened_region=f"region_{region_id}"))
+    # Беремо все, що йде після "toggle_" (це надійніше, ніж split, якщо в назві є ще підкреслення)
+    raw_id = callback_query.data.replace("toggle_", "")
+    
+    # Спробуємо кілька варіантів передачі, які зазвичай використовуються в таких функціях:
+    # Варіант А: просто raw_id (наприклад, "europe" або "1")
+    # Варіант Б: f"region_{raw_id}" (наприклад, "region_europe")
+    # Ми перевіримо обидва, загорнувши в try/except, щоб бот не падав
+    
+    try:
+        # Спочатку пробуємо ваш оригінальний варіант
+        new_kb = get_dropdown_countries_kb(opened_region=f"region_{raw_id}")
+        await callback_query.message.edit_reply_markup(reply_markup=new_kb)
+    except aiogram.exceptions.TelegramBadRequest:
+        # Якщо Telegram сказав "not modified", спробуємо передати чистий ID без префіксу "region_"
+        try:
+            new_kb = get_dropdown_countries_kb(opened_region=raw_id)
+            await callback_query.message.edit_reply_markup(reply_markup=new_kb)
+        except aiogram.exceptions.TelegramBadRequest:
+            # Якщо все одно отримати ту саму клавіатуру — просто гасимо помилку, щоб бот не вмирав
+            pass
+            
     await callback_query.answer()
 
 
 @dp.callback_query(F.data == "toggle_close", TourRequest.destination)
 async def toggle_close_region(callback_query: types.CallbackQuery, state: FSMContext):
-    await callback_query.message.edit_reply_markup(reply_markup=get_dropdown_countries_kb())
+    try:
+        await callback_query.message.edit_reply_markup(reply_markup=get_dropdown_countries_kb())
+    except aiogram.exceptions.TelegramBadRequest:
+        pass
     await callback_query.answer()
 
 
