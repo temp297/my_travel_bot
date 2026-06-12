@@ -39,8 +39,8 @@ try:
     REVIEWS_CHAT_ID = int(os.getenv("REVIEWS_CHAT_ID"))
     FEEDBACK_HOUR = int(os.getenv("FEEDBACK_HOUR", "11"))
     FEEDBACK_MINUTE = int(os.getenv("FEEDBACK_MINUTE", "0"))
-    ASSISTANT_HOUR = int(os.getenv("ASSISTANT_HOUR", "9"))
-    ASSISTANT_MINUTE = int(os.getenv("ASSISTANT_MINUTE", "30"))
+    ASSISTANT_HOUR = int(os.getenv("ASSISTANT_HOUR", "19"))
+    ASSISTANT_MINUTE = int(os.getenv("ASSISTANT_MINUTE", "0"))
 except ValueError:
     raise ValueError("ADMIN_ID, REVIEWS_CHAT_ID, FEEDBACK_HOUR та FEEDBACK_MINUTE мають бути цілими числами!")
 
@@ -327,7 +327,7 @@ def get_dropdown_countries_kb(open_region_id: str = None):
             builder.row(types.InlineKeyboardButton(text=f"📂 {region['title']} (Натисніть, щоб згорнути)", callback_data="toggle_close"))
             for item_id, item_name in region["items"].items():
                 builder.row(types.InlineKeyboardButton(text=f"📍 {item_name}", callback_data=f"select_country_{item_id}"))
-        builder.row(types.InlineKeyboardButton(text="⬅️ Назад до регіонів", callback_data="toggle_close"))
+        builder.row(types.InlineKeyboardButton(text="⬅️ Назад до регіонів", callback_data="select_country_other"))
     return builder.as_markup()
 
 def generate_discount():
