@@ -1386,7 +1386,7 @@ async def process_budget(message: types.Message, state: FSMContext):
     
     msg0 = await message.answer(f"💰 Бюджет: {budget_raw} ГРН")
     msg = await message.answer(
-        "📞 Будь ласка, натисніть кнопку <b>«📱 Поділитися контактом»</b> нижче або введіть свій номер/нікнейм вручну:",
+        "📞 Будь ласка, натисніть кнопку <b>«📱 Поділитися контактом»</b> нижче",
         reply_markup=reply_builder.as_markup(resize_keyboard=True, one_time_keyboard=True),
         parse_mode="HTML"
     )
