@@ -156,6 +156,50 @@ async def init_db():
             );
         """)
 
+async def save_user(user: types.User):
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "INSERT INTO users (user_id, username, full_name) VALUES ($1, $2, $3) "
+            "ON CONFLICT (user_id) DO UPDATE SET "
+            "username = EXCLUDED.username, full_name = EXCLUDED.full_name",
+            user.id, user.username, user.full_name
+        )
+
+async def get_user_discount(user_id: int):
+    async with pool.acquire() as conn:
+        return await conn.fetchrow(
+            "SELECT discount_value FROM discounts WHERE user_id = $1 AND is_used = FALSE", 
+            user_id
+        )
+
+async def check_returns():
+    now = datetime.now(ukraine_tz)
+    today = now.strftime("%d.%m.%Y")
+    logging.info(f"🔎 [SCHEDULER] Перевірка bases на дату: {today}")
+    
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT user_id FROM feedbacks WHERE return_date = $1 AND sent = 0", 
+            today
+        )
+        
+        logging.info(f"📊 [SCHEDULER] Знайдено записів: {len(rows)}")
+        
+        for row in rows:
+            try:
+                await bot.send_message(
+                    row['user_id'],
+                    "✈️ З поверненням! Сподіваємося, Ваш відпочинок був чудовим.\n\nБудь ласка, оцініть нашу роботу:",
+                    reply_markup=rating_kb()
+                )
+                await conn.execute(
+                    "UPDATE feedbacks SET sent = 1 WHERE user_id = $1 AND return_date = $2", 
+                    row['user_id'], today
+                )
+                logging.info(f"✅ [SCHEDULER] Відгук надіслано ID: {row['user_id']}")
+            except Exception as e:
+                logging.error(f"❌ [SCHEDULER] Помилка для ID {row['user_id']}: {e}")
+
 # =====================================================================
 # --- ДОПОМІЖНІ ХЕЛПЕРИ ТА КЛАВІАТУРИ ---
 # =====================================================================
@@ -219,10 +263,54 @@ async def clean_admin_messages(state: FSMContext, chat_id: int):
     await state.update_data(admin_msgs_to_clean=[])
 
 async def show_admin_base(message: types.Message, state: FSMContext):
-    builder = InlineKeyboardBuilder()
-    builder.row(types.InlineKeyboardButton(text="⚙️ Призначити запит на відгук", callback_data="admin_set_feedback"))
-    msg = await message.answer("🛠 <b>Панель адміністратора:</b>", reply_markup=builder.as_markup(), parse_mode="HTML")
-    await state.update_data(admin_msgs_to_clean=[msg.message_id])
+    """Надсилає актуальний список туристів зі статусами відгуків"""
+    global pool
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("""
+            SELECT 
+                u.user_id, u.username, u.full_name, 
+                d.discount_value,
+                f.return_date, f.sent
+            FROM users u 
+            LEFT JOIN discounts d ON u.user_id = d.user_id AND d.is_used = FALSE
+            LEFT JOIN (
+                SELECT DISTINCT ON (user_id) user_id, return_date, sent 
+                FROM feedbacks 
+                ORDER BY user_id, id DESC
+            ) f ON u.user_id = f.user_id
+        """)
+
+    text = "👥 <b>Список туристів:</b>\n━━━━━━━━━━━━━━━\n"
+    
+    if not rows:
+        text += "База порожня."
+    else:
+        for row in rows:
+            username = f"@{row['username']}" if row['username'] else "немає"
+            name = row['full_name'] or "Ім'я не вказано"
+            discount = f" | 🎁 {row['discount_value']}%" if row['discount_value'] else ""
+            
+            feedback_status = ""
+            if row['return_date']:
+                if row['sent'] == 1:
+                    feedback_status = f"\n     └ ✅ Запит на відгук надіслано ({row['return_date']})"
+                else:
+                    feedback_status = f"\n     └ ⏳ Запит на відгук заплановано ({row['return_date']})"
+
+            text += f"👤 <b>{name}</b> — {username} (<code>{row['user_id']}</code>){discount}{feedback_status}\n"
+    
+    text += "━━━━━━━━━━━━━━━"
+    
+    new_msg = await bot.send_message(chat_id=message.chat.id, text=text, parse_mode="HTML")
+    
+    data = await state.get_data()
+    current_msgs = data.get("admin_msgs_to_clean", [])
+    current_msgs.append(new_msg.message_id)
+    await state.update_data(admin_msgs_to_clean=current_msgs)
+
+pool = None
+
+
 
 # =====================================================================
 # --- ФУНКЦІЇ ЕЛЕКТРОННОГО ПОМІЧНИКА (ПАРСИНГ ТА ШІ) ---
