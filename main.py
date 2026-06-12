@@ -18,10 +18,10 @@ from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_applicati
 import asyncpg
 import httpx
 from bs4 import BeautifulSoup
-import google.generativeai as genai
+from google import genai
 
 # Локальні модулі проекту
-from conversations import SimpleCalendar, SimpleCalendarCallback  
+from aiogram_calendar import SimpleCalendar, SimpleCalendarCallback  
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 # =====================================================================
@@ -41,14 +41,16 @@ FEEDBACK_MINUTE = int(os.getenv("FEEDBACK_MINUTE", 0))
 ASSISTANT_HOUR = int(os.getenv("ASSISTANT_HOUR", 17))
 ASSISTANT_MINUTE = int(os.getenv("ASSISTANT_MINUTE", 30))
 
-# Ініціалізація ШІ моделі Gemini
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-if GEMINI_API_KEY:
-    genai.configure(api_key=GEMINI_API_KEY)
-    ai_model = genai.GenerativeModel("gemini-pro")
+# Ініціалізація нового клієнта ШІ Gemini за допомогою google-genai
+GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")  # Виправлено назву відповідно до налаштувань у Render
+if GOOGLE_API_KEY:
+    # Створюємо клієнт для нової бібліотеки
+    ai_client = genai.Client(api_key=GOOGLE_API_KEY)
+    ai_model = "gemini-2.5-flash"  # Сучасна актуальна модель за замовчуванням
 else:
+    ai_client = None
     ai_model = None
-    logging.warning("⚠️ Ключ GEMINI_API_KEY не знайдено. Функції ШІ будуть недоступні.")
+    logging.warning("⚠️ Ключ GOOGLE_API_KEY не знайдено в Render. Функції ШІ будуть недоступні.")
 
 bot = Bot(token=API_TOKEN)
 storage = MemoryStorage()
