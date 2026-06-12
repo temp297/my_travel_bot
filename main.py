@@ -55,7 +55,7 @@ GEMINI_API_KEY = os.getenv("GOOGLE_API_KEY")    # Було GEMINI_API_KEY -> с�
 FEEDBACK_HOUR = int(os.getenv("FEEDBACK_HOUR", 12))
 FEEDBACK_MINUTE = int(os.getenv("FEEDBACK_MINUTE", 0))
 ASSISTANT_HOUR = int(os.getenv("ASSISTANT_HOUR", 12))
-ASSISTANT_MINUTE = int(os.getenv("ASSISTANT_MINUTE", 0))
+ASSISTANT_MINUTE = int(os.getenv("ASSISTANT_MINUTE", 30))
 
 # Сучасна ініціалізація клієнта Google AI
 ai_client = genai.Client(api_key=GEMINI_API_KEY)
