@@ -30,7 +30,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
-API_TOKEN = os.getenv("BOT_TOKEN")
+API_TOKEN = os.getenv("API_TOKEN")
 ADMIN_ID = int(os.getenv("ADMIN_ID", 0))
 REVIEWS_CHAT_ID = int(os.getenv("REVIEWS_CHAT_ID", 0))
 AUTO_POST_CHAT_ID = int(os.getenv("AUTO_POST_CHAT_ID", 0))
@@ -39,7 +39,7 @@ AUTO_POST_CHAT_ID = int(os.getenv("AUTO_POST_CHAT_ID", 0))
 FEEDBACK_HOUR = int(os.getenv("FEEDBACK_HOUR", 18))
 FEEDBACK_MINUTE = int(os.getenv("FEEDBACK_MINUTE", 0))
 ASSISTANT_HOUR = int(os.getenv("ASSISTANT_HOUR", 17))
-ASSISTANT_MINUTE = int(os.getenv("ASSISTANT_MINUTE", 30))
+ASSISTANT_MINUTE = int(os.getenv("ASSISTANT_MINUTE", 40))
 
 # Ініціалізація нового клієнта ШІ Gemini за допомогою google-genai
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")  # Виправлено назву відповідно до налаштувань у Render
