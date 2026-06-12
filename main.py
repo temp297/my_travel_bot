@@ -36,7 +36,7 @@ except (ImportError, ModuleNotFoundError):
 from aiogram_calendar import SimpleCalendar, SimpleCalendarCallback
 
 # =====================================================================
-# 1. НАЛАШТУВАННЯ ТА ІНІЦІАЛІЗАЦІЯ
+# 1. НАЛАШТУВАННЯ ТА ІНІЦІАЛІЗАЦІЯ (СИНХРОНІЗОВАНО З ВАШИМ RENDER)
 # =====================================================================
 
 logging.basicConfig(
@@ -44,17 +44,18 @@ logging.basicConfig(
     format="%(asctime)s - %(levelname)s - %(name)s - %(message)s"
 )
 
-BOT_TOKEN = os.getenv("BOT_TOKEN")
+# Тут назви змінних тепер ТОЧНО збігаються з вашим скриншотом:
+BOT_TOKEN = os.getenv("API_TOKEN")              # Було BOT_TOKEN -> стало API_TOKEN
 ADMIN_ID = int(os.getenv("ADMIN_ID", 0))
 REVIEWS_CHAT_ID = int(os.getenv("REVIEWS_CHAT_ID", 0))
-CHANNEL_ID = int(os.getenv("CHANNEL_ID", 0))
+CHANNEL_ID = int(os.getenv("AUTO_POST_CHAT_ID", 0)) # Було CHANNEL_ID -> стало AUTO_POST_CHAT_ID
 DATABASE_URL = os.getenv("DATABASE_URL")
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+GEMINI_API_KEY = os.getenv("GOOGLE_API_KEY")    # Було GEMINI_API_KEY -> стало GOOGLE_API_KEY
 
 FEEDBACK_HOUR = int(os.getenv("FEEDBACK_HOUR", 12))
 FEEDBACK_MINUTE = int(os.getenv("FEEDBACK_MINUTE", 0))
-ASSISTANT_HOUR = int(os.getenv("ASSISTANT_HOUR", 10))
-ASSISTANT_MINUTE = int(os.getenv("ASSISTANT_MINUTE", 55))
+ASSISTANT_HOUR = int(os.getenv("ASSISTANT_HOUR", 11))
+ASSISTANT_MINUTE = int(os.getenv("ASSISTANT_MINUTE", 0))
 
 # Сучасна ініціалізація клієнта Google AI
 ai_client = genai.Client(api_key=GEMINI_API_KEY)
@@ -332,7 +333,7 @@ async def generate_and_send_ai_tour_post():
         f"⚠️ Суворо дотримуйся наступних правил конструювання текста:\n"
         f"1. НІКОЛИ не згадуй назву сторонніх сайтів чи парсерів.\n"     
         f"2. Текст ОБОВ'ЯЗКОВО має починатися одразу з ХУДОЖНЬОГО ВСТУПУ.\n"
-        f"3. Заборони будь-які технічні чи робочі фрази типу 'Згідно з наявними даними...'.\n"
+        f"3. Заборони будь-які技術чи робочі фрази типу 'Згідно з наявними даними...'.\n"
         f"4. СУВОРЕ ПРАВИЛО ДЛЯ РОЗДІЛЕННЯ ТУРИВ: Відокремлюй картки готелів одну від одної СУВОРО одним порожнім рядком. Категорично ЗАБОРОНЕНО малювати штучні лінії ('---')!\n"
         f"5. Після художнього вступу виведи список готелів. Для КОЖНОГО готелю суворо використовуй наступний візуальний шаблон:\n\n"
         
@@ -910,7 +911,7 @@ async def process_contact(message: types.Message, state: FSMContext):
     re_builder = ReplyKeyboardBuilder()
     re_builder.add(types.KeyboardButton(text="🔄 СТВОРИТИ НОВУ ЗАЯВКУ"))
     
-    # Виправлено дублювання reply_markup!
+    # Виправлено дульнування аргументу!
     await message.answer(
         f"✅ Дякуємо! Заявку успішно відправлено!\n\n<b>ДЕТАЛІ ВАШОЇ ЗАЯВКИ:</b>\n"
         f"━━━━━━━━━━━━━━━\n{info_table}\n━━━━━━━━━━━━━━━", 
