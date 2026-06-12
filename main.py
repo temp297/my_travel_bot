@@ -309,7 +309,7 @@ async def generate_and_send_ai_tour_post():
         f"3. БЕЗ ТРАНСФЕРУ: Варіанти 'Власний транспорт / Без трансферу' дозволено брати лише в крайньому разі, якщо немає ні авіа, ні автобусів.\n"
         f"Підсумок: Завжди зберігай пріоритет транспорту (Авіа -> Автобус), але ВСЕРЕДИНІ обраного транспорту вибирай ТІЛЬКИ ті тури, де чітко включено проїзд, страховку та трансфер!\n\n"
         
-        f"⚠️ КРИТИЧНО ВАЖЛИВЕ ПРАВИЛО ДЛЯ НАЙНИЖЧОЇ ЦІНИ ТА СИНХРОНІЗАЦІЇ:\n"
+        f"⚠️ КРИТИЧНО ВАЖЛИВЕ П ПРАВИЛО ДЛЯ НАЙНИЖЧОЇ ЦІНИ ТА СИНХРОНІЗАЦІЇ:\n"
         f"- Коли алгоритм відібрав готелі за пріоритетом трансферу (наприклад, авіа з повним пакетом), вибирай серед них варіанти за ЯКІСТЮ та НАЙВИГІДНІШОЮ ціною для конкретної кількості ночей. \n"
         f"- НІКОЛИ не зліплюй ціну від дешевого автобусного туру з описом авіатуру! Ціна, тип харчування, трансфер та кількість ночей у шаблоні мають бути СУВОРО СИНХРОНІЗОВАНІ між собою для обраного варіанту.\n"
         f"- Якщо для одного готелю є кілька цін (за 4, 5 чи 7 ночей), виводь ту, яка є найпривабливішою, чітко вказавши відповідну їй кількість ночей.\n"
@@ -930,10 +930,13 @@ async def process_budget(message: types.Message, state: FSMContext):
 @dp.callback_query(F.data == "back_to_budget", TourRequest.contact)
 async def back_to_budget(callback_query: types.CallbackQuery, state: FSMContext):
     await callback_query.message.delete()
+    
+    # Створюємо інлайн-клавіатуру «Назад»
+    inline_builder = InlineKeyboardBuilder()
+    
     msg = await callback_query.message.answer(
         f"💰 Який Ви плануєте витратити бюджет у гривнях (цифрами):",
-        reply_markup=add_back_button(InlineKeyboardBuilder(), "back_to_meals"),
-        reply_markup=types.ReplyKeyboardRemove()
+        reply_markup=add_back_button(inline_builder, "back_to_meals")
     )
     await save_msg(msg, state)
     await state.set_state(TourRequest.budget)
@@ -1048,7 +1051,7 @@ async def send_delayed_feedback(forwarded_msg_id: int, rating: int):
     elif rating == 3:
         reply_text = "🙏 Дякуємо за ваш відгук. Ми обов'язково врахуємо ваші зауваження, щоб стать кращими!"
     else: 
-        reply_text = "😔 Нам дуже прикро, що ви залишилися незадоволені. Менеджер вже вивчає ситуацію, щоб зв'язатися з вами та все владнати."
+        reply_text = "😔 Нам дуже прикро, що ви залишилися незадоволені. Менеджер вже вивчає ситуацию, щоб зв'язатися з вами та все владнати."
     try:
         await bot.send_message(chat_id=REVIEWS_CHAT_ID, text=reply_text, reply_to_message_id=forwarded_msg_id)
     except Exception as e:
