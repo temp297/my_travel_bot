@@ -1390,7 +1390,6 @@ async def process_budget(message: types.Message, state: FSMContext):
         reply_markup=reply_builder.as_markup(resize_keyboard=True, one_time_keyboard=True),
         parse_mode="HTML"
     )
-    msg_inline = await message.answer("Або поверніться назад:", reply_markup=inline_builder.as_markup())
     
     await save_msg(msg0, state)
     await save_msg(msg, state)
