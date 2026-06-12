@@ -1376,19 +1376,28 @@ async def process_budget(message: types.Message, state: FSMContext):
     tasks = [bot.delete_message(chat_id=message.chat.id, message_id=m_id) for m_id in msgs_to_delete]
     if tasks:
         await asyncio.gather(*tasks, return_exceptions=True)
-    await state.update_data(msgs_to_delete=[])
+    await state.update_data(budget=budget_raw)
     
+    # Видаляємо проміжний ввід бюджету перед новим кроком
+    data = await state.get_data()
+    msgs_to_delete = data.get("msgs_to_delete", [])
+    tasks = [bot.delete_message(chat_id=message.chat.id, message_id=m_id) for m_id in msgs_to_delete]
+    if tasks:
+        await asyncio.gather(*tasks, return_exceptions=True)
+    await state.update_data(msgs_to_delete=[])
     reply_builder = ReplyKeyboardBuilder()
     reply_builder.add(types.KeyboardButton(text="📱 Поділитися контактом", request_contact=True))
     
     inline_builder = InlineKeyboardBuilder()
     add_back_button(inline_builder, "back_to_budget")
     
-    msg0 = await message.answer(f"💰 Бюджет: {budget_raw} ГРН")
-            reply_markup=inline_builder.as_markup() # Кнопка "Назад" тепер тут, без тексту "Або поверніться..."
+    msg0 = await message.answer(
+        f"💰 Бюджет: {budget_raw} ГРН", 
+        reply_markup=inline_builder.as_markup() # Кнопка "Назад" тепер тут, без тексту "Або поверніться..."
     )
+    
     msg = await message.answer(
-        "📞 Будь ласка, натисніть кнопку <b>«📱 Поділитися контактом»</b> нижче",
+        "📞 Будь ласка, натисніть кнопку <b>«📱 Поділитися контактом»</b> нижче або введіть свій номер/нікнейм вручну:",
         reply_markup=reply_builder.as_markup(resize_keyboard=True, one_time_keyboard=True),
         parse_mode="HTML"
     )
