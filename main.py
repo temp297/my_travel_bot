@@ -54,8 +54,8 @@ GEMINI_API_KEY = os.getenv("GOOGLE_API_KEY")    # Було GEMINI_API_KEY -> с�
 
 FEEDBACK_HOUR = int(os.getenv("FEEDBACK_HOUR", 12))
 FEEDBACK_MINUTE = int(os.getenv("FEEDBACK_MINUTE", 0))
-ASSISTANT_HOUR = int(os.getenv("ASSISTANT_HOUR", 11))
-ASSISTANT_MINUTE = int(os.getenv("ASSISTANT_MINUTE", 30))
+ASSISTANT_HOUR = int(os.getenv("ASSISTANT_HOUR", 12))
+ASSISTANT_MINUTE = int(os.getenv("ASSISTANT_MINUTE", 0))
 
 # Сучасна ініціалізація клієнта Google AI
 ai_client = genai.Client(api_key=GEMINI_API_KEY)
@@ -226,7 +226,12 @@ async def save_msg(message: types.Message, state: FSMContext):
 
 async def init_db():
     global pool
-    pool = await asyncpg.create_pool(DATABASE_URL)
+    # Додаємо параметри min_size та max_size, щоб не забивати ліміти бази даних
+    pool = await asyncpg.create_pool(
+        DATABASE_URL,
+        min_size=1,
+        max_size=3  # Бот використовуватиме максимум 3 з'єднання одночасно
+    )
     async with pool.acquire() as conn:
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS users (
