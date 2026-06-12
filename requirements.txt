@@ -1,8 +1,8 @@
-aiogram
+aiogram>=3.10.0
 asyncpg
 pytz
 aiohttp
-apscheduler
+apscheduler>=4.0.0a1
 aiogram-calendar
 python-dotenv
 beautifulsoup4
@@ -13,3 +13,4 @@ tgcrypto
 requests
 playwright
 httpx
+google-genai
