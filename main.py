@@ -1453,7 +1453,7 @@ async def process_contact(message: types.Message, state: FSMContext):
     info_table = (
         f"🌍 <b>Напрямок:</b> {data.get('destination')}\n"
         f"👥 <b>Склад:</b> {data.get('adults')} дор. + {data.get('children')} діт.\n"
-        f"📅 <b>Дати туру:</b> {data.get('date_from')} - {data.get('date_to')}\n"
+        f"📅 <b>Дати початку туру:</b> {data.get('date_from')} - {data.get('date_to')}\n"
         f"🌙 <b>Ночей:</b> {data.get('nights')}\n"
         f"⭐ <b>Готель:</b> {data.get('stars')}\n"
         f"🍴 <b>Харчування:</b> {data.get('meals')}\n"
