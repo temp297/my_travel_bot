@@ -545,11 +545,10 @@ async def generate_and_send_ai_tour_post():
             logging.info(f"⏩ Пропущено block '{cat['name']}', бо в парсері немає даних для цієї країни.")
             continue
 
-        # ГЕНЕРУЄМО ДИНАМІЧНЕ ПОСИЛАННЯ НА КАРТИНКУ ПЕРЕД ПРОМПТОМ
-        # loremflickr автоматично підставить фото за вказаними тегами
-        
-        random_hash = random.randint(1, 1000000)
-        country_photo_url = f"https://loremflickr.com/1200/800/{cat['img_tag']}?lock={random_hash}"
+        # Генеруємо число, яке збиває кеш як для Телеграма, так і для самого фотостоку
+        random_hash = random.randint(1, 100000)
+        # Використовуємо комбінацію тегів та обов'язковий random-параметр
+        country_photo_url = f"https://loremflickr.com/1200/800/{cat['img_tag']}?random={random_hash}"
 
         prompt = (
             f"Ти — професійний travel-копірайтер компанії. На основі НАДАНИХ ТЕКСТОВИХ ДАНИХ склади один цікавий, "
