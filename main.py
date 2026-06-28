@@ -41,7 +41,7 @@ try:
     REVIEWS_CHAT_ID = int(os.getenv("REVIEWS_CHAT_ID"))
     FEEDBACK_HOUR = int(os.getenv("FEEDBACK_HOUR", "11"))
     FEEDBACK_MINUTE = int(os.getenv("FEEDBACK_MINUTE", "0"))
-    ASSISTANT_HOUR = int(os.getenv("ASSISTANT_HOUR", "14"))
+    ASSISTANT_HOUR = int(os.getenv("ASSISTANT_HOUR", "15"))
     ASSISTANT_MINUTE = int(os.getenv("ASSISTANT_MINUTE", "45"))
 except ValueError:
     raise ValueError("ADMIN_ID, REVIEWS_CHAT_ID, FEEDBACK_HOUR та FEEDBACK_MINUTE мають бути цілими числами!")
@@ -526,11 +526,11 @@ async def generate_and_send_ai_tour_post():
 
     # Додали "img_tag" для кожної країни, щоб сервіс підбирав правильне фото
     categories = [
-        {"name": "ТУРЕЧЧИНА", "slug": "turkey", "flag": "🇹🇷", "stars": "5★, 4★, 3★", "img_tag": "turkey,bodrum", "prompt_part": "Уважно проскануй весь наданий текст. Твоє завдання — вибрати до 5 НАЙКРАЩИХ РІЗНИХ готелів СУТО в ТУРЕЧЧИНІ (шукай маркер [ПОЧАТОК БЛОКУ КРАЇНИ: TURKEY]) за суворим пріоритетом зірковості."},
-        {"name": "ЄГИПЕТ", "slug": "egypt", "flag": "🇪🇬", "stars": "5★, 4★, 3★", "img_tag": "egypt,sharm", "prompt_part": "Уважно проскануй весь наданий текст. Твоє завдання — вибрати до 5 НАЙКРАЩИХ РІЗНИХ готелів СУТО в ЄГИПТІ (шукай маркер [ПОЧАТОК БЛОКУ КРАЇНИ: EGYPT]) за суворим пріоритетом зірковості."},
-        {"name": "ГРЕЦІЯ", "slug": "greece", "flag": "🇬🇷", "stars": "5★, 4★, 3★", "img_tag": "greece,santorini", "prompt_part": "Уважно проскануй весь наданий текст. Твоє завдання — вибрати до 5 НАЙКРАЩИХ РІЗНИХ готелів СУТО в ГРЕЦІЇ (шукай маркер [ПОЧАТОК БЛОКУ КРАЇНИ: GREECE]) за суворим пріоритетом зірковості."},
-        {"name": "КІПР", "slug": "cyprus", "flag": "🇨🇾", "stars": "5★, 4★, 3★", "img_tag": "cyprus,limassol", "prompt_part": "Уважно проскануй весь наданий текст. Твоє завдання — вибрати до 5 НАЙКРАЩИХ РІЗНИХ готелів СУТО на КІПРІ (шукай маркер [ПОЧАТОК БЛОКУ КРАЇНИ: CYPRUS]) за суворим пріоритетом зірковості."},
-        {"name": "УКРАЇНА", "slug": "ukraine", "flag": "🇺🇦", "stars": "5★, 4★, 3★", "img_tag": "ukraine,lavra", "prompt_part": "Уважно проскануй весь наданий текст. Твоє завдання — вибрати до 5 НАЙКРАЩИХ РІЗНИХ готелів СУТО в УКРАЇНІ (шукай маркер [ПОЧАТОК БЛОКУ КРАЇНИ: UKRAINE]) за суворим пріоритетом зірковості."}
+        {"name": "ТУРЕЧЧИНА", "slug": "turkey", "flag": "🇹🇷", "stars": "5★, 4★, 3★", "img_tag": "turkey,travel,coast,sea", "prompt_part": "Уважно проскануй весь наданий текст. Твоє завдання — вибрати до 5 НАЙКРАЩИХ РІЗНИХ готелів СУТО в ТУРЕЧЧИНІ (шукай маркер [ПОЧАТОК БЛОКУ КРАЇНИ: TURKEY]) за суворим пріоритетом зірковості."},
+        {"name": "ЄГИПЕТ", "slug": "egypt", "flag": "🇪🇬", "stars": "5★, 4★, 3★", "img_tag": "egypt,travel,palms,sea", "prompt_part": "Уважно проскануй весь наданий текст. Твоє завдання — вибрати до 5 НАЙКРАЩИХ РІЗНИХ готелів СУТО в ЄГИПТІ (шукай маркер [ПОЧАТОК БЛОКУ КРАЇНИ: EGYPT]) за суворим пріоритетом зірковості."},
+        {"name": "ГРЕЦІЯ", "slug": "greece", "flag": "🇬🇷", "stars": "5★, 4★, 3★", "img_tag": "greece,travel,santorini,sea", "prompt_part": "Уважно проскануй весь наданий текст. Твоє завдання — вибрати до 5 НАЙКРАЩИХ РІЗНИХ готелів СУТО в ГРЕЦІЇ (шукай маркер [ПОЧАТОК БЛОКУ КРАЇНИ: GREECE]) за суворим пріоритетом зірковості."},
+        {"name": "КІПР", "slug": "cyprus", "flag": "🇨🇾", "stars": "5★, 4★, 3★", "img_tag": "cyprus,travel,ayianapa,sea", "prompt_part": "Уважно проскануй весь наданий текст. Твоє завдання — вибрати до 5 НАЙКРАЩИХ РІЗНИХ готелів СУТО на КІПРІ (шукай маркер [ПОЧАТОК БЛОКУ КРАЇНИ: CYPRUS]) за суворим пріоритетом зірковості."},
+        {"name": "УКРАЇНА", "slug": "ukraine", "flag": "🇺🇦", "stars": "5★, 4★, 3★", "img_tag": "ukraine,travel,carpathians,mountains", "prompt_part": "Уважно проскануй весь наданий текст. Твоє завдання — вибрати до 5 НАЙКРАЩИХ РІЗНИХ готелів СУТО в УКРАЇНІ (шукай маркер [ПОЧАТОК БЛОКУ КРАЇНИ: UKRAINE]) за суворим пріоритетом зірковості."}
     ]
     
     successful_posts_count = 0
@@ -547,7 +547,9 @@ async def generate_and_send_ai_tour_post():
 
         # ГЕНЕРУЄМО ДИНАМІЧНЕ ПОСИЛАННЯ НА КАРТИНКУ ПЕРЕД ПРОМПТОМ
         # loremflickr автоматично підставить фото за вказаними тегами
-        country_photo_url = f"https://loremflickr.com/1200/800/{cat['img_tag']}"
+        
+        random_hash = random.randint(1, 1000000)
+        country_photo_url = f"https://loremflickr.com/1200/800/{cat['img_tag']}?lock={random_hash}"
 
         prompt = (
             f"Ти — професійний travel-копірайтер компанії. На основі НАДАНИХ ТЕКСТОВИХ ДАНИХ склади один цікавий, "
