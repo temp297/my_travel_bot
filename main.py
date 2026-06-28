@@ -526,11 +526,126 @@ async def generate_and_send_ai_tour_post():
 
     # Додали "img_tag" для кожної країни, щоб сервіс підбирав правильне фото
     categories = [
-        {"name": "ТУРЕЧЧИНА", "slug": "turkey", "flag": "🇹🇷", "stars": "5★, 4★, 3★", "img_tag": "turkey,coast,travel,sea,sunny,summer,paradise,professional", "prompt_part": "Уважно проскануй весь наданий текст. Твоє завдання — вибрати до 5 НАЙКРАЩИХ РІЗНИХ готелів СУТО в ТУРЕЧЧИНІ (шукай маркер [ПОЧАТОК БЛОКУ КРАЇНИ: TURKEY]) за суворим пріоритетом зірковості."},
-        {"name": "ЄГИПЕТ", "slug": "egypt", "flag": "🇪🇬", "stars": "5★, 4★, 3★", "img_tag": "egypt,palms,travel,sea,sunny,summer,paradise,professional", "prompt_part": "Уважно проскануй весь наданий текст. Твоє завдання — вибрати до 5 НАЙКРАЩИХ РІЗНИХ готелів СУТО в ЄГИПТІ (шукай маркер [ПОЧАТОК БЛОКУ КРАЇНИ: EGYPT]) за суворим пріоритетом зірковості."},
-        {"name": "ГРЕЦІЯ", "slug": "greece", "flag": "🇬🇷", "stars": "5★, 4★, 3★", "img_tag": "greece,santorini,travel,sea,sunny,summer,paradise,professional", "prompt_part": "Уважно проскануй весь наданий текст. Твоє завдання — вибрати до 5 НАЙКРАЩИХ РІЗНИХ готелів СУТО в ГРЕЦІЇ (шукай маркер [ПОЧАТОК БЛОКУ КРАЇНИ: GREECE]) за суворим пріоритетом зірковості."},
-        {"name": "КІПР", "slug": "cyprus", "flag": "🇨🇾", "stars": "5★, 4★, 3★", "img_tag": "cyprus,ayianapa,travel,sea,sunny,summer,paradise,professional", "prompt_part": "Уважно проскануй весь наданий текст. Твоє завдання — вибрати до 5 НАЙКРАЩИХ РІЗНИХ готелів СУТО на КІПРІ (шукай маркер [ПОЧАТОК БЛОКУ КРАЇНИ: CYPRUS]) за суворим пріоритетом зірковості."},
-        {"name": "УКРАЇНА", "slug": "ukraine", "flag": "🇺🇦", "stars": "5★, 4★, 3★", "img_tag": "ukraine,carpathians,travel,mountains,sunny,summer,paradise,professional", "prompt_part": "Уважно проскануй весь наданий текст. Твоє завдання — вибрати до 5 НАЙКРАЩИХ РІЗНИХ готелів СУТО в УКРАЇНІ (шукай маркер [ПОЧАТОК БЛОКУ КРАЇНИ: UKRAINE]) за суворим пріоритетом зірковості."}
+        {
+            "name": "ТУРЕЧЧИНА", 
+            "slug": "turkey", 
+            "flag": "🇹🇷", 
+            "stars": "5★, 4★, 3★",
+            "prompt_part": "Уважно проскануй весь наданий текст. Твоє завдання — вибрати до 5 НАЙКРАЩИХ РІЗНИХ готелів СУТО в ТУРЕЧЧИНІ (шукай маркер [ПОЧАТОК БЛОКУ КРАЇНИ: TURKEY]) за суворим пріоритетом зірковості.",
+            "photos": [
+                "https://images.unsplash.com/photo-1542314831-068cd1dbfeeb?auto=format&fit=crop&w=1200&h=800&q=80",
+                "https://images.unsplash.com/photo-1524231757912-21f4fe3a7200?auto=format&fit=crop&w=1200&h=800&q=80",
+                "https://images.unsplash.com/photo-1512917774080-9991f1c4c750?auto=format&fit=crop&w=1200&h=800&q=80",
+                "https://images.unsplash.com/photo-1564507592333-c60657eea523?auto=format&fit=crop&w=1200&h=800&q=80",
+                "https://images.unsplash.com/photo-1571003123894-1f0594d2b5d9?auto=format&fit=crop&w=1200&h=800&q=80",
+                "https://images.unsplash.com/photo-1540555700478-4be289fbecef?auto=format&fit=crop&w=1200&h=800&q=80",
+                "https://images.unsplash.com/photo-1549144511-f099e773c147?auto=format&fit=crop&w=1200&h=800&q=80",
+                "https://images.unsplash.com/photo-1507525428034-b723cf961d3e?auto=format&fit=crop&w=1200&h=800&q=80",
+                "https://images.unsplash.com/photo-1519046904884-53103b34b206?auto=format&fit=crop&w=1200&h=800&q=80",
+                "https://images.unsplash.com/photo-1439066615861-d1af74d74000?auto=format&fit=crop&w=1200&h=800&q=80",
+                "https://images.unsplash.com/photo-1506929562872-bb421503ef21?auto=format&fit=crop&w=1200&h=800&q=80",
+                "https://images.unsplash.com/photo-1520250497591-112f2f40a3f4?auto=format&fit=crop&w=1200&h=800&q=80",
+                "https://images.unsplash.com/photo-1505118380757-91f5f5632de0?auto=format&fit=crop&w=1200&h=800&q=80",
+                "https://images.unsplash.com/photo-1515238152791-8216bfdf89a7?auto=format&fit=crop&w=1200&h=800&q=80",
+                "https://images.unsplash.com/photo-1476514525535-07fb3b4ae5f1?auto=format&fit=crop&w=1200&h=800&q=80"
+            ]
+        },
+        {
+            "name": "ЄГИПЕТ", 
+            "slug": "egypt", 
+            "flag": "🇪🇬", 
+            "stars": "5★, 4★, 3★", 
+            "prompt_part": "Уважно проскануй весь наданий текст. Твоє завдання — вибрати до 5 НАЙКРАЩИХ РІЗНИХ готелів СУТО в ЄГИПТІ (шукай маркер [ПОЧАТОК БЛОКУ КРАЇНИ: EGYPT]) за суворим пріоритетом зірковості.",
+            "photos": [
+                "https://images.unsplash.com/photo-1539650116574-8efeb43e2750?auto=format&fit=crop&w=1200&h=800&q=80",
+                "https://images.unsplash.com/photo-1504150559654-a2547274ec1f?auto=format&fit=crop&w=1200&h=800&q=80",
+                "https://images.unsplash.com/photo-1518241353330-0f7941c2d9b5?auto=format&fit=crop&w=1200&h=800&q=80",
+                "https://images.unsplash.com/photo-1506973035872-a4ec16b8e8d9?auto=format&fit=crop&w=1200&h=800&q=80",
+                "https://images.unsplash.com/photo-1544644181-1484b3fdfc62?auto=format&fit=crop&w=1200&h=800&q=80",
+                "https://images.unsplash.com/photo-1568322485981-d2bf8bfef5cc?auto=format&fit=crop&w=1200&h=800&q=80",
+                "https://images.unsplash.com/photo-1523812285510-1869e4d0d0f5?auto=format&fit=crop&w=1200&h=800&q=80",
+                "https://images.unsplash.com/photo-1509099836639-18ba1795216d?auto=format&fit=crop&w=1200&h=800&q=80",
+                "https://images.unsplash.com/photo-1582719508461-905c673771fd?auto=format&fit=crop&w=1200&h=800&q=80",
+                "https://images.unsplash.com/photo-1540541338287-41700207dee6?auto=format&fit=crop&w=1200&h=800&q=80",
+                "https://images.unsplash.com/photo-1566073771259-6a8506099945?auto=format&fit=crop&w=1200&h=800&q=80",
+                "https://images.unsplash.com/photo-1571896349842-33c89424de2d?auto=format&fit=crop&w=1200&h=800&q=80",
+                "https://images.unsplash.com/photo-1535827841776-24afc882f725?auto=format&fit=crop&w=1200&h=800&q=80",
+                "https://images.unsplash.com/photo-1590523277543-a94d2e4eb00b?auto=format&fit=crop&w=1200&h=800&q=80",
+                "https://images.unsplash.com/photo-1469854523086-cc02fe5d8800?auto=format&fit=crop&w=1200&h=800&q=80"
+            ]
+        },
+        {
+            "name": "ГРЕЦІЯ", 
+            "slug": "greece", 
+            "flag": "🇬🇷", 
+            "stars": "5★, 4★, 3★", 
+            "prompt_part": "Уважно проскануй весь наданий текст. Твоє завдання — вибрати до 5 НАЙКРАЩИХ РІЗНИХ готелів СУТО в ГРЕЦІЇ (шукай маркер [ПОЧАТОК БЛОКУ КРАЇНИ: GREECE]) за суворим пріоритетом зірковості.",
+            "photos": [
+                "https://images.unsplash.com/photo-1533105079780-92b9be482077?auto=format&fit=crop&w=1200&h=800&q=80",
+                "https://images.unsplash.com/photo-1516483638261-f4dbaf036963?auto=format&fit=crop&w=1200&h=800&q=80",
+                "https://images.unsplash.com/photo-1469796466635-455edd028a14?auto=format&fit=crop&w=1200&h=800&q=80",
+                "https://images.unsplash.com/photo-1601581875309-fafbf2d3ed3a?auto=format&fit=crop&w=1200&h=800&q=80",
+                "https://images.unsplash.com/photo-1530841377377-3ff06c0ca713?auto=format&fit=crop&w=1200&h=800&q=80",
+                "https://images.unsplash.com/photo-1504609773096-104ff2c73ba4?auto=format&fit=crop&w=1200&h=800&q=80",
+                "https://images.unsplash.com/photo-1555939594-58d7cb561ad1?auto=format&fit=crop&w=1200&h=800&q=80",
+                "https://images.unsplash.com/photo-1515260268569-9271009adfdb?auto=format&fit=crop&w=1200&h=800&q=80",
+                "https://images.unsplash.com/photo-1528127269322-539801943592?auto=format&fit=crop&w=1200&h=800&q=80",
+                "https://images.unsplash.com/photo-1501785888041-af3ef285b470?auto=format&fit=crop&w=1200&h=800&q=80",
+                "https://images.unsplash.com/photo-1470071459604-3b5ec3a7fe05?auto=format&fit=crop&w=1200&h=800&q=80",
+                "https://images.unsplash.com/photo-1441974231531-c6227db76b6e?auto=format&fit=crop&w=1200&h=800&q=80",
+                "https://images.unsplash.com/photo-1502602898657-3e91760cbb34?auto=format&fit=crop&w=1200&h=800&q=80",
+                "https://images.unsplash.com/photo-1493976040374-85c8e12f0c0e?auto=format&fit=crop&w=1200&h=800&q=80",
+                "https://images.unsplash.com/photo-1523906834658-6e24ef2386f9?auto=format&fit=crop&w=1200&h=800&q=80"
+            ]
+        },
+        {
+            "name": "КІПР", 
+            "slug": "cyprus", 
+            "flag": "🇨🇾", 
+            "stars": "5★, 4★, 3★", 
+            "prompt_part": "Уважно проскануй весь наданий текст. Твоє завдання — вибрати до 5 НАЙКРАЩИХ РІЗНИХ готелів СУТО на КІПРІ (шукай маркер [ПОЧАТОК БЛОКУ КРАЇНИ: CYPRUS]) за суворим пріоритетом зірковості.",
+            "photos": [
+                "https://images.unsplash.com/photo-1517400508447-f8dd518b86db?auto=format&fit=crop&w=1200&h=800&q=80",
+                "https://images.unsplash.com/photo-1506929562872-bb421503ef21?auto=format&fit=crop&w=1200&h=800&q=80",
+                "https://images.unsplash.com/photo-1543486338-1822940026e1?auto=format&fit=crop&w=1200&h=800&q=80",
+                "https://images.unsplash.com/photo-1589394815304-964df9c43ee6?auto=format&fit=crop&w=1200&h=800&q=80",
+                "https://images.unsplash.com/photo-1502784444187-359ac186c5bb?auto=format&fit=crop&w=1200&h=800&q=80",
+                "https://images.unsplash.com/photo-1534447677768-be436bb09401?auto=format&fit=crop&w=1200&h=800&q=80",
+                "https://images.unsplash.com/photo-1507525428034-b723cf961d3e?auto=format&fit=crop&w=1200&h=800&q=80",
+                "https://images.unsplash.com/photo-1520250497591-112f2f40a3f4?auto=format&fit=crop&w=1200&h=800&q=80",
+                "https://images.unsplash.com/photo-1473116763269-255448993f66?auto=format&fit=crop&w=1200&h=800&q=80",
+                "https://images.unsplash.com/photo-1544735716-392fe2489ffa?auto=format&fit=crop&w=1200&h=800&q=80",
+                "https://images.unsplash.com/photo-1510414842594-a61c69b5ae57?auto=format&fit=crop&w=1200&h=800&q=80",
+                "https://images.unsplash.com/photo-1471922687909-6a73da043873?auto=format&fit=crop&w=1200&h=800&q=80",
+                "https://images.unsplash.com/photo-1504609773096-104ff2c73ba4?auto=format&fit=crop&w=1200&h=800&q=80",
+                "https://images.unsplash.com/photo-1545569341-9eb8b30979d9?auto=format&fit=crop&w=1200&h=800&q=80",
+                "https://images.unsplash.com/photo-1500530855697-b586d89ba3ee?auto=format&fit=crop&w=1200&h=800&q=80"
+            ]
+        },
+        {
+            "name": "УКРАЇНА", 
+            "slug": "ukraine", 
+            "flag": "🇺🇦", 
+            "stars": "5★, 4★, 3★", 
+            "prompt_part": "Уважно проскануй весь наданий текст. Твоє завдання — вибрати до 5 НАЙКРАЩИХ РІЗНИХ готелів СУТО в УКРАЇНІ (шукай маркер [ПОЧАТОК БЛОКУ КРАЇНИ: UKRAINE]) за суворим пріоритетом зірковості.",
+            "photos": [
+                "https://images.unsplash.com/photo-1561542320-9a18cd340469?auto=format&fit=crop&w=1200&h=800&q=80",
+                "https://images.unsplash.com/photo-1527004013197-933c4bb611b3?auto=format&fit=crop&w=1200&h=800&q=80",
+                "https://images.unsplash.com/photo-1464822759023-fed622ff2c3b?auto=format&fit=crop&w=1200&h=800&q=80",
+                "https://images.unsplash.com/photo-1501854140801-50d01698950b?auto=format&fit=crop&w=1200&h=800&q=80",
+                "https://images.unsplash.com/photo-1447752875215-b2761acb3c5d?auto=format&fit=crop&w=1200&h=800&q=80",
+                "https://images.unsplash.com/photo-1472214222541-d510753a4707?auto=format&fit=crop&w=1200&h=800&q=80",
+                "https://images.unsplash.com/photo-1448375240586-882707db888b?auto=format&fit=crop&w=1200&h=800&q=80",
+                "https://images.unsplash.com/photo-1513836279014-a89f7a76ae86?auto=format&fit=crop&w=1200&h=800&q=80",
+                "https://images.unsplash.com/photo-1470240731273-7821a6eeb6bd?auto=format&fit=crop&w=1200&h=800&q=80",
+                "https://images.unsplash.com/photo-1500627869374-13cd993b1115?auto=format&fit=crop&w=1200&h=800&q=80",
+                "https://images.unsplash.com/photo-1426604966848-d7adac402bff?auto=format&fit=crop&w=1200&h=800&q=80",
+                "https://images.unsplash.com/photo-1475924156734-496f6cac6ec1?auto=format&fit=crop&w=1200&h=800&q=80",
+                "https://images.unsplash.com/photo-1502082553048-f009c37129b9?auto=format&fit=crop&w=1200&h=800&q=80",
+                "https://images.unsplash.com/photo-1518495973542-4542c06a5843?auto=format&fit=crop&w=1200&h=800&q=80",
+                "https://images.unsplash.com/photo-1433832597046-4f10e10ac764?auto=format&fit=crop&w=1200&h=800&q=80"
+            ]
+        }
     ]
     
     successful_posts_count = 0
@@ -545,10 +660,8 @@ async def generate_and_send_ai_tour_post():
             logging.info(f"⏩ Пропущено block '{cat['name']}', бо в парсері немає даних для цієї країни.")
             continue
 
-        # Генеруємо число, яке збиває кеш як для Телеграма, так і для самого фотостоку
-        random_hash = random.randint(1, 100000)
-        # Використовуємо комбінацію тегів та обов'язковий random-параметр
-        country_photo_url = f"https://loremflickr.com/1200/800/{cat['img_tag']}?random={random_hash}"
+        # Вибираємо ОДНЕ абсолютно випадкове фото з 15 штук саме для цієї країни
+        country_photo_url = random.choice(cat['photos'])
 
         prompt = (
             f"Ти — професійний travel-копірайтер компанії. На основі НАДАНИХ ТЕКСТОВИХ ДАНИХ склади один цікавий, "
