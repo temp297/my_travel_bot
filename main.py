@@ -20,6 +20,8 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.utils.keyboard import InlineKeyboardBuilder, ReplyKeyboardBuilder
 from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
 from aiogram_calendar import SimpleCalendar, SimpleCalendarCallback
+from aiogram.types import LinkPreviewOptions
+from aiogram.client.default import DefaultBotProperties
 import google.generativeai as genai
 import aiohttp
 import re
@@ -39,8 +41,8 @@ try:
     REVIEWS_CHAT_ID = int(os.getenv("REVIEWS_CHAT_ID"))
     FEEDBACK_HOUR = int(os.getenv("FEEDBACK_HOUR", "11"))
     FEEDBACK_MINUTE = int(os.getenv("FEEDBACK_MINUTE", "0"))
-    ASSISTANT_HOUR = int(os.getenv("ASSISTANT_HOUR", "11"))
-    ASSISTANT_MINUTE = int(os.getenv("ASSISTANT_MINUTE", "5"))
+    ASSISTANT_HOUR = int(os.getenv("ASSISTANT_HOUR", "14"))
+    ASSISTANT_MINUTE = int(os.getenv("ASSISTANT_MINUTE", "0"))
 except ValueError:
     raise ValueError("ADMIN_ID, REVIEWS_CHAT_ID, FEEDBACK_HOUR та FEEDBACK_MINUTE мають бути цілими числами!")
 
@@ -48,7 +50,20 @@ if not API_TOKEN or not DATABASE_URL:
     raise ValueError("Помилка: API_TOKEN або DATABASE_URL не встановлені в Environment Variables!")
 
 logging.basicConfig(level=logging.INFO)
-bot = Bot(token=API_TOKEN)
+
+# --- НОВІ НАЛАШТУВАННЯ ДЛЯ КАРТИНОК НАД ТЕКСТОМ ---
+
+default_properties = DefaultBotProperties(
+    parse_mode="HTML",
+    link_preview=LinkPreviewOptions(
+        is_disabled=False, 
+        prefer_large_media=True, 
+        show_above_text=True
+    )
+)
+
+bot = Bot(token=API_TOKEN, default=default_properties)
+# --------------------------------------------------
 
 storage = MemoryStorage()
 dp = Dispatcher(storage=storage)
@@ -622,14 +637,18 @@ async def generate_and_send_ai_tour_post():
                 continue
 
             header_text = f"🧭 <b>Навігатор дня: {cat['name'].upper()} {cat['flag']} | {current_date_str}</b>\n\n"
-            full_message = f"{header_text}{post_text}"
-            
+            full_message = f"{header_text}{post_text.strip()}"
+
             msg = await bot.send_message(
                 chat_id=CURRENT_CHAT_ID, 
                 text=full_message, 
                 parse_mode="HTML",
                 message_thread_id=NAVIGATOR_DAY_TOPIC_ID if NAVIGATOR_DAY_TOPIC_ID else None,
-                disable_web_page_preview=True
+                link_preview_options=LinkPreviewOptions(
+                    is_disabled=False,          # УВІМКНУТИ відображення фото
+                    prefer_large_media=True,    # Зробити фото великим
+                    show_above_text=True        # Відображати НАД текстом
+                )
             )
 
             async with pool.acquire() as conn:
@@ -1210,8 +1229,6 @@ async def back_to_date_to(callback_query: types.CallbackQuery, state: FSMContext
     await save_msg(msg2, state)
     await state.set_state(TourRequest.date_to)
 
-# --- НОВІ ХЕНДЛЕРИ КНОПОК ДЛЯ НОЧЕЙ ---
-
 @dp.callback_query(F.data.startswith("select_nights_"), TourRequest.nights_count)
 async def process_nights_callback(callback_query: types.CallbackQuery, state: FSMContext):
     await callback_query.answer()
@@ -1255,9 +1272,9 @@ async def back_to_nights_callback(callback_query: types.CallbackQuery, state: FS
     await state.update_data(msgs_to_delete=[])
 
     builder = InlineKeyboardBuilder()
-    for nights in range(4, 16):
+    for nights in range(1, 21):
         builder.add(types.InlineKeyboardButton(text=f"{nights}", callback_data=f"select_nights_{nights}"))
-    builder.adjust(4)
+    builder.adjust(5)
     add_back_button(builder, "back_to_date_to")
     
     msg1 = await callback_query.message.answer(f"✅ Дата вильоту (ПО): {data.get('date_to')}")
@@ -1271,8 +1288,6 @@ async def check_nights_text_block(message: types.Message, state: FSMContext):
     await save_msg(message, state)
     msg = await message.answer("⚠️ Будь ласка, оберіть кількість ночей натиснувши на кнопку із цифрою вище.")
     await save_msg(msg, state)
-
-# --- ПРОДОВЖЕННЯ СТАРИХ ХЕНДЛЕРІВ (ГОТЕЛІ, ХАРЧУВАННЯ, БЮДЖЕТ) ---
 
 @dp.message(TourRequest.hotel_stars, ~Command(commands=BOT_COMMANDS))
 async def check_stars_input(message: types.Message, state: FSMContext):
@@ -1521,7 +1536,7 @@ async def delayed_feedback_reply(forwarded_msg, rating):
     except Exception as e:
         logging.error(f"Error sending delayed reply: {e}")
 
-@dp.message(FeedbackState.waiting_for_text, ~CommandFilter(commands=BOT_COMMANDS))
+@dp.message(FeedbackState.waiting_for_text, ~Command(commands=BOT_COMMANDS))
 async def process_feedback_text(message: types.Message, state: FSMContext):
     data = await state.get_data()
     rating = data.get("user_rating")
@@ -1553,7 +1568,7 @@ async def apply_discount_callback(callback_query: types.CallbackQuery, state: FS
         pass
     await show_admin_base(callback_query.message, state)
 
-@dp.message(AdminPanel.waiting_for_client_info, ~CommandFilter(commands=BOT_COMMANDS))
+@dp.message(AdminPanel.waiting_for_client_info, ~Command(commands=BOT_COMMANDS))
 async def process_admin_search(message: types.Message, state: FSMContext):
     input_data = message.text.strip().replace("@", "").lower()
     target_id = None
