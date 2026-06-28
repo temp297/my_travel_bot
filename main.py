@@ -199,7 +199,7 @@ async def show_admin_base(message: types.Message, state: FSMContext):
     
     text += "━━━━━━━━━━━━━━━"
     
-    new_msg = await bot.send_message(chat_id=message.chat.id, text=text, parse_mode="HTML")
+    new_msg = await bot.send_message(chat_id=message.chat.id, text=text)
     
     data = await state.get_data()
     current_msgs = data.get("admin_msgs_to_clean", [])
@@ -518,7 +518,6 @@ async def generate_and_send_ai_tour_post():
             await conn.execute("DELETE FROM daily_posts")
             logging.info("✨ Таблиця вчорашніх постів в БД успішно очищена.")
 
-# --- 2. ОДНОРАЗОВИЙ СКАНОР ВСЬОГО САЙТУ ЧЕРЕЗ REQUESTS ---
     global_raw_tour_data = await fetch_tat_ua_data()
     if not global_raw_tour_data:
         logging.error("🛑 Не вдалося отримати контент із сайту. Роботу ШІ зупинено.")
@@ -607,7 +606,7 @@ async def generate_and_send_ai_tour_post():
             logging.info(f"⏳ Очікуємо 10 секунд перед обробкою ШІ для напрямку '{cat['name']}'...")
             await asyncio.sleep(10)
 
-        country_data = global_raw_tour_data.get(cat['slug'], "") if global_raw_tour_data else ""
+        country_data = global_raw_tour_data.get(cat['slug'], "")
         if not country_data:
             logging.info(f"⏩ Пропущено block '{cat['name']}', бо в парсері немає даних для цієї країни.")
             continue
@@ -715,13 +714,7 @@ async def generate_and_send_ai_tour_post():
             msg = await bot.send_message(
                 chat_id=CURRENT_CHAT_ID, 
                 text=full_message, 
-                parse_mode="HTML",
-                message_thread_id=NAVIGATOR_DAY_TOPIC_ID if NAVIGATOR_DAY_TOPIC_ID else None,
-                link_preview_options=LinkPreviewOptions(
-                    is_disabled=False,          # УВІМКНУТИ відображення фото
-                    prefer_large_media=True,    # Зробити фото великим
-                    show_above_text=True        # Відображати НАД текстом
-                )
+                message_thread_id=NAVIGATOR_DAY_TOPIC_ID if NAVIGATOR_DAY_TOPIC_ID else None
             )
 
             async with pool.acquire() as conn:
@@ -729,7 +722,7 @@ async def generate_and_send_ai_tour_post():
                 
             successful_posts_count += 1
             logging.info(f"✅ Пост для категорії '{cat['name']}' успішно опубліковано!")
-            
+           
         except Exception as ai_err:
             logging.error(f"❌ Помилка роботи ШІ Gemini для категорії {cat['name']}: {ai_err}")
 
