@@ -39,10 +39,10 @@ AUTO_POST_CHAT_ID = os.getenv("AUTO_POST_CHAT_ID")
 try:
     ADMIN_ID = int(os.getenv("ADMIN_ID"))
     REVIEWS_CHAT_ID = int(os.getenv("REVIEWS_CHAT_ID"))
-    FEEDBACK_HOUR = int(os.getenv("FEEDBACK_HOUR", "11"))
-    FEEDBACK_MINUTE = int(os.getenv("FEEDBACK_MINUTE", "0"))
-    ASSISTANT_HOUR = int(os.getenv("ASSISTANT_HOUR", "15"))
-    ASSISTANT_MINUTE = int(os.getenv("ASSISTANT_MINUTE", "45"))
+    FEEDBACK_HOUR = int(os.getenv("FEEDBACK_HOUR"))
+    FEEDBACK_MINUTE = int(os.getenv("FEEDBACK_MINUTE"))
+    ASSISTANT_HOUR = int(os.getenv("ASSISTANT_HOUR"))
+    ASSISTANT_MINUTE = int(os.getenv("ASSISTANT_MINUTE"))
 except ValueError:
     raise ValueError("ADMIN_ID, REVIEWS_CHAT_ID, FEEDBACK_HOUR та FEEDBACK_MINUTE мають бути цілими числами!")
 
@@ -445,8 +445,8 @@ async def fetch_tat_ua_data():
                     # Збираємо масив назад (5★ гарантовано та суворо стають на самий початок списку)
                     sorted_blocks = hotels_5_stars + hotels_4_stars + hotels_3_stars
                     
-                    # Беремо оптимальну вибірку з 35 готелів для аналізу ШІ
-                    selected_blocks = sorted_blocks[:35]
+                    # Беремо оптимальну вибірку з 50 готелів для аналізу ШІ
+                    selected_blocks = sorted_blocks[:50]
                     
                     # Точний перерахунок зірок, які РЕАЛЬНО потрапили у фінальну вибірку для передачі в Gemini
                     final_5_count = sum(1 for b in selected_blocks if any(x in b.lower() for x in ["5*", "5★", "5 *", "5 зірок"]))
@@ -526,11 +526,11 @@ async def generate_and_send_ai_tour_post():
 
     # Додали "img_tag" для кожної країни, щоб сервіс підбирав правильне фото
     categories = [
-        {"name": "ТУРЕЧЧИНА", "slug": "turkey", "flag": "🇹🇷", "stars": "5★, 4★, 3★", "img_tag": "turkey,travel,coast,sea", "prompt_part": "Уважно проскануй весь наданий текст. Твоє завдання — вибрати до 5 НАЙКРАЩИХ РІЗНИХ готелів СУТО в ТУРЕЧЧИНІ (шукай маркер [ПОЧАТОК БЛОКУ КРАЇНИ: TURKEY]) за суворим пріоритетом зірковості."},
-        {"name": "ЄГИПЕТ", "slug": "egypt", "flag": "🇪🇬", "stars": "5★, 4★, 3★", "img_tag": "egypt,travel,palms,sea", "prompt_part": "Уважно проскануй весь наданий текст. Твоє завдання — вибрати до 5 НАЙКРАЩИХ РІЗНИХ готелів СУТО в ЄГИПТІ (шукай маркер [ПОЧАТОК БЛОКУ КРАЇНИ: EGYPT]) за суворим пріоритетом зірковості."},
-        {"name": "ГРЕЦІЯ", "slug": "greece", "flag": "🇬🇷", "stars": "5★, 4★, 3★", "img_tag": "greece,travel,santorini,sea", "prompt_part": "Уважно проскануй весь наданий текст. Твоє завдання — вибрати до 5 НАЙКРАЩИХ РІЗНИХ готелів СУТО в ГРЕЦІЇ (шукай маркер [ПОЧАТОК БЛОКУ КРАЇНИ: GREECE]) за суворим пріоритетом зірковості."},
-        {"name": "КІПР", "slug": "cyprus", "flag": "🇨🇾", "stars": "5★, 4★, 3★", "img_tag": "cyprus,travel,ayianapa,sea", "prompt_part": "Уважно проскануй весь наданий текст. Твоє завдання — вибрати до 5 НАЙКРАЩИХ РІЗНИХ готелів СУТО на КІПРІ (шукай маркер [ПОЧАТОК БЛОКУ КРАЇНИ: CYPRUS]) за суворим пріоритетом зірковості."},
-        {"name": "УКРАЇНА", "slug": "ukraine", "flag": "🇺🇦", "stars": "5★, 4★, 3★", "img_tag": "ukraine,travel,carpathians,mountains", "prompt_part": "Уважно проскануй весь наданий текст. Твоє завдання — вибрати до 5 НАЙКРАЩИХ РІЗНИХ готелів СУТО в УКРАЇНІ (шукай маркер [ПОЧАТОК БЛОКУ КРАЇНИ: UKRAINE]) за суворим пріоритетом зірковості."}
+        {"name": "ТУРЕЧЧИНА", "slug": "turkey", "flag": "🇹🇷", "stars": "5★, 4★, 3★", "img_tag": "turkey,coast,travel,sea,sunny,summer,paradise,professional", "prompt_part": "Уважно проскануй весь наданий текст. Твоє завдання — вибрати до 5 НАЙКРАЩИХ РІЗНИХ готелів СУТО в ТУРЕЧЧИНІ (шукай маркер [ПОЧАТОК БЛОКУ КРАЇНИ: TURKEY]) за суворим пріоритетом зірковості."},
+        {"name": "ЄГИПЕТ", "slug": "egypt", "flag": "🇪🇬", "stars": "5★, 4★, 3★", "img_tag": "egypt,palms,travel,sea,sunny,summer,paradise,professional", "prompt_part": "Уважно проскануй весь наданий текст. Твоє завдання — вибрати до 5 НАЙКРАЩИХ РІЗНИХ готелів СУТО в ЄГИПТІ (шукай маркер [ПОЧАТОК БЛОКУ КРАЇНИ: EGYPT]) за суворим пріоритетом зірковості."},
+        {"name": "ГРЕЦІЯ", "slug": "greece", "flag": "🇬🇷", "stars": "5★, 4★, 3★", "img_tag": "greece,santorini,travel,sea,sunny,summer,paradise,professional", "prompt_part": "Уважно проскануй весь наданий текст. Твоє завдання — вибрати до 5 НАЙКРАЩИХ РІЗНИХ готелів СУТО в ГРЕЦІЇ (шукай маркер [ПОЧАТОК БЛОКУ КРАЇНИ: GREECE]) за суворим пріоритетом зірковості."},
+        {"name": "КІПР", "slug": "cyprus", "flag": "🇨🇾", "stars": "5★, 4★, 3★", "img_tag": "cyprus,ayianapa,travel,sea,sunny,summer,paradise,professional", "prompt_part": "Уважно проскануй весь наданий текст. Твоє завдання — вибрати до 5 НАЙКРАЩИХ РІЗНИХ готелів СУТО на КІПРІ (шукай маркер [ПОЧАТОК БЛОКУ КРАЇНИ: CYPRUS]) за суворим пріоритетом зірковості."},
+        {"name": "УКРАЇНА", "slug": "ukraine", "flag": "🇺🇦", "stars": "5★, 4★, 3★", "img_tag": "ukraine,carpathians,travel,mountains,sunny,summer,paradise,professional", "prompt_part": "Уважно проскануй весь наданий текст. Твоє завдання — вибрати до 5 НАЙКРАЩИХ РІЗНИХ готелів СУТО в УКРАЇНІ (шукай маркер [ПОЧАТОК БЛОКУ КРАЇНИ: UKRAINE]) за суворим пріоритетом зірковості."}
     ]
     
     successful_posts_count = 0
