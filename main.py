@@ -354,16 +354,11 @@ def generate_discount():
     else:
         return 5
 
+
+
 # --- ФУНКЦІЇ ЕЛЕКТРОННОГО ПОМІЧНИКА (ПАРСИНГ ТА ШІ) ---
 
 async def fetch_tat_ua_data():
-# ---     country_urls = {
-# ---         "turkey": "https://tat.ua/search/turkey/",
-# ---         "egypt": "https://tat.ua/search/egypt/",
-# ---         "greece": "https://tat.ua/search/greece/",
-# ---         "cyprus": "https://tat.ua/search/cyprus/",
-# ---         "ukraine": "https://tat.ua/search/ukraine/"
-# ---    }
     country_urls = {
         "turkey": "https://navigo.nniif.org.ua/",
         "egypt": "https://navigo.nniif.org.ua/",
@@ -372,111 +367,104 @@ async def fetch_tat_ua_data():
         "ukraine": "https://navigo.nniif.org.ua/"
     }
     
-    # Ротуємо заголовки для повної імітації реального браузера (захист від блокувань)
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
-        "Accept-Language": "uk-UA,uk;q=0.9,en-US;q=0.8,en;q=0.7",
-        "Referer": "https://turne.ua/ua/hottours",
-        "Cache-Control": "no-cache",
-        "Connection": "keep-alive"
-    }
-    
-    logging.info(f"🚀 [ПАРСЕР] Початок ОДНОРАЗОВОГО швидкого збору даних з сортуванням зірковості через HTTPX...")
+    logging.info("🚀 [ПАРСЕР] Початок збору даних із ПРОКРУТКОЮ СТОРІНКИ через Playwright...")
     cleaned_country_data = {}
-    max_pages_per_country = 1 
     
     try:
-        # Відкриваємо асинхронну сесію клієнта
-        async with httpx.AsyncClient(headers=headers, timeout=20.0, follow_redirects=True) as client:
-            for country_slug, base_url in country_urls.items():
+        # Запускаємо асинхронний браузер Chromium у фоновому режимі (headless=True)
+        async with async_playwright() as p:
+            browser = await p.chromium.launch(
+                headless=True,
+                args=["--no-sandbox", "--disable-setuid-sandbox"] # Для безпечного запуску в Docker / VPS
+            )
+            
+            context = await browser.new_context(
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+                viewport={"width": 1920, "height": 1080}
+            )
+            
+            for country_slug, url in country_urls.items():
                 logging.info(f"🌍 Збираємо пропозиції для напрямку: {country_slug.upper()}")
-                country_raw_blocks = []
+                page = await context.new_page()
                 
-                for page_num in range(1, max_pages_per_country + 1):
-                    url = base_url if page_num == 1 else f"{base_url}?page={page_num}"
+                try:
+                    # Переходимо на сайт та чекаємо первинного завантаження мережі
+                    await page.goto(url, wait_until="networkidle", timeout=35000)
                     
-                    try:
-                        # Асинхронний безпечний HTTP-запит (не блокує Event Loop бота)
-                        response = await client.get(url)
-                        if response.status_code == 200:
-                            soup = BeautifulSoup(response.text, 'html.parser')
-                            
-                            # Видаляємо важкі елементи коду (скрипти, стилі, іконки svg) для економії пам'яті
-                            for element in soup(["script", "style", "header", "footer", "nav", "aside", "form", "svg"]):
-                                element.decompose()
-                                
-                            page_text = " ".join(soup.get_text(separator=" ", strip=True).split())
-                            
-                            if "грн" in page_text or "ноч" in page_text:
-                                # Розбиваємо сирий текст сторінки за маркером валюти на окремі сутності
-                                raw_hotel_blocks = page_text.split("грн")
-                                for b in raw_hotel_blocks:
-                                    cleaned_block = b.strip()
-                                    if len(cleaned_block) > 100 and ("ноч" in cleaned_block or "*" in cleaned_block or "★" in cleaned_block):
-                                        country_raw_blocks.append(cleaned_block + " грн")
-                            else:
-                                break
-                        else:
-                            logging.warning(f"⚠️ Статус-код {response.status_code} для сторінки {page_num} ({country_slug})")
-                            break
+                    # --- БЛОК ПРОКРУТКИ СТОРІНКИ ВНИЗ ДЛЯ ПОДВАНТАЖЕННЯ ВСІХ ТУРІВ ---
+                    scroll_passes = 5  # Кількість прокруток вниз
+                    for i in range(scroll_passes):
+                        await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+                        logging.info(f"📜 Прокрутка {i + 1}/{scroll_passes} для {country_slug.upper()}...")
+                        await page.wait_for_timeout(1500)  # Пауза 1.5 сек, щоб JS встиг завантажити нові тури
+                    
+                    # Забираємо повний рендерений HTML-код сторінки
+                    content = await page.content()
+                    soup = BeautifulSoup(content, 'html.parser')
+                    
+                    # Видаляємо непотрібні елементи для економії пам'яті
+                    for element in soup(["script", "style", "header", "footer", "nav", "aside", "form", "svg"]):
+                        element.decompose()
                         
-                        # Коректна неблокуюча пауза між запитами
-                        await asyncio.sleep(0.5)
-                        
-                    except Exception as page_err:
-                        logging.error(f"❌ Помилка пагінації {page_num} для {country_slug}: {page_err}")
-                        continue
+                    page_text = " ".join(soup.get_text(separator=" ", strip=True).split())
+                    
+                    country_raw_blocks = []
+                    if "грн" in page_text or "ноч" in page_text:
+                        raw_hotel_blocks = page_text.split("грн")
+                        for b in raw_hotel_blocks:
+                            cleaned_block = b.strip()
+                            if len(cleaned_block) > 100 and ("ноч" in cleaned_block or "*" in cleaned_block or "★" in cleaned_block):
+                                country_raw_blocks.append(cleaned_block + " грн")
 
-                # --- РОЗУМНЕ СОРТУВАННЯ ТА ПЕРЕМІШУВАННЯ ---
-                if country_raw_blocks:
-                    hotels_5_stars = []
-                    hotels_4_stars = []
-                    hotels_3_stars = []
-                    
-                    for block in country_raw_blocks:
-                        b_low = block.lower()
-                        # «Всеїдний» пошук за всіма можливими текстовими варіаціями зірок на сайті
-                        if "5*" in b_low or "5★" in b_low or "5 *" in b_low or "5 зірок" in b_low:
-                            hotels_5_stars.append(block)
-                        elif "4*" in b_low or "4★" in b_low or "4 *" in b_low or "4 зірок" in b_low:
-                            hotels_4_stars.append(block)
-                        else:
-                            hotels_3_stars.append(block)
-                    
-                    # Перемішуємо кожну категорію окремо, щоб пости щодня були різноманітними
-                    random.shuffle(hotels_5_stars)
-                    random.shuffle(hotels_4_stars)
-                    random.shuffle(hotels_3_stars)
-                    
-                    # Збираємо масив назад (5★ гарантовано та суворо стають на самий початок списку)
-                    sorted_blocks = hotels_5_stars + hotels_4_stars + hotels_3_stars
-                    
-                    # Беремо оптимальну вибірку з 50 готелів для аналізу ШІ
-                    selected_blocks = sorted_blocks[:50]
-                    
-                    # Точний перерахунок зірок, які РЕАЛЬНО потрапили у фінальну вибірку для передачі в Gemini
-                    final_5_count = sum(1 for b in selected_blocks if any(x in b.lower() for x in ["5*", "5★", "5 *", "5 зірок"]))
-                    final_4_count = sum(1 for b in selected_blocks if any(x in b.lower() for x in ["4*", "4★", "4 *", "4 зірок"]))
-                    
-                    country_text_combined = " | ".join(selected_blocks)
-                    final_chunk = " ".join(country_text_combined.split())
-                    
-                    if len(final_chunk) > 200:
-                        cleaned_country_data[country_slug] = (
-                            f"\n=== ПОЧАТОК БЛОКУ КРАЇНИ: {country_slug.upper()} ===\n"
-                            f"{final_chunk}"
-                            f"\n=== КІНЕЦЬ БЛОКУ КРАЇНИ: {country_slug.upper()} ===\n"
-                        )
-                        # Тепер логи відображатимуть реальні та чесні цифри знайдених готелів
-                        logging.info(f"🎯 Сортування завершено ({country_slug.upper()}): Передано ШІ {final_5_count}шт 5★ та {final_4_count}шт 4★. (Всього у вибірці: {len(selected_blocks)} готелів).")
-                else:
-                    logging.warning(f"⚠️ Не вдалося виділити готелі для напрямку {country_slug.upper()}")
-                    
-            return cleaned_country_data if cleaned_country_data else None
+                    # --- РОЗУМНЕ СОРТУВАННЯ ТА ПЕРЕМІШУВАННЯ ---
+                    if country_raw_blocks:
+                        hotels_5_stars = []
+                        hotels_4_stars = []
+                        hotels_3_stars = []
+                        
+                        for block in country_raw_blocks:
+                            b_low = block.lower()
+                            if any(x in b_low for x in ["5*", "5★", "5 *", "5 зірок"]):
+                                hotels_5_stars.append(block)
+                            elif any(x in b_low for x in ["4*", "4★", "4 *", "4 зірок"]):
+                                hotels_4_stars.append(block)
+                            else:
+                                hotels_3_stars.append(block)
+                        
+                        random.shuffle(hotels_5_stars)
+                        random.shuffle(hotels_4_stars)
+                        random.shuffle(hotels_3_stars)
+                        
+                        sorted_blocks = hotels_5_stars + hotels_4_stars + hotels_3_stars
+                        selected_blocks = sorted_blocks[:50]
+                        
+                        final_5_count = sum(1 for b in selected_blocks if any(x in b.lower() for x in ["5*", "5★", "5 *", "5 зірок"]))
+                        final_4_count = sum(1 for b in selected_blocks if any(x in b.lower() for x in ["4*", "4★", "4 *", "4 зірок"]))
+                        
+                        country_text_combined = " | ".join(selected_blocks)
+                        final_chunk = " ".join(country_text_combined.split())
+                        
+                        if len(final_chunk) > 200:
+                            cleaned_country_data[country_slug] = (
+                                f"\n=== ПОЧАТОК БЛОКУ КРАЇНИ: {country_slug.upper()} ===\n"
+                                f"{final_chunk}"
+                                f"\n=== КІНЕЦЬ БЛОКУ КРАЇНИ: {country_slug.upper()} ===\n"
+                            )
+                            logging.info(f"🎯 Сортування завершено ({country_slug.upper()}): Отримано {len(country_raw_blocks)} турів. Передано ШІ {final_5_count}шт 5★ та {final_4_count}шт 4★.")
+                    else:
+                        logging.warning(f"⚠️ Не вдалося виділити готелі для напрямку {country_slug.upper()}")
+
+                except Exception as page_err:
+                    logging.error(f"❌ Помилка обробки сторінки {country_slug}: {page_err}")
+                finally:
+                    await page.close()
+
+            await browser.close()
+
+        return cleaned_country_data if cleaned_country_data else None
 
     except Exception as e:
-        logging.error(f"❌ Загальна помилка під час збору даних: {e}")
+        logging.error(f"❌ Загальна помилка під час роботи Playwright: {e}")
         return None
 
 async def generate_and_send_ai_tour_post():
@@ -530,7 +518,7 @@ async def generate_and_send_ai_tour_post():
         logging.error("🛑 Не вдалося отримати контент із сайту. Роботу ШІ зупинено.")
         return
 
-# Базовий шаблон для всіх фото з Unsplash (щоб не дублювати його в коді 75 разів)
+    # Базовий шаблон для всіх фото з Unsplash
     UNSPLASH_BASE_URL = "https://images.unsplash.com/{}?fm=jpg&fit=crop&w=1000&h=562&q=75"
 
     categories = [
@@ -615,12 +603,10 @@ async def generate_and_send_ai_tour_post():
 
         country_data = global_raw_tour_data.get(cat['slug'], "")
         if not country_data:
-            logging.info(f"⏩ Пропущено block '{cat['name']}', бо в парсері немає даних для цієї країни.")
+            logging.info(f"⏩ Пропущено блок '{cat['name']}', бо в парсері немає даних для цієї країни.")
             continue
 
-        # 1. Вибираємо ОДИН випадковий ID з масиву
         random_id = random.choice(cat['photo_ids'])
-        # 2. Склеюємо його з базовим шаблоном лінка
         country_photo_url = UNSPLASH_BASE_URL.format(random_id)
 
         prompt = (
@@ -647,7 +633,7 @@ async def generate_and_send_ai_tour_post():
             
             f"⚠️ КРИТИЧНО ВАЖЛИВЕ ПРАВИЛО ПРІОРИТЕТУ ЗІРКОВОСТІ ГОТЕЛІВ:\n"
             f"Ти повинен робити вибірку готелів (до 5 штук) суворо за такому каскадним пріоритетом:\n"
-            f"1. Наданий тобі список вже відсортований на рівні Python: на самому початку йдуть преміум-готелі 5★. Твоє головне завдання — вибрати до 5 найкращих готелів 5★. Сформуй добірку виключно або переважно з них.\n"
+            f"1. Наданий тобі список вже відсортований на рівні Python: на самом початку йдуть преміум-готелі 5★. Твоє головне завдання — вибрати до 5 найкращих готелів 5★. Сформуй добірку виключно або переважно з них.\n"
             f"2. Тільки якщо готелів 5★ у списку виявиться менше 5 штук, добирай решту з готелів зірковості 4★ (4*).\n"
             f"3. Якщо в тексті немає взагалі ні 5★, ні 4★ готелів для цієї країни, тільки в цьому крайньому разі дозволено брати та показувати готелі зірковості 3★ (3*).\n"
             f"Порушення цього пріоритету заборонено! Якщо є вища зірковість — нижчу ігноруй.\n\n"
@@ -695,9 +681,9 @@ async def generate_and_send_ai_tour_post():
             
             f"⚠️ ДОДАТКОВІ ОБМЕЖЕННЯ ДЛЯ ОФОРМЛЕННЯ ГОТЕЛІВ:\n"
             f"- СУВОРЕ ПРАВИЛО ДЛЯ ДАТИ: Заборонено примусово міняти формат дати. Відображай символ в символ, як у тексті джерела. Без самодіяльності та зайвих знаків.\n"
-            f"- СУВОРЕ ПРАВИЛО ДЛЯ НАЗВИ ГОТЕЛЮ: Виводь назву готелю в оригіналі так, як вона вказана в тексті джерела (латиницею).\n\n"
+            f"- СУВОРЕ ПРАВИЛО ДЛЯ НАЗВИ ГОТЕЛІВ: Виводь назву готелю в оригіналі так, як вона вказана в тексті джерела (латиницею).\n\n"
             
-            f"⚠️ ОБМЕЖЕННЯ: Описуй каждый готель ємно. Твій підсумковий текст має бути не більше за 3000 символів. Використовуй тільки HTML-теги <b>, <i> та <a> для прихованого посилання.\n\n"
+            f"⚠️ ОБМЕЖЕННЯ: Описуй кожен готель ємно. Твій підсумковий текст має бути не більше за 3000 символів. Використовуй тільки HTML-теги <b>, <i> та <a> для прихованого посилання.\n\n"
             
             f"⚠️ СУВОРЕ ТА КАТЕГОРИЧНЕ ПРАВИЛО ЩОДО СТИЛЮ МІНУСІВ ТА ЗАБОРОНИ НЕВВЕРНЕНОСТІ:\n"
             f"- КАТЕГОРИЧНО ЗАБОРОНЕНО використовувати конструкції: 'Може бути...', 'Здається...', 'Можливо...', 'Не всім сподобається...'. Текст має бути чітким, професійним та констатувати факти.\n"
