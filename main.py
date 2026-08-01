@@ -357,12 +357,19 @@ def generate_discount():
 # --- ФУНКЦІЇ ЕЛЕКТРОННОГО ПОМІЧНИКА (ПАРСИНГ ТА ШІ) ---
 
 async def fetch_tat_ua_data():
+# ---     country_urls = {
+# ---         "turkey": "https://tat.ua/search/turkey/",
+# ---         "egypt": "https://tat.ua/search/egypt/",
+# ---         "greece": "https://tat.ua/search/greece/",
+# ---         "cyprus": "https://tat.ua/search/cyprus/",
+# ---         "ukraine": "https://tat.ua/search/ukraine/"
+    }
     country_urls = {
-        "turkey": "https://tat.ua/search/turkey/",
-        "egypt": "https://tat.ua/search/egypt/",
-        "greece": "https://tat.ua/search/greece/",
-        "cyprus": "https://tat.ua/search/cyprus/",
-        "ukraine": "https://tat.ua/search/ukraine/"
+        "turkey": "https://navigo.nniif.org.ua/",
+        "egypt": "https://navigo.nniif.org.ua/",
+        "greece": "https://navigo.nniif.org.ua/",
+        "cyprus": "https://navigo.nniif.org.ua/",
+        "ukraine": "https://navigo.nniif.org.ua/"
     }
     
     # Ротуємо заголовки для повної імітації реального браузера (захист від блокувань)
