@@ -27,6 +27,9 @@ import aiohttp
 import re
 import json
 import time
+import subprocess
+
+
 
 # НАЛАШТУВАННЯ
 API_TOKEN = os.getenv("API_TOKEN")
@@ -354,8 +357,6 @@ def generate_discount():
     else:
         return 5
 
-
-
 # --- ФУНКЦІЇ ЕЛЕКТРОННОГО ПОМІЧНИКА (ПАРСИНГ ТА ШІ) ---
 
 async def fetch_tat_ua_data():
@@ -367,6 +368,13 @@ async def fetch_tat_ua_data():
         "ukraine": "https://navigo.nniif.org.ua/"
     }
     
+    # --- АВТОМАТИЧНЕ ВСТАНОВЛЕННЯ CHROMIUM ДЛЯ BORУ У RENDER ---
+    try:
+        logging.info("⏳ Перевірка та автоматичне завантаження Chromium для Playwright...")
+        subprocess.run(["playwright", "install", "chromium"], check=True)
+    except Exception as env_err:
+        logging.warning(f"⚠️ Попередження під час інсталяції Chromium: {env_err}")
+
     logging.info("🚀 [ПАРСЕР] Початок збору даних із ПРОКРУТКОЮ СТОРІНКИ через Playwright...")
     cleaned_country_data = {}
     
@@ -375,7 +383,7 @@ async def fetch_tat_ua_data():
         async with async_playwright() as p:
             browser = await p.chromium.launch(
                 headless=True,
-                args=["--no-sandbox", "--disable-setuid-sandbox"] # Для безпечного запуску в Docker / VPS
+                args=["--no-sandbox", "--disable-setuid-sandbox"] # Для безпечного запуску в Docker / VPS / Render
             )
             
             context = await browser.new_context(
