@@ -363,7 +363,7 @@ async def fetch_tat_ua_data():
 # ---         "greece": "https://tat.ua/search/greece/",
 # ---         "cyprus": "https://tat.ua/search/cyprus/",
 # ---         "ukraine": "https://tat.ua/search/ukraine/"
-    }
+# ---    }
     country_urls = {
         "turkey": "https://navigo.nniif.org.ua/",
         "egypt": "https://navigo.nniif.org.ua/",
