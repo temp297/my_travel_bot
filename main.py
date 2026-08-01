@@ -746,7 +746,7 @@ async def generate_and_send_ai_tour_post():
             
 # --- ОБРОБНИКИ КОМАНД (ВЕРХНІЙ ПРІОРИТЕТ) ---
 
-@dp.message(CommandStart(), StateFilter(*))
+@dp.message(CommandStart(), StateFilter("*"))
 async def cmd_start(message: types.Message, state: FSMContext, command: CommandObject):
     await state.clear()
     global pool 
@@ -785,7 +785,7 @@ async def cmd_start(message: types.Message, state: FSMContext, command: CommandO
     await save_msg(message, state)
     await save_msg(msg, state)
 
-@dp.message(Command("cancel"), StateFilter(*))
+@dp.message(Command("cancel"), StateFilter("*"))
 async def cmd_cancel(message: types.Message, state: FSMContext):
     await state.clear()
     await message.answer(
@@ -793,7 +793,7 @@ async def cmd_cancel(message: types.Message, state: FSMContext):
         reply_markup=types.ReplyKeyboardRemove()
     )
 
-@dp.message(Command("discount"), StateFilter(*))
+@dp.message(Command("discount"), StateFilter("*"))
 async def cmd_discount(message: types.Message, state: FSMContext):
     await state.clear()
     user = message.from_user
@@ -840,7 +840,7 @@ async def cmd_discount(message: types.Message, state: FSMContext):
         reply_markup=start_inline_kb()
     )
 
-@dp.message(Command("check_discounts"), F.from_user.id == ADMIN_ID, StateFilter(*))
+@dp.message(Command("check_discounts"), F.from_user.id == ADMIN_ID, StateFilter("*"))
 async def check_active_discounts(message: types.Message, state: FSMContext):
     await clean_admin_messages(state, message.chat.id)
     async with pool.acquire() as conn:
@@ -855,7 +855,7 @@ async def check_active_discounts(message: types.Message, state: FSMContext):
         new_msg = await message.answer(text, parse_mode="HTML")
         await state.update_data(admin_msgs_to_clean=[message.message_id, new_msg.message_id])
 
-@dp.message(Command("admin"), F.from_user.id == ADMIN_ID, StateFilter(*))
+@dp.message(Command("admin"), F.from_user.id == ADMIN_ID, StateFilter("*"))
 async def admin_start(message: types.Message, state: FSMContext):
     await clean_admin_messages(state, message.chat.id)
     try:
@@ -868,7 +868,7 @@ async def admin_start(message: types.Message, state: FSMContext):
     await show_admin_base(message, state)
     await state.set_state(AdminPanel.waiting_for_client_info)
 
-@dp.message(Command("users"), F.from_user.id == ADMIN_ID, StateFilter(*))
+@dp.message(Command("users"), F.from_user.id == ADMIN_ID, StateFilter("*"))
 async def list_users(message: types.Message, state: FSMContext):
     await clean_admin_messages(state, message.chat.id)
     try:
@@ -877,7 +877,7 @@ async def list_users(message: types.Message, state: FSMContext):
         pass
     await show_admin_base(message, state)
 
-@dp.message(Command("use_discount"), F.from_user.id == ADMIN_ID, StateFilter(*))
+@dp.message(Command("use_discount"), F.from_user.id == ADMIN_ID, StateFilter("*"))
 async def start_use_discount(message: types.Message, state: FSMContext):
     await clean_admin_messages(state, message.chat.id)
     try: 
