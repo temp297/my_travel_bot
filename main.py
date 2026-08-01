@@ -360,11 +360,11 @@ def generate_discount():[cite: 1]
 
 async def fetch_tat_ua_data():[cite: 1]
     country_urls = {
-        "turkey": "https://navigo.nniif.org.ua",[cite: 1]
-        "egypt": "https://navigo.nniif.org.ua",[cite: 1]
-        "greece": "https://navigo.nniif.org.ua",[cite: 1]
-        "cyprus": "https://navigo.nniif.org.ua",[cite: 1]
-        "ukraine": "https://navigo.nniif.org.ua"[cite: 1]
+        "turkey": "https://tat.ua/search/turkey/",
+        "egypt": "https://tat.ua/search/egypt/",
+        "greece": "https://tat.ua/search/greece/",
+        "cyprus": "https://tat.ua/search/cyprus/",
+        "ukraine": "https://tat.ua/search/ukraine/"
     }
     
     # Ротуємо заголовки для повної імітації реального браузера (захист від блокувань)
