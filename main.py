@@ -77,7 +77,7 @@ if GOOGLE_API_KEY
     ai_model = genai.GenerativeModel('gemini-2.5-flash')
 else
     ai_model = None
-    logging.warning(⚠️ GOOGLE_API_KEY не знайдено. Електронний помічник (ШІ) вимкнено.)
+    logging.warning("⚠️ GOOGLE_API_KEY не знайдено. Електронний помічник (ШІ) вимкнено.")
 
 # Список команд для фільтрації
 BOT_COMMANDS = [start, cancel, admin, discount, check_discounts, use_discount, users]
