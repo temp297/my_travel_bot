@@ -1743,10 +1743,10 @@ async def main():
 
     # Встановлюємо актуальний вебхук
     await bot.set_webhook(
-        url=f"{WEBHOOK_URL}webhook",
+        url=f"{WEBHOOK_URL}/webhook",
         secret_token=WEBHOOK_SECRET
     )
-    logging.info(f"🌐 Webhook успішно встановлено на {WEBHOOK_URL}webhook")
+    logging.info(f"🌐 Webhook успішно встановлено на {WEBHOOK_URL}/webhook")
     
     # 2. Налаштування веб-додатка aiohttp
     app = web.Application()
