@@ -515,6 +515,7 @@ async def generate_and_send_travel_news():
     past_news_context = "Історія порожня."
     try:
         async with pool.acquire() as conn:
+            # Створюємо таблицю, якщо вона ще не існує
             await conn.execute("""
                 CREATE TABLE IF NOT EXISTS daily_news_posts (
                     message_id BIGINT PRIMARY KEY,
@@ -522,6 +523,8 @@ async def generate_and_send_travel_news():
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
+            # Додаємо колонку summary, якщо таблиця вже існувала без неї
+            await conn.execute("ALTER TABLE daily_news_posts ADD COLUMN IF NOT EXISTS summary TEXT;")
             
             rows = await conn.fetch("SELECT summary FROM daily_news_posts WHERE summary IS NOT NULL ORDER BY created_at DESC LIMIT 10")
             if rows:
@@ -604,6 +607,7 @@ async def generate_and_send_travel_news():
         f"- Твій підсумковий текст має бути не більше за 2500 символів.\n"
         f"- Стиль: діловий, журналістський, лаконічний, без рекламного сміття.\n"
         f"- Форматування: ТІЛЬКИ HTML-теги Telegram (<b>, <i>, <code>, <a href='...'>).\n"
+        f"- ЗАБОРОНЕНО використовувати теги <br>, <p>, div чи Markdown. Для перенесення рядків використовуй звичайний символ перенесення (Enter).\n"
         f"- ЗАБОРОНЕНО використовувати Markdown (НЕ використовуй символи **, ##, __, *)."
     )
     
@@ -617,6 +621,16 @@ async def generate_and_send_travel_news():
             )
         )
         news_text = response.text.strip()
+
+        # 🧹 Очищення тексту від тегів <br>, <p>, які не підтримуються Telegram HTML-парсером
+        news_text = (
+            news_text
+            .replace("<br>", "\n")
+            .replace("<br/>", "\n")
+            .replace("<br />", "\n")
+            .replace("<p>", "")
+            .replace("</p>", "\n\n")
+        )
 
         if len(news_text) < 30:
             logging.error("🛑 Згенерований текст новин занадто короткий. Публікацію скасовано.")
@@ -652,6 +666,7 @@ async def generate_and_send_travel_news():
                         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                     )
                 """)
+                await conn.execute("ALTER TABLE daily_news_posts ADD COLUMN IF NOT EXISTS summary TEXT;")
                 await conn.execute(
                     "INSERT INTO daily_news_posts (message_id, summary) VALUES ($1, $2) ON CONFLICT DO NOTHING",
                     msg.message_id, news_summary
