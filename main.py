@@ -7,6 +7,10 @@ import asyncpg
 import aiogram
 import requests
 import httpx
+import aiohttp
+import re
+import json
+import time
 from bs4 import BeautifulSoup
 from playwright.async_api import async_playwright
 from datetime import datetime
@@ -22,11 +26,9 @@ from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_applicati
 from aiogram_calendar import SimpleCalendar, SimpleCalendarCallback
 from aiogram.types import LinkPreviewOptions
 from aiogram.client.default import DefaultBotProperties
-import google.generativeai as genai
-import aiohttp
-import re
-import json
-import time
+from google import genai
+from google.genai import types as genai_types
+
 
 # НАЛАШТУВАННЯ
 API_TOKEN = os.getenv("API_TOKEN")
@@ -81,15 +83,14 @@ dp = Dispatcher(storage=storage)
 ukraine_tz = pytz.timezone('Europe/Kyiv')
 scheduler = AsyncIOScheduler(timezone=ukraine_tz)
 
-# Ініціалізація Google Gemini для Електронного помічника з увімкненим пошуком Google
+# Отримання API ключа
+GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
+
 if GOOGLE_API_KEY:
-    genai.configure(api_key=GOOGLE_API_KEY)
-    ai_model = genai.GenerativeModel(
-        model_name='gemini-2.5-flash',
-        tools='google_search'  # ← САМЕ ЦЕЙ ПАРАМЕТР ВМИКАЄ РЕАЛЬНИЙ ПОШУК В ІНТЕРНЕТІ!
-    )
+    # Створення клієнта за новим стандартом SDK
+    ai_client = genai.Client(api_key=GOOGLE_API_KEY)
 else:
-    ai_model = None
+    ai_client = None
     logging.warning("⚠️ GOOGLE_API_KEY не знайдено. Електронний помічник (ШІ) вимкнено.")
 
 # Список команд для фільтрації
@@ -487,8 +488,8 @@ async def fetch_tat_ua_data():
 
 async def generate_and_send_travel_news():
     """Генерація та публікація щоденних глобальних туристичних новин (із блокуванням повторів новин кордону)"""
-    if not ai_model:
-        logging.info("🤖 Помічник новин пропущений: немає моделі ШІ.")
+    if not ai_client:
+        logging.info("🤖 Помічник новин пропущений: немає клієнта ШІ.")
         return
 
     # --- 1. БЕЗПЕЧНА ПЕРЕВІРКА ТА ПЕРЕНАПРАВЛЕННЯ ---
@@ -539,7 +540,7 @@ async def generate_and_send_travel_news():
     ]
     today_focus = random.choice(main_focuses)
 
-    # --- 4. ГЕНЕРАЦІЯ ПРОМПТА З ЖОРСТКИМ ФІЛЬТРОМ ПОВТОРІВ ТА ДИНАМІЧНЕ ОТРЕМАННЯ ДАТИ ТА ДНЯ ТИЖНЯ ---
+    # --- 4. ГЕНЕРАЦІЯ ПРОМПТА З ЖОРСТКИМ ФІЛЬТРОМ ПОВТОРІВ ТА ДИНАМІЧНЕ ОТРИМАННЯ ДАТИ ТА ДНЯ ТИЖНЯ ---
     now = datetime.now()
     current_date_str = now.strftime("%d.%m.%Y")
     
@@ -605,7 +606,14 @@ async def generate_and_send_travel_news():
     )
     
     try:
-        response = ai_model.generate_content(prompt)
+        # Виклики за новим стандартом google-genai із розширенням Пошуку
+        response = ai_client.models.generate_content(
+            model='gemini-2.5-flash',
+            contents=prompt,
+            config=genai_types.GenerateContentConfig(
+                tools=[genai_types.Tool(google_search=genai_types.GoogleSearch())]
+            )
+        )
         news_text = response.text.strip()
 
         if len(news_text) < 30:
@@ -627,7 +635,7 @@ async def generate_and_send_travel_news():
             text=full_message,
             parse_mode="HTML",
             message_thread_id=CURRENT_NEWS_THREAD_ID,
-            disable_web_page_preview=True
+            link_preview_options=LinkPreviewOptions(is_disabled=True)
         )
 
         # --- 6. ЗБЕРЕЖЕННЯ ID ТА СУХОГО СУМАРІ В БД ---
@@ -653,7 +661,7 @@ async def generate_and_send_travel_news():
 
     except Exception as ai_err:
         logging.error(f"❌ Помилка генерації або відправки новин через ШІ: {ai_err}")
-
+        
 async def generate_and_send_ai_tour_post():
     if not ai_model or not AUTO_POST_CHAT_ID:
         logging.info("🤖 Помічник пропущений: немає моделі ШІ або AUTO_POST_CHAT_ID.")
