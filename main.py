@@ -557,7 +557,7 @@ async def generate_and_send_travel_news():
 
     logging.info(f"📰 Запуск генерації туристичних новин... (Цільовий чат: {CURRENT_NEWS_CHAT_ID})")
 
-prompt = (
+    prompt = (
         f"Ти — головний редактор та провідний експерт із міжнародного туризму Telegram-каналу для українських мандрівників.\n\n"
         f"Сьогодні {today_weekday}, {current_date_str}.\n"
         f"⚠️ ВАЖЛИВО ДЛЯ КАЛЕНДАРНОЇ ТОЧНОСТІ: Переконайся, що день тижня у тексті — ТІЛЬКИ {today_weekday}! "
