@@ -527,7 +527,8 @@ async def generate_and_send_travel_news():
             await conn.execute("ALTER TABLE daily_news_posts ADD COLUMN IF NOT EXISTS summary TEXT;")
             await conn.execute("ALTER TABLE daily_news_posts ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;")
 
-            await conn.execute("TRUNCATE TABLE daily_news_posts;")
+            # Закоментовано: очищення таблиці з новинами
+            # await conn.execute("TRUNCATE TABLE daily_news_posts;")
    
             rows = await conn.fetch("SELECT summary FROM daily_news_posts WHERE summary IS NOT NULL ORDER BY created_at DESC LIMIT 10")
             if rows:
