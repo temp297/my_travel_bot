@@ -663,7 +663,7 @@ async def generate_and_send_travel_news():
         logging.error(f"❌ Помилка генерації або відправки новин через ШІ: {ai_err}")
         
 async def generate_and_send_ai_tour_post():
-    if not ai_model or not AUTO_POST_CHAT_ID:
+    if not ai_client or not AUTO_POST_CHAT_ID:
         logging.info("🤖 Помічник пропущений: немає моделі ШІ або AUTO_POST_CHAT_ID.")
         return
 
@@ -873,7 +873,13 @@ async def generate_and_send_ai_tour_post():
             f"Ось текстові дані з готелями СУТО ДЛЯ ЦІЄЇ КРАЇНИ: {country_data}"
         )
         try:
-            response = ai_model.generate_content(prompt)
+            response = ai_client.models.generate_content(
+                model='gemini-2.5-flash',
+                contents=prompt,
+                config=genai_types.GenerateContentConfig(
+                    tools=[genai_types.Tool(google_search=genai_types.GoogleSearch())]
+                )
+            )
             post_text = response.text
             
             if len(post_text.strip()) < 100 or "📍" not in post_text or "🏨" not in post_text:
