@@ -1806,7 +1806,7 @@ async def main():
     admin_commands = user_commands + [
         types.BotCommand(command="admin", description="🛠 Запит на відгук"),
         types.BotCommand(command="use_discount", description="✅ Використати знижку"),
-        types.BotCommand(command="users", description="👥 Список туристів")
+        types.BotCommand(command="users", description="👥 Список туристів"),
         types.BotCommand(command="post_news", description="📰 Опублікувати новини зараз")
     ]
    
