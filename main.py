@@ -523,8 +523,9 @@ async def generate_and_send_travel_news():
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
-            # Додаємо колонку summary, якщо таблиця вже існувала без неї
+            # Автоматично додаємо відсутні колонки для старих таблиць
             await conn.execute("ALTER TABLE daily_news_posts ADD COLUMN IF NOT EXISTS summary TEXT;")
+            await conn.execute("ALTER TABLE daily_news_posts ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;")
             
             rows = await conn.fetch("SELECT summary FROM daily_news_posts WHERE summary IS NOT NULL ORDER BY created_at DESC LIMIT 10")
             if rows:
@@ -666,7 +667,10 @@ async def generate_and_send_travel_news():
                         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                     )
                 """)
+                # Автоматично додаємо відсутні колонки для старих таблиць
                 await conn.execute("ALTER TABLE daily_news_posts ADD COLUMN IF NOT EXISTS summary TEXT;")
+                await conn.execute("ALTER TABLE daily_news_posts ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP;")
+                
                 await conn.execute(
                     "INSERT INTO daily_news_posts (message_id, summary) VALUES ($1, $2) ON CONFLICT DO NOTHING",
                     msg.message_id, news_summary
