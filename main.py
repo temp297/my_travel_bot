@@ -554,7 +554,7 @@ async def generate_and_send_travel_news():
         response = ai_model.generate_content(prompt)
         news_text = response.text.strip()
 
-        if len(news_text) < 50:
+        if len(news_text) < 30:
             logging.error("🛑 Згенерований текст новин занадто короткий. Публікацію скасовано.")
             return
 
