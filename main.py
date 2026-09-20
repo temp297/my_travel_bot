@@ -488,29 +488,31 @@ async def generate_and_send_travel_news():
         logging.info("🤖 Помічник новин пропущений: немає моделі ШІ.")
         return
 
-    # --- 1. ТОЧНА ПЕРЕВІРКА АДРЕСАТА (ЧАТ / ОСОБИСТІ ПОВІДОМЛЕННЯ) ---
-    raw_chat_id = os.getenv("NEWS_CHAT_ID")
-    raw_thread_id = os.getenv("NEWS_THREAD_ID")
+    # --- 1. БЕЗПЕЧНА ПЕРЕВІРКА ТА ПЕРЕНАПРАВЛЕННЯ (ЗА АНАЛОГІЄЮ З ТУРАМИ) ---
+    raw_news_chat_id = os.getenv("NEWS_CHAT_ID")
+    raw_news_thread_id = os.getenv("NEWS_THREAD_ID")
 
-    # Якщо NEWS_CHAT_ID відсутній, порожній або дорівнює "None" — відправляємо ОСОБИСТО В БОТ (ADMIN_ID)
-    if not raw_chat_id or raw_chat_id.strip() == "" or raw_chat_id.strip() == "None":
-        CURRENT_NEWS_CHAT_ID = ADMIN_ID
-        CURRENT_NEWS_THREAD_ID = None
-        is_direct_to_admin = True
-    else:
-        # Якщо чат вказано — публікуємо у вказаний чат
-        CURRENT_NEWS_CHAT_ID = raw_chat_id.strip()
-        is_direct_to_admin = False
-        
-        # Перевіряємо наявність конкретної гілки (thread)
-        if raw_thread_id and raw_thread_id.strip() != "None" and raw_thread_id.strip().isdigit():
-            CURRENT_NEWS_THREAD_ID = int(raw_thread_id.strip())
-        else:
+    # Перевіряємо саме NEWS_THREAD_ID (якщо там "None", відправляємо в БОТ)
+    if raw_news_thread_id and raw_news_thread_id.strip() != "None":
+        try:
+            CURRENT_NEWS_THREAD_ID = int(raw_news_thread_id.strip())
+            # Перевіряємо наявність чату
+            if raw_news_chat_id and raw_news_chat_id.strip() != "None":
+                CURRENT_NEWS_CHAT_ID = raw_news_chat_id.strip()
+            else:
+                CURRENT_NEWS_CHAT_ID = ADMIN_ID
+                CURRENT_NEWS_THREAD_ID = None
+        except ValueError:
             CURRENT_NEWS_THREAD_ID = None
+            CURRENT_NEWS_CHAT_ID = ADMIN_ID
+    else:
+        # NEWS_THREAD_ID є "None" або відсутній -> ПУБЛІКУЄМО ОСОБИСТО В БОТ (ADMIN_ID)
+        CURRENT_NEWS_THREAD_ID = None
+        CURRENT_NEWS_CHAT_ID = ADMIN_ID
 
     # --- 2. ГЕНЕРАЦІЯ ПРОМПТА ТА ОТРИМАННЯ ВІДПОВІДІ ВІД ШІ ---
     current_date_str = datetime.now().strftime("%d.%m.%Y")
-    logging.info(f"📰 Запуск генерації глобальних туристичних новин... (Цільовий чат: {CURRENT_NEWS_CHAT_ID})")
+    logging.info(f"📰 Запуск генерації туристичних новин... (Цільовий чат: {CURRENT_NEWS_CHAT_ID})")
 
     prompt = (
         f"Ти — головний редактор та провідний експерт із міжнародного туризму Telegram-каналу для українських мандрівників.\n\n"
@@ -549,9 +551,8 @@ async def generate_and_send_travel_news():
 
         header_text = f"📰 <b>Дайджест туристичних новин світу | {current_date_str}</b>\n\n"
         
-        # Додаємо мітку, якщо повідомлення відправлено вам у приватні в БОТ
-        if is_direct_to_admin:
-            prefix = "⚙️ <b>[ТЕСТОВИЙ РЕЖИМ: Надіслано особисто вам в БОТ]</b>\n\n"
+        if CURRENT_NEWS_CHAT_ID == ADMIN_ID:
+            prefix = "⚙️ <b>[ТЕСТОВИЙ РЕЖИМ: NEWS_THREAD_ID = None — надіслано особисто вам у БОТ]</b>\n\n"
         else:
             prefix = ""
 
@@ -577,7 +578,7 @@ async def generate_and_send_travel_news():
                 """)
                 await conn.execute("INSERT INTO daily_news_posts (message_id) VALUES ($1) ON CONFLICT DO NOTHING", msg.message_id)
             
-            logging.info(f"✅ Глобальні новини успішно відправлено та збережено в історію БД! Chat ID: {CURRENT_NEWS_CHAT_ID}")
+            logging.info(f"✅ Новини успішно відправлено та збережено в історію БД! Chat ID: {CURRENT_NEWS_CHAT_ID}")
         except Exception as db_save_err:
             logging.error(f"⚠️ Помилка збереження ID новини в БД: {db_save_err}")
 
