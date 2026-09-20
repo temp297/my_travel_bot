@@ -603,7 +603,7 @@ async def generate_and_send_travel_news():
         f"- Форматування: ТІЛЬКИ HTML-теги Telegram (<b>, <i>, <code>, <a href='...'>).\n"
         f"- ЗАБОРОНЕНО використовувати Markdown (НЕ використовуй символи **, ##, __, *)."
     )
-
+    
     try:
         response = ai_model.generate_content(prompt)
         news_text = response.text.strip()
