@@ -477,46 +477,114 @@ async def fetch_tat_ua_data():
         return None
 
 async def generate_and_send_travel_news():
-    """Генерація та публікація щоденних туристичних новин для українців у конкретну гілку чату"""
-    logging.info("📰 Запуск генерації туристичних новин через ШІ...")
-    try:
-        today_str = datetime.now().strftime("%d.%m.%Y")
+    """Генерація та публікація щоденних туристичних новин за аналогією з постами турів"""
+    if not ai_model:
+        logging.info("🤖 Помічник новин пропущений: немає моделі ШІ.")
+        return
+
+    # --- БЕЗПЕЧНА ПЕРЕВІРКА ТА ПЕРЕНАПРАВЛЕННЯ ---
+    raw_chat_id = os.getenv("NEWS_CHAT_ID")
+    raw_thread_id = os.getenv("NEWS_THREAD_ID")
+
+    # Якщо чат вказано і це не "None"
+    if raw_chat_id and raw_chat_id.strip() != "None":
+        CURRENT_NEWS_CHAT_ID = raw_chat_id.strip()
         
-        prompt = (
-            f"Ти — головний редактор туристичного Telegram-каналу для українців. "
-            f"Сьогодні {today_str}. Напиши 1-2 найважливіші та найактуальніші туристичні новини, "
-            f"які корисні для українських мандрівників (наприклад: нові залізничні або авіамаршрути з країн ЄС, "
-            f"зміни в правилах в'їзду/візовому режимі для громадян України, оновлення Безвізу, ETIAS, "
-            f"або важливі тревел-тренди сезону).\n\n"
-            f"Вимоги до поста:\n"
-            f"1. Мова: українська.\n"
-            f"2. Заголовок: яскравий, з емодзі, звертає увагу.\n"
-            f"3. Структура: лаконічна, легка для читання з мобільного (використовуй списки, спирайся на тези).\n"
-            f"4. СТИЛЬ: професійний, дружній, корисний.\n"
-            f"5. Наприкінці додай короткий висновок або пораду для туриста та тематичні хештеги (наприклад: #новини #туризм #ETIAS #подорожі).\n"
-            f"6. Використовуй HTML-розмітку (<b>, <i>, <code>), але БЕЗ використання Markdown та БЕЗ тегів <html>/<body>."
-        )
+        # Перевіряємо та парсимо thread_id за наявності
+        if raw_thread_id and raw_thread_id.strip() != "None":
+            try:
+                CURRENT_NEWS_THREAD_ID = int(raw_thread_id.strip())
+            except ValueError:
+                CURRENT_NEWS_THREAD_ID = None
+        else:
+            CURRENT_NEWS_THREAD_ID = None
+    else:
+        # Якщо конфігурації немає — перенаправляємо Адміну в приватні повідомлення
+        CURRENT_NEWS_CHAT_ID = ADMIN_ID
+        CURRENT_NEWS_THREAD_ID = None
 
-        # Виклик Google Gemini API (використовується та ж модель, що й для готелів)
-        response = client.models.generate_content(
-            model='gemini-2.5-flash',
-            contents=prompt,
-        )
+    # --- 1. ВИДАЛЕННЯ ВЧОРАШНІХ НОВИН З БАЗИ ДАНИХ ПЕРЕД ЗАПУСКОМ ---
+    try:
+        async with pool.acquire() as conn:
+            # Створюємо таблицю для новин, якщо її ще немає
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS daily_news_posts (
+                    message_id BIGINT PRIMARY KEY
+                )
+            """)
+            
+            old_rows = await conn.fetch("SELECT message_id FROM daily_news_posts")
+            if old_rows:
+                logging.info(f"🧹 Знайдено вчорашні новини для видалення в БД. Кількість: {len(old_rows)}")
+                for row in old_rows:
+                    try:
+                        await bot.delete_message(chat_id=CURRENT_NEWS_CHAT_ID, message_id=row['message_id'])
+                    except Exception as del_err:
+                        logging.warning(f"Не вдалося видалити старий пост новин {row['message_id']}: {del_err}")
+                
+                await conn.execute("DELETE FROM daily_news_posts")
+                logging.info("✨ Таблиця вчорашніх новин в БД успішно очищена.")
+    except Exception as db_err:
+        logging.error(f"⚠️ Помилка роботи з БД при очищенні новин: {db_err}")
 
+    # --- 2. ГЕНЕРАЦІЯ ПРОМПТА ТА ОТРЕМАЕННЯ ВІДПОВІДІ ВІД ШІ ---
+    current_date_str = datetime.now().strftime("%d.%m.%Y")
+    logging.info("📰 Запуск генерації туристичних новин через ШІ...")
+
+    prompt = (
+        f"Ти — головний редактор та експерт із виїзного й в'їзного туризму Telegram-каналу для українських мандрівників.\n"
+        f"Сьогодні {current_date_str}. Напиши щоденний дайджест найважливіших та найактуальніших новин про туризм та перетин кордону, які безпосередньо стосуються громадян України.\n\n"
+        f"СТРУКТУРА ТА ЗМІСТ ПОСТА:\n"
+        f"1. <b>Заголовок:</b> яскравий, з емодзі (✈️, 🚆, 🛂, 🇪🇺), який відображає головну тему.\n"
+        f"2. <b>Основний блок (1–3 новини):</b>\n"
+        f"   - Правила перетину кордону (черги, eЧерга, пункти пропуску, поїзди, автобуси).\n"
+        f"   - Зміни в правилах в'їзду до ЄС та світу (EES, ETIAS, документи, правила безвізу).\n"
+        f"   - Нові логістичні маршрути з сусідніх країн (Польща, Румунія, Молдова) або тренди.\n"
+        f"3. <b>Корисна порада дня:</b> короткий практичний лайфхак для мандрівника (1-2 речення).\n"
+        f"4. <b>Хештеги:</b> 3-5 тематичних хештегів (#кордон #подорожі #новинитуризму #ETIAS тощо).\n\n"
+        f"ВИМОГИ:\n"
+        f"- Мова: українська.\n"
+        f"- Стиль: лаконічний, зручний для читання з мобільного.\n"
+        f"- Форматування: ТІЛЬКИ HTML-теги Telegram (<b>, <i>, <code>). НЕ використовуй Markdown (без **, ##)!"
+    )
+
+    try:
+        response = ai_model.generate_content(prompt)
         news_text = response.text.strip()
 
-        # Відправка повідомлення у конкретну гілку (message_thread_id)
-        await bot.send_message(
-            chat_id=NEWS_CHAT_ID,
-            text=news_text,
-            message_thread_id=NEWS_THREAD_ID,  # Параметр для відправки у топік / гілку №1
+        if len(news_text) < 50:
+            logging.error("🛑 Згенерований текст новин занадто короткий. Публікацію скасовано.")
+            return
+
+        header_text = f"📰 <b>Дайджест туристичних новин | {current_date_str}</b>\n\n"
+        
+        # Додаємо попередження, якщо публікація йде в тестовому режимі адміну
+        if CURRENT_NEWS_CHAT_ID == ADMIN_ID:
+            prefix = "⚠️ <b>[ТЕСТОВИЙ РЕЖИМ: NEWS_CHAT_ID не налаштовано]</b>\n\n"
+        else:
+            prefix = ""
+
+        full_message = f"{prefix}{header_text}{news_text}"
+
+        # --- 3. НАДСИЛАННЯ ПОВІДОМЛЕННЯ В ТЕЛЕГРАМ ---
+        msg = await bot.send_message(
+            chat_id=CURRENT_NEWS_CHAT_ID,
+            text=full_message,
             parse_mode="HTML",
+            message_thread_id=CURRENT_NEWS_THREAD_ID if CURRENT_NEWS_THREAD_ID else None,
             disable_web_page_preview=True
         )
-        logging.info(f"✅ Туристичні новини успішно опубліковано в гілку {NEWS_THREAD_ID} чату {NEWS_CHAT_ID}!")
 
-    except Exception as e:
-        logging.error(f"🛑 Помилка при генерації або публікації новин: {e}")
+        # --- 4. ЗБЕРЕЖЕННЯ ID ПОВІДОМЛЕННЯ В БД ---
+        try:
+            async with pool.acquire() as conn:
+                await conn.execute("INSERT INTO daily_news_posts (message_id) VALUES ($1)", msg.message_id)
+            logging.info(f"✅ Туристичні новини успішно опубліковано та збережено в БД! Chat: {CURRENT_NEWS_CHAT_ID}")
+        except Exception as db_save_err:
+            logging.error(f"⚠️ Помилка збереження ID новини в БД: {db_save_err}")
+
+    except Exception as ai_err:
+        logging.error(f"❌ Помилка генерації або відправки новин через ШІ: {ai_err}")
 
 async def generate_and_send_ai_tour_post():
     if not ai_model or not AUTO_POST_CHAT_ID:
