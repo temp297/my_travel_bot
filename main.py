@@ -37,17 +37,23 @@ GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 AUTO_POST_CHAT_ID = os.getenv("AUTO_POST_CHAT_ID")
 NEWS_CHAT_ID = os.getenv("NEWS_CHAT_ID")
 
+# --- БЕЗПЕЧНЕ ЗЧИТУВАННЯ НОВИННОЇ ГІЛКИ (може бути None) ---
+raw_news_thread = os.getenv("NEWS_THREAD_ID")
+if raw_news_thread and raw_news_thread.strip() != "None" and raw_news_thread.strip().isdigit():
+    NEWS_THREAD_ID = int(raw_news_thread.strip())
+else:
+    NEWS_THREAD_ID = None
+    
 try:
     ADMIN_ID = int(os.getenv("ADMIN_ID"))
     REVIEWS_CHAT_ID = int(os.getenv("REVIEWS_CHAT_ID"))
-    NEWS_THREAD_ID = int(os.getenv("NEWS_THREAD_ID"))
     FEEDBACK_HOUR = int(os.getenv("FEEDBACK_HOUR"))
     FEEDBACK_MINUTE = int(os.getenv("FEEDBACK_MINUTE"))
     ASSISTANT_HOUR = int(os.getenv("ASSISTANT_HOUR"))
     ASSISTANT_MINUTE = int(os.getenv("ASSISTANT_MINUTE"))
     NEWS_HOUR = int(os.getenv("NEWS_HOUR"))
     NEWS_MINUTE = int(os.getenv("NEWS_MINUTE"))
-except ValueError:
+except (ValueError, TypeError):
     raise ValueError("ADMIN_ID, REVIEWS_CHAT_ID, FEEDBACK_HOUR та FEEDBACK_MINUTE мають бути цілими числами!")
 
 if not API_TOKEN or not DATABASE_URL:
