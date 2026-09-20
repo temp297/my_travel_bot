@@ -35,14 +35,18 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 # --- НАЛАШТУВАННЯ ДЛЯ ШІ ТА КАНАЛУ ПОМІЧНИКА ---
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 AUTO_POST_CHAT_ID = os.getenv("AUTO_POST_CHAT_ID")
+NEWS_CHAT_ID = os.getenv("NEWS_CHAT_ID")
 
 try:
     ADMIN_ID = int(os.getenv("ADMIN_ID"))
     REVIEWS_CHAT_ID = int(os.getenv("REVIEWS_CHAT_ID"))
+    NEWS_THREAD_ID = int(os.getenv("NEWS_THREAD_ID"))
     FEEDBACK_HOUR = int(os.getenv("FEEDBACK_HOUR"))
     FEEDBACK_MINUTE = int(os.getenv("FEEDBACK_MINUTE"))
     ASSISTANT_HOUR = int(os.getenv("ASSISTANT_HOUR"))
     ASSISTANT_MINUTE = int(os.getenv("ASSISTANT_MINUTE"))
+    NEWS_HOUR = int(os.getenv("NEWS_HOUR"))
+    NEWS_MINUTE = int(os.getenv("NEWS_MINUTE"))
 except ValueError:
     raise ValueError("ADMIN_ID, REVIEWS_CHAT_ID, FEEDBACK_HOUR та FEEDBACK_MINUTE мають бути цілими числами!")
 
@@ -472,6 +476,48 @@ async def fetch_tat_ua_data():
         logging.error(f"❌ Загальна помилка під час збору даних {e}")
         return None
 
+async def generate_and_send_travel_news():
+    """Генерація та публікація щоденних туристичних новин для українців у конкретну гілку чату"""
+    logging.info("📰 Запуск генерації туристичних новин через ШІ...")
+    try:
+        today_str = datetime.now().strftime("%d.%m.%Y")
+        
+        prompt = (
+            f"Ти — головний редактор туристичного Telegram-каналу для українців. "
+            f"Сьогодні {today_str}. Напиши 1-2 найважливіші та найактуальніші туристичні новини, "
+            f"які корисні для українських мандрівників (наприклад: нові залізничні або авіамаршрути з країн ЄС, "
+            f"зміни в правилах в'їзду/візовому режимі для громадян України, оновлення Безвізу, ETIAS, "
+            f"або важливі тревел-тренди сезону).\n\n"
+            f"Вимоги до поста:\n"
+            f"1. Мова: українська.\n"
+            f"2. Заголовок: яскравий, з емодзі, звертає увагу.\n"
+            f"3. Структура: лаконічна, легка для читання з мобільного (використовуй списки, спирайся на тези).\n"
+            f"4. СТИЛЬ: професійний, дружній, корисний.\n"
+            f"5. Наприкінці додай короткий висновок або пораду для туриста та тематичні хештеги (наприклад: #новини #туризм #ETIAS #подорожі).\n"
+            f"6. Використовуй HTML-розмітку (<b>, <i>, <code>), але БЕЗ використання Markdown та БЕЗ тегів <html>/<body>."
+        )
+
+        # Виклик Google Gemini API (використовується та ж модель, що й для готелів)
+        response = client.models.generate_content(
+            model='gemini-2.5-flash',
+            contents=prompt,
+        )
+
+        news_text = response.text.strip()
+
+        # Відправка повідомлення у конкретну гілку (message_thread_id)
+        await bot.send_message(
+            chat_id=NEWS_CHAT_ID,
+            text=news_text,
+            message_thread_id=NEWS_THREAD_ID,  # Параметр для відправки у топік / гілку №1
+            parse_mode="HTML",
+            disable_web_page_preview=True
+        )
+        logging.info(f"✅ Туристичні новини успішно опубліковано в гілку {NEWS_THREAD_ID} чату {NEWS_CHAT_ID}!")
+
+    except Exception as e:
+        logging.error(f"🛑 Помилка при генерації або публікації новин: {e}")
+
 async def generate_and_send_ai_tour_post():
     if not ai_model or not AUTO_POST_CHAT_ID:
         logging.info("🤖 Помічник пропущений: немає моделі ШІ або AUTO_POST_CHAT_ID.")
@@ -858,6 +904,13 @@ async def list_users(message: types.Message, state: FSMContext):
     except Exception:
         pass
     await show_admin_base(message, state)
+
+@dp.message(Command("post_news"), F.from_user.id == ADMIN_ID, StateFilter("*"))
+async def cmd_post_news_manual(message: types.Message):
+    """Ручний запуск генерації новин для тестування адміном"""
+    msg = await message.answer("🔄 Запускаю генерацію та публікацію новин...")
+    await generate_and_send_travel_news()
+    await msg.edit_text("✅ Запит на публікацію новин виконано! Перевірте гілку каналу.")
 
 @dp.message(Command("use_discount"), F.from_user.id == ADMIN_ID, StateFilter("*"))
 async def start_use_discount(message: types.Message, state: FSMContext):
@@ -1754,6 +1807,7 @@ async def main():
         types.BotCommand(command="admin", description="🛠 Запит на відгук"),
         types.BotCommand(command="use_discount", description="✅ Використати знижку"),
         types.BotCommand(command="users", description="👥 Список туристів")
+        types.BotCommand(command="post_news", description="📰 Опублікувати новини зараз")
     ]
    
     await bot.set_my_commands(user_commands, scope=types.BotCommandScopeDefault())
@@ -1763,8 +1817,15 @@ async def main():
     # 4. Налаштування та старт планувальника завдань (APScheduler)
     scheduler.add_job(check_returns, 'cron', hour=FEEDBACK_HOUR, minute=FEEDBACK_MINUTE)
     scheduler.add_job(generate_and_send_ai_tour_post, 'cron', hour=ASSISTANT_HOUR, minute=ASSISTANT_MINUTE)
+    scheduler.add_job(generate_and_send_travel_news, 'cron', hour=NEWS_HOUR, minute=NEWS_MINUTE)
+    
     scheduler.start()
-    logging.info(f"⏰ Планувальник запущено. Відгуки: {FEEDBACK_HOUR}:{FEEDBACK_MINUTE}, ШІ-пости: {ASSISTANT_HOUR}:{ASSISTANT_MINUTE}")
+    logging.info(
+        f"⏰ Планувальник запущено.\n"
+        f"  ├ Відгуки: {FEEDBACK_HOUR}:{FEEDBACK_MINUTE}\n"
+        f"  ├ ШІ-готелі: {ASSISTANT_HOUR}:{ASSISTANT_MINUTE}\n"
+        f"  └ ШІ-новини: {NEWS_HOUR}:{NEWS_MINUTE}"
+    )
     
     # 5. Запуск сервера на правильному порті (Змінено 8000 на 10000 за замовчуванням для Render)
     runner = web.AppRunner(app)
